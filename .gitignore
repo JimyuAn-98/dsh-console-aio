@@ -1,0 +1,24 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ── 构建 / 打包产物 ──
+build/
+dist/
+*.spec
+
+# ── 本地日志 / 临时文件 ──
+*.log
+*.err
+dsh-dash/
+
+# ── 个人配置（内含你的服务器 IP/用户名，不入库）──
+config.json
+
+# ── 打包旧产物 / 零碎 ──
+*.zip
+Thumbs.db
+.DS_Store
+# ── 运行时状态（隧道 PID 轨道等）──
+tunnel-pids.json

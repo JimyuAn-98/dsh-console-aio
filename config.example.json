@@ -1,0 +1,27 @@
+{
+  "ssh_server": "YOUR_PUBLIC_SERVER_IP",
+  "ssh_user": "tunnel",
+  "dash_repo": "D:\\Applications\\deepseek-harness",
+  "dash_port": 3080,
+  "dash_cmd": ["pnpm.cmd", "dsh", "web"],
+
+  "poll_seconds": 4,
+  "remote_poll_seconds": 20,
+  "tcp_timeout": 0.8,
+  "ssh_timeout": 10,
+  "update_timeout": 1800,
+
+  "local_ports": [
+    [3080, "本机dsh", "GUI"],
+    [8090, "本机8090", "在家隧道→204GUI"],
+    [8022, "本机8022", "在家隧道→204SSH"],
+    [8091, "本机8091", "在家隧道→本机GUI"],
+    [3090, "本机3090", "实验室→204GUI"]
+  ],
+  "remote_tunnels": [
+    [8090, "185:8090", "←204 GUI"],
+    [8022, "185:8022", "←204 SSH"],
+    [8091, "185:8091", "←本机GUI"]
+  ],
+  "forward_ports": [8090, 8022, 8091]
+}
