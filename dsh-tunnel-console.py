@@ -34,11 +34,12 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 # ─────────────────────────────────────────
 #  默认配置（当 config.json 缺失/字段缺失时使用）
+#  仅包含通用/无敏感信息的值: 真实 IP/用户名/路径只存在用户本地的 config.json
 # ─────────────────────────────────────────
 DEFAULTS = {
-    "ssh_server": "YOUR_PUBLIC_IP",
-    "ssh_user": "tunnel",
-    "dash_repo": r"D:/path/to/deepseek-harness",
+    "ssh_server": "YOUR_PUBLIC_IP",   # 请填公网中转服务器 IP/域名
+    "ssh_user": "YOUR_USER",           # 请填中转服务器用户名
+    "dash_repo": "",                   # 本机 dsh 仓库路径(留空则提示在配置向导填写)
     "dash_port": 3080,
     "dash_cmd": ["pnpm.cmd", "dsh", "web"],
     "poll_seconds": 4,
@@ -46,25 +47,25 @@ DEFAULTS = {
     "tcp_timeout": 0.8,
     "ssh_timeout": 10,
     "update_timeout": 1800,
-    # 实验室直连 204
-    "lab_server": "YOUR_LAB_IP",
-    "lab_user": "YOUR_USER",
+    # 实验室直连(可选, 未配置时置空)
+    "lab_server": "",
+    "lab_user": "",
     "lab_port": 3090,
-    # 本机 -> 185 反向隧道: 185 上暴露本机 GUI 的端口
+    # 本机反向隧道: 中继端口 -> 本机 dsh
     "reverse_port": 8091,
     "local_ports": [
         [3080, "本机dsh", "GUI"],
-        [8090, "本机8090", "在家隧道→204GUI"],
-        [8022, "本机8022", "在家隧道→204SSH"],
-        [8091, "本机8091", "在家隧道→本机GUI"],
-        [3090, "本机3090", "实验室→204GUI"],
+        [8090, "本地8090", "正向隧道"],
+        [8022, "本地8022", "正向隧道"],
+        [8091, "本地8091", "正向隧道"],
+        [3090, "本地3090", "实验室直连"],
     ],
     "remote_tunnels": [
-        [8090, "185:8090", "←204 GUI"],
-        [8022, "185:8022", "←204 SSH"],
-        [8091, "185:8091", "←本机GUI"],
+        [8090, "中继:8090", "远端监听"],
+        [8022, "中继:8022", "远端监听"],
+        [8091, "中继:8091", "远端监听"],
     ],
-    # 正向隧道(在家打通 185 三个口) 在本机使用的端口
+    # 正向隧道在中继侧使用的端口
     "forward_ports": [8090, 8022, 8091],
 }
 

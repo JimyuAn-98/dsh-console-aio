@@ -61,9 +61,9 @@
 
 | 字段 | 说明 | 默认 |
 |------|------|------|
-| ssh_server | 公网中转服务器 IP | YOUR_PUBLIC_IP |
-| ssh_user | 中转服务器隧道用户 | tunnel |
-| dash_repo | 本机 dsh 仓库路径 | D:/path/to/deepseek-harness |
+| ssh_server | 公网中转服务器 IP/域名 | YOUR_PUBLIC_IP |
+| ssh_user | 中转服务器隧道用户名 | YOUR_USER |
+| dash_repo | 本机 dsh 仓库路径 | <留空, 在向导里填> |
 | dash_port | 本机 dsh GUI 端口 | 3080 |
 | dash_cmd | 本机 dsh 启动命令 | ["pnpm.cmd","dsh","web"] |
 | local_ports | 本机端口监控 [端口,名称,说明] | 3080/8090/8022/8091/3090 |
@@ -71,7 +71,7 @@
 | poll_seconds / remote_poll_seconds | 本机轮询 / SSH 直查间隔(秒) | 4 / 20 |
 | *_timeout | 探测与更新超时 | ... |
 
-> 脚本（*.ps1）本身也内含端口/IP 配置，改端口时应同步修改对应 .ps1 和 config.json。脚本请勿改名（-Stop 按文件名匹配进程）。
+> 真实 IP / 用户名 / 仓库路径只保存在本地 config.json（已 gitignore），请勿把它们写进 README 或任何被提交的文件。
 
 ---
 
