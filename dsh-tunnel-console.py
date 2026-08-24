@@ -388,6 +388,77 @@ class ConfigDialog(tk.Toplevel):
         self.destroy()
 
 
+class InstallDialog(tk.Toplevel):
+    # 辅助本地安装 dsh: 填仓库地址/目标目录 -> 环境预检 -> clone+安装+构建。
+    # 安装命令在后台线程执行, 流式输出到主界面日志区。
+
+    DEFAULT_URL = "https://github.com/deepseek-ai/deepseek-harness.git"
+
+    def __init__(self, master):
+        super().__init__(master)
+        self._master = master
+        self.title("安装 dsh")
+        self.configure(padx=15, pady=12)
+        self.result = None
+        self._url = tk.StringVar(value=self.DEFAULT_URL)
+        self._dir = tk.StringVar()
+        self._env_lbl = None
+        self._build()
+
+    def _build(self):
+        wrap = ttk.Frame(self)
+        wrap.pack(fill="both", expand=True)
+        ttk.Label(wrap, text="一键安装本机 dsh（无需求会提前提示）",
+                  font=F_BOLD).pack(anchor="w", pady=(0, 4))
+        # 仓库地址
+        ttk.Label(wrap, text="dsh 仓库地址（git 克隆源）:").pack(anchor="w", pady=(6, 0))
+        ttk.Entry(wrap, textvariable=self._url, width=64).pack(anchor="w", fill="x")
+        ttk.Label(wrap, text="默认使用官方 deepseek-harness，可改成你自己的仓库。",
+                  font=F_SMALL, foreground="#888").pack(anchor="w")
+        # 目标目录
+        ttk.Label(wrap, text="安装到的目标目录（如 C:/Users/你的名字/dsh）:").pack(anchor="w", pady=(10, 0))
+        ttk.Entry(wrap, textvariable=self._dir, width=64).pack(anchor="w", fill="x")
+        ttk.Label(wrap, text="留空则默认安装到用户主目录下的 dsh 文件夹。",
+                  font=F_SMALL, foreground="#888").pack(anchor="w")
+        # 环境预检
+        ttk.Label(wrap, text="环境预检:", font=F_BOLD).pack(anchor="w", pady=(12, 2))
+        self._env_lbl = tk.Label(wrap, text="检查中…", font=F_SMALL, justify="left", anchor="w")
+        self._env_lbl.pack(anchor="w", fill="x")
+        # 按钮
+        btns = ttk.Frame(wrap)
+        btns.pack(fill="x", pady=(14, 0))
+        ttk.Button(btns, text="开始安装", command=self._start).pack(side="left", padx=4)
+        ttk.Button(btns, text="取消", command=self.destroy).pack(side="left", padx=4)
+        self.transient(self._master)
+        self.grab_set()
+        self._check_env()
+
+    def _check_env(self):
+        # 异步检查 git / node / npm / pnpm 是否可用。
+        def worker():
+            import shutil
+            lines = []
+            for tool in ("git", "node", "npm", "pnpm"):
+                path = shutil.which(tool)
+                status = "OK" if path else "缺失"
+                lines.append(f"  {tool:5s}: {status}" + (f"  ({path})" if path else ""))
+            text = "\n".join(lines)
+            missing = [l.split(":")[0].strip() for l in lines if "缺失" in l]
+            if missing:
+                text += "\n\n⚠ 缺少: " + ", ".join(missing) + "  — 请先安装后再安装 dsh。"
+            self.after(0, lambda: self._env_lbl.configure(text=text))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _start(self):
+        url = self._url.get().strip()
+        target = self._dir.get().strip()
+        if not url:
+            messagebox.showerror("缺少仓库地址", "请填写 dsh 的 git 仓库地址。", parent=self)
+            return
+        # target 默认: 用户主目录/dsh
+        target = target or os.path.join(os.path.expanduser("~"), "dsh")
+        self.result = (url, target)
+        self.destroy()
 class Dashboard:
     def __init__(self, root):
         self.root = root
@@ -414,6 +485,7 @@ class Dashboard:
         ttk.Label(top, text="dsh 控制台", font=("Segoe UI", 16, "bold")).pack(side="left")
         ttk.Label(top, text=f"  本机轮询 {POLL_SECONDS}s · SSH直查 {REMOTE_POLL_SECONDS}s",
                   font=F_SMALL, foreground="#666").pack(side="left")
+        ttk.Button(top, text="安装 dsh", command=self._open_install).pack(side="right", padx=(0, 6))
         ttk.Button(top, text="配置", command=self._open_config).pack(side="right", padx=(0, 6))
         ttk.Button(top, text="立即刷新", command=self._force_refresh).pack(side="right")
 
@@ -659,6 +731,56 @@ class Dashboard:
         self._dsh_start()
         self.log("  [更新] 完成 ✓ 访问 http://127.0.0.1:%d" % DASH_PORT, "ok")
         self.set_status("更新完成")
+
+    # ── 安装 dsh ──────────────────────────
+    def _open_install(self):
+        dlg = InstallDialog(self.root)
+        self.root.wait_window(dlg)
+        if dlg.result:
+            url, target = dlg.result
+            self.log(f"[安装 dsh] 目标: {target}  源: {url}", "warn")
+            self.set_status("正在安装 dsh(clone+依赖+构建, 较久请耐心)...")
+            threading.Thread(target=self._run_install, args=(url, target), daemon=True).start()
+
+    def _run_install(self, url, target):
+        import shutil
+        # 0) 环境预检
+        need = [t for t in ("git", "node", "npm", "pnpm") if not shutil.which(t)]
+        if need:
+            self.log(f"[安装] 缺少依赖: {', '.join(need)}", "err")
+            self.log("  请先安装 Node.js(含 npm) 和 git; 然后 npm install -g pnpm", "warn")
+            self.set_status("安装中止: 缺少依赖 " + ", ".join(need))
+            return
+        # 1) clone(完整克隆, 便于后续 update 的 git pull)
+        if os.path.isdir(target) and os.listdir(target):
+            self.log(f"[安装] 目录已存在且有内容, 跳过 clone: {target}", "warn")
+        else:
+            self.log("[安装] 步骤1/3: git clone ...", "warn")
+            if not self._stream_cmd(["git", "clone", url, target]):
+                self.set_status("安装失败: git clone")
+                return
+        # 2) install
+        self.log("[安装] 步骤2/3: pnpm install", "warn")
+        if not self._stream_cmd(["pnpm", "install"], cwd=target):
+            self.set_status("安装失败: pnpm install")
+            return
+        # 3) build
+        self.log("[安装] 步骤3/3: pnpm run build", "warn")
+        if not self._stream_cmd(["pnpm", "run", "build"], cwd=target):
+            self.set_status("安装失败: pnpm run build")
+            return
+        # 4) 写 config.dash_repo
+        self.log(f"[安装] 完成! 目标目录: {target}", "ok")
+        try:
+            cfg = load_config()
+            cfg["dash_repo"] = target
+            if save_config(cfg):
+                self.log("[安装] 已把 dash_repo 写入 config.json, 重启后生效。", "ok")
+            else:
+                self.log("[安装] 无法写 config.json(权限?), 请在配置向导里手动设置 dash_repo。", "warn")
+        except Exception as e:
+            self.log(f"[安装] 写 config 失败: {e}", "warn")
+        self.set_status("dsh 安装完成 ✓ 重启后生效")
 
     def _stream_cmd(self, cmd, cwd=None):
         """流式运行命令, 输出逐行打进日志。返回 True/False。"""

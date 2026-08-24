@@ -9,6 +9,12 @@
   - 支持在界面里直接编辑 forward_ports / lab_server / lab_user / lab_port / reverse_port（原来只能手改 JSON）
   - 新增"测试 SSH 连接"按钮：填好服务器即可在线验证免密能否连通
   - 每个字段带灰色帮助文字，降低配置门槛（面向使用者）
+- **一键安装 dsh（辅助全新环境）**
+  - 顶部新增"安装 dsh"按钮，打开安装向导
+  - 填 dsh 仓库地址（默认官方 deepseek-harness）与目标目录
+  - 自动环境预检（git / node / npm / pnpm 是否可用，缺失会明确提示）
+  - 后台流式执行 clone → pnpm install → pnpm build
+  - 安装完成后自动把 dash_repo 写入 config.json（重启生效）
 
 ## v0.1.0 (草案)
 
