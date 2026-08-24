@@ -5,10 +5,10 @@
 #   8091 → Windows 本机 dsh GUI（Windows→185 反向隧道）
 #
 # 用法（在 Windows PowerShell 里）:
-#   powershell -ExecutionPolicy Bypass -File C:\Users\1\dsh-tunnel.ps1
-#   powershell -ExecutionPolicy Bypass -File C:\Users\1\dsh-tunnel.ps1 -Persist   # 断线自动重连
-#   powershell -ExecutionPolicy Bypass -File C:\Users\1\dsh-tunnel.ps1 -NoBrowser # 不自动开浏览器
-#   powershell -ExecutionPolicy Bypass -File C:\Users\1\dsh-tunnel.ps1 -Stop      # 关闭隧道
+#   powershell -ExecutionPolicy Bypass -File C:\Users\YOUR_NAME\dsh-tunnel.ps1
+#   powershell -ExecutionPolicy Bypass -File C:\Users\YOUR_NAME\dsh-tunnel.ps1 -Persist   # 断线自动重连
+#   powershell -ExecutionPolicy Bypass -File C:\Users\YOUR_NAME\dsh-tunnel.ps1 -NoBrowser # 不自动开浏览器
+#   powershell -ExecutionPolicy Bypass -File C:\Users\YOUR_NAME\dsh-tunnel.ps1 -Stop      # 关闭隧道
 #
 # 前置: Windows 的 ~/.ssh/id_ed25519 已授权到 185 的 tunnel 用户。
 
@@ -21,7 +21,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # ── 配置（改这里）────────────────────────────────────────
-$PublicIP   = 'YOUR_PUBLIC_IP'   # 公网服务器
+$PublicIP   = 'YOUR_PUBLIC_SERVER_IP'   # 公网服务器
 $TunnelUser = 'tunnel'            # 公网服务器上的隧道用户
 # 三条正向转发: 本机端口:目标=185的对应端口
 $Forwards = @(
@@ -51,7 +51,7 @@ if ($Stop) {
 
 if (-not (Test-Path $KeyPath)) {
     Write-Host "找不到密钥 $KeyPath — 先在 Windows 生成并授权到 185:" -ForegroundColor Yellow
-    Write-Host "  ssh-keygen -t ed25519 -f $KeyPath -N `"`" -C `"YOUR_USER-win`"" -ForegroundColor Yellow
+    Write-Host "  ssh-keygen -t ed25519 -f $KeyPath -N `"`" -C `"your-ssh-key-name`"" -ForegroundColor Yellow
     Write-Host "  type $KeyPath.pub | ssh $Target `"mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys`"" -ForegroundColor Yellow
     exit 1
 }

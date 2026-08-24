@@ -1,7 +1,7 @@
 ﻿# update-dsh.ps1 — 更新 Windows 原生 dsh: git 拉取 → 依赖 → 构建 → 重启 GUI
 #
 # 用法:
-#   powershell -ExecutionPolicy Bypass -File C:\Users\1\update-dsh.ps1
+#   powershell -ExecutionPolicy Bypass -File C:\Users\YOUR_NAME\update-dsh.ps1
 #
 # ⚠ 会先停掉本机正在运行的 dsh web（当前 Windows dsh 会话会断），构建后自动重启。
 
