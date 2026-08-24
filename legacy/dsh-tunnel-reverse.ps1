@@ -1,4 +1,4 @@
-﻿# dsh-tunnel-reverse.ps1 — Windows → 185 反向隧道（手机/外部访问本机 dsh）
+﻿# dsh-tunnel-reverse.ps1 — Windows → 公网服务器 反向隧道（手机/外部访问本机 dsh）
 # 访问: http://YOUR_PUBLIC_SERVER_IP:8091（映射到本机 127.0.0.1:3090）
 #
 # 用法（Windows PowerShell）:
@@ -6,9 +6,9 @@
 #   powershell -ExecutionPolicy Bypass -File dsh-tunnel-reverse.ps1 -Persist   # 常驻重连（推荐）
 #   powershell -ExecutionPolicy Bypass -File dsh-tunnel-reverse.ps1 -Stop      # 关闭
 #
-# 前置: Windows 的 ~/.ssh/id_ed25519（your-ssh-key-name）已授权到 185 的 tunnel 用户。
-# 默认绑定 185 回环（安全）; 想公网直连（手机浏览器），把 -R 的端口前加 0.0.0.0:
-#   且 185 sshd 需 GatewayPorts clientspecified。⚠ 无鉴权 GUI 暴露公网风险自负。
+# 前置: Windows 的 ~/.ssh/id_ed25519（your-ssh-key-name）已授权到 公网服务器 的 tunnel 用户。
+# 默认绑定 公网服务器 回环（安全）; 想公网直连（手机浏览器），把 -R 的端口前加 0.0.0.0:
+#   且 公网服务器 sshd 需 GatewayPorts clientspecified。⚠ 无鉴权 GUI 暴露公网风险自负。
 
 param(
     [switch]$NoBrowser,
@@ -21,8 +21,8 @@ $ErrorActionPreference = 'Stop'
 # ── 配置（改这里）────────────────────────
 $PublicIP   = 'YOUR_PUBLIC_SERVER_IP'   # 公网服务器
 $TunnelUser = 'tunnel'            # 公网服务器上的隧道用户
-$LocalGUI   = 3080                # 本机 dsh GUI 端口（已从 3090 改到 3080，避免和连 204 的本地转发冲突）
-$RemoteGUI  = 8091                # 185 上暴露的端口（8090/8022 已被 204 隧道占用）
+$LocalGUI   = 3080                # 本机 dsh GUI 端口（已从 3090 改到 3080，避免和连 实验室dsh 的本地转发冲突）
+$RemoteGUI  = 8091                # 公网服务器 上暴露的端口（8090/8022 已被 实验室dsh 隧道占用）
 # ─────────────────────────────────────────
 
 $KeyPath = Join-Path $env:USERPROFILE '.ssh\id_ed25519'
@@ -61,7 +61,7 @@ if ($Loop) {
     exit 0
 }
 
-# 探测免密（your-ssh-key-name 应已授权到 185）。
+# 探测免密（your-ssh-key-name 应已授权到 公网服务器）。
 # 注意: 不能复用 $Common —— 它带 -N（纯转发不退出），探针会永远挂着。
 $keyAuth = $false
 $ErrorActionPreference = 'Continue'
@@ -70,7 +70,7 @@ if ($LASTEXITCODE -eq 0) { $keyAuth = $true }
 $ErrorActionPreference = 'Stop'
 
 if (-not $keyAuth) {
-    Write-Host '未检测到 185 的免密登录。请先装公钥:' -ForegroundColor Yellow
+    Write-Host '未检测到 公网服务器 的免密登录。请先装公钥:' -ForegroundColor Yellow
     Write-Host "  type $KeyPath.pub | ssh $Target `"mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys`"" -ForegroundColor Yellow
     exit 1
 }
@@ -96,7 +96,7 @@ if ($running) {
     }
 }
 
-# 反向隧道不自动开浏览器——185 上的是回环绑定，外网 URL 打开也是空白；
+# 反向隧道不自动开浏览器——公网服务器 上的是回环绑定，外网 URL 打开也是空白；
 # 手机/外部访问请用 SSH 客户端做本地端口转发后访问 127.0.0.1:<转发端口>。
-Write-Host "隧道已就绪: 185 的 127.0.0.1:$RemoteGUI → 本机 127.0.0.1:$LocalGUI"
+Write-Host "隧道已就绪: 公网服务器 的 127.0.0.1:$RemoteGUI → 本机 127.0.0.1:$LocalGUI"
 Write-Host "（回环绑定，需经 SSH 端口转发访问；公网直连需 GatewayPorts + 0.0.0.0:，风险自负）"

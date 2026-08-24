@@ -1,8 +1,8 @@
-﻿# dsh-tunnel.ps1 — 在家一键打通 185 上的三个转发口（正向隧道）
-# 185 上的三个口分属:
-#   8090 → 204 的 dsh GUI（204→185 反向隧道）
-#   8022 → 204 的 SSH   （在家 scp/同步到 204 用）
-#   8091 → Windows 本机 dsh GUI（Windows→185 反向隧道）
+﻿# dsh-tunnel.ps1 — 在家一键打通 公网服务器 上的三个转发口（正向隧道）
+# 公网服务器 上的三个口分属:
+#   8090 → 实验室dsh 的 dsh GUI（实验室dsh→公网服务器 反向隧道）
+#   8022 → 实验室dsh 的 SSH   （在家 scp/同步到 实验室dsh 用）
+#   8091 → Windows 本机 dsh GUI（Windows→公网服务器 反向隧道）
 #
 # 用法（在 Windows PowerShell 里）:
 #   powershell -ExecutionPolicy Bypass -File C:\Users\YOUR_NAME\dsh-tunnel.ps1
@@ -10,7 +10,7 @@
 #   powershell -ExecutionPolicy Bypass -File C:\Users\YOUR_NAME\dsh-tunnel.ps1 -NoBrowser # 不自动开浏览器
 #   powershell -ExecutionPolicy Bypass -File C:\Users\YOUR_NAME\dsh-tunnel.ps1 -Stop      # 关闭隧道
 #
-# 前置: Windows 的 ~/.ssh/id_ed25519 已授权到 185 的 tunnel 用户。
+# 前置: Windows 的 ~/.ssh/id_ed25519 已授权到 公网服务器 的 tunnel 用户。
 
 param(
     [switch]$NoBrowser,
@@ -23,13 +23,13 @@ $ErrorActionPreference = 'Stop'
 # ── 配置（改这里）────────────────────────────────────────
 $PublicIP   = 'YOUR_PUBLIC_SERVER_IP'   # 公网服务器
 $TunnelUser = 'tunnel'            # 公网服务器上的隧道用户
-# 三条正向转发: 本机端口:目标=185的对应端口
+# 三条正向转发: 本机端口:目标=公网服务器的对应端口
 $Forwards = @(
-    '8090:127.0.0.1:8090',   # → 204 的 dsh GUI
-    '8022:127.0.0.1:8022',   # → 204 的 SSH（scp/同步用）
+    '8090:127.0.0.1:8090',   # → 实验室dsh 的 dsh GUI
+    '8022:127.0.0.1:8022',   # → 实验室dsh 的 SSH（scp/同步用）
     '8091:127.0.0.1:8091'    # → Windows 本机 dsh GUI
 )
-$GUIPort = 8090               # 浏览器访问 204 GUI 的本机端口（等待就绪用）
+$GUIPort = 8090               # 浏览器访问 实验室dsh GUI 的本机端口（等待就绪用）
 # ─────────────────────────────────────────────────────────
 
 $KeyPath = Join-Path $env:USERPROFILE '.ssh\id_ed25519'
@@ -50,7 +50,7 @@ if ($Stop) {
 }
 
 if (-not (Test-Path $KeyPath)) {
-    Write-Host "找不到密钥 $KeyPath — 先在 Windows 生成并授权到 185:" -ForegroundColor Yellow
+    Write-Host "找不到密钥 $KeyPath — 先在 Windows 生成并授权到 公网服务器:" -ForegroundColor Yellow
     Write-Host "  ssh-keygen -t ed25519 -f $KeyPath -N `"`" -C `"your-ssh-key-name`"" -ForegroundColor Yellow
     Write-Host "  type $KeyPath.pub | ssh $Target `"mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys`"" -ForegroundColor Yellow
     exit 1
@@ -128,13 +128,13 @@ if ($running) {
     if (-not (Test-Port $GUIPort)) {
         Write-Host '隧道端口暂未就绪，日志见:' -ForegroundColor Yellow
         Write-Host "  $LogFile" -ForegroundColor Yellow
-        Write-Host '常见原因: 185 上反向隧道没起来 / IP 填错 / 防火墙。'
+        Write-Host '常见原因: 公网服务器 上反向隧道没起来 / IP 填错 / 防火墙。'
     }
 }
 
-# 打开 204 GUI（本机 8090）
+# 打开 实验室dsh GUI（本机 8090）
 if (-not $NoBrowser) {
     Start-Process "http://127.0.0.1:$GUIPort"
-    Write-Host "浏览器已打开 http://127.0.0.1:$GUIPort （204 的 dsh）"
+    Write-Host "浏览器已打开 http://127.0.0.1:$GUIPort （实验室dsh 的 dsh）"
 }
-Write-Host "访问: http://127.0.0.1:8090 = 204 dsh | http://127.0.0.1:8091 = Windows dsh | scp -P 8022 → 204"
+Write-Host "访问: http://127.0.0.1:8090 = 实验室dsh dsh | http://127.0.0.1:8091 = Windows dsh | scp -P 8022 → 实验室dsh"

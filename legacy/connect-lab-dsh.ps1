@@ -1,12 +1,12 @@
-﻿# connect-lab-dsh.ps1 — 实验室局域网内连接 204 的 dsh GUI（正向隧道）
-# 访问: http://127.0.0.1:3090（= 204 的 dsh）
+﻿# connect-lab-dsh.ps1 — 实验室局域网内连接 实验室dsh 的 dsh GUI（正向隧道）
+# 访问: http://127.0.0.1:3090（= 实验室dsh 的 dsh）
 #
 # 用法（Windows PowerShell）:
 #   powershell -ExecutionPolicy Bypass -File connect-lab-dsh.ps1            # 后台隧道
 #   powershell -ExecutionPolicy Bypass -File connect-lab-dsh.ps1 -Persist   # 常驻重连
 #   powershell -ExecutionPolicy Bypass -File connect-lab-dsh.ps1 -Stop      # 关闭
 #
-# 前置: Windows 的 ~/.ssh/id_ed25519 已授权到 204 的 YOUR_USER 用户
+# 前置: Windows 的 ~/.ssh/id_ed25519 已授权到 实验室dsh 的 YOUR_USER 用户
 #（Windows 没有 ssh-copy-id，手动装公钥）:
 #   type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh YOUR_USER@YOUR_LAB_SERVER_IP "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
 
@@ -120,7 +120,7 @@ if ($running) {
     if (-not (Test-Port $LocalGUI)) {
         Write-Host '隧道端口暂未就绪，日志见:' -ForegroundColor Yellow
         Write-Host "  $LogFile" -ForegroundColor Yellow
-        Write-Host '常见原因: 204 的 dsh 没起 / 密码输错 / 防火墙。'
+        Write-Host '常见原因: 实验室dsh 的 dsh 没起 / 密码输错 / 防火墙。'
     }
 }
 

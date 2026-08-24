@@ -33,7 +33,7 @@
 
     健康监控(两行):
       本机端口:      ●3080  ●8090  ●8022  ●8091  ●3090
-      185 反向隧道:  ●8090  ●8022  ●8091   ●185 SSH
+      公网服务器 反向隧道:  ●8090  ●8022  ●8091   ●公网服务器 SSH
 
     运行日志(实时滚动) / 底部状态栏
 
@@ -79,25 +79,25 @@
 
 典型拓扑（多机 + 公网中转）：
 
-    [204 服务器(实验室)]          [Windows 本机]
+    [实验室dsh 服务器(实验室)]          [Windows 本机]
       dsh GUI :3090               dsh GUI :3080
         |  反向隧道(常驻)               |  反向隧道(常驻)
-        +-------------> 185 公网中转 <-------------+
-                        8090->204GUI   8091->本机GUI
-                        8022->204SSH
+        +-------------> 公网服务器 公网中转 <-------------+
+                        8090->实验室dshGUI   8091->本机GUI
+                        8022->实验室dshSSH
                             |
              在家/外部: dsh-tunnel.ps1 正向隧道访问
 
-- 反向隧道（204->185、本机->185）在 185 上监听回环端口，默认仅绑定 127.0.0.1（安全）。
-- 本机端口行反映本机是否建立了正向隧道等本地监听；185 反向隧道行通过 SSH 直查 185 上监听状态，才是"隧道是否配置成功"的真实指标。
+- 反向隧道（实验室dsh->公网服务器、本机->公网服务器）在 公网服务器 上监听回环端口，默认仅绑定 127.0.0.1（安全）。
+- 本机端口行反映本机是否建立了正向隧道等本地监听；公网服务器 反向隧道行通过 SSH 直查 公网服务器 上监听状态，才是"隧道是否配置成功"的真实指标。
 
 ### 隧道引擎
 | 模块 | 作用 | 状态 |
 |------|------|------|
 | tunnel_mgr.py | 纯 Python 隧道管理器（forward/reverse, start/persist/stop） | ✅ |
 | dsh-tunnel 卡片 | 在家正向隧道三连（8090/8022/8091） | ✅ 纯 Python |
-| connect-lab-dsh 卡片 | 实验室局域网直连 204（本机 3090） | ✅ 纯 Python |
-| dsh-tunnel-reverse 卡片 | 本机 dsh -> 185 反向隧道（185:8091 -> 3080） | ✅ 纯 Python |
+| connect-lab-dsh 卡片 | 实验室局域网直连 实验室dsh（本机 3090） | ✅ 纯 Python |
+| dsh-tunnel-reverse 卡片 | 本机 dsh -> 公网服务器 反向隧道（公网服务器:8091 -> 3080） | ✅ 纯 Python |
 | update-dsh 卡片 | git 拉取 + pnpm 构建 + 重启（流式日志） | ✅ 纯 Python |
 
 > 旧的 4 个 .ps1 已收进 legacy/ 目录，仅供历史参考，不再被界面调用。
@@ -145,8 +145,8 @@ A **visual SSH-tunnel manager + service health monitor** for Windows. Wrap the c
 All tunables live in config.json (also editable via the **Config** button; save takes effect after restart). See the Chinese section above for the field table.
 
 ## How it works
-- Reverse tunnels (204->185, local->185) listen on 185's loopback (127.0.0.1 only, safe by default).
-- The local-ports row shows local listeners; the 185 tunnel row SSH-queries the real listener status on 185 — that's the true "is my tunnel configured" signal.
+- Reverse tunnels (实验室dsh->公网服务器, local->公网服务器) listen on 公网服务器's loopback (127.0.0.1 only, safe by default).
+- The local-ports row shows local listeners; the 公网服务器 tunnel row SSH-queries the real listener status on 公网服务器 — that's the true "is my tunnel configured" signal.
 
 ## Security
 - Relay ports bind loopback only by default; do not expose the unauthenticated GUI to public internet (remote-code-execution risk) unless you explicitly accept it.

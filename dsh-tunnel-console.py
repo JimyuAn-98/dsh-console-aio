@@ -11,7 +11,7 @@ dsh-tunnel-console — dsh SSH 隧道管理 + 本机 dsh 启停 + 健康监控
   · 更新卡片: 一键 运行 update-dsh（拉取→构建→重启, 实时滚动日志）
   · 健康监控(两行):
       本机端口行 — 探测本机监听的端口
-      185 隧道行  — SSH 直查 185 上反向隧道端口是否在监听
+      公网服务器 隧道行  — SSH 直查 公网服务器 上反向隧道端口是否在监听
   · 配置: IP/用户名/仓库路径/端口/轮询间隔等全部集中在 config.json,
           或点界面右上角"配置"按钮编辑。
 仅依赖 Python 标准库 (tkinter), 无需 pip 安装任何东西。
@@ -129,16 +129,16 @@ ITEMS = [
      "desc": "启动/停止本机 dsh GUI\n(后台 pnpm dsh web,\n访问 http://127.0.0.1:%d)" % DASH_PORT},
     {"type": "py", "key": "dsh-tunnel", "port": 8090,
      "backend": "python", "actions": ["start", "persist", "stop"],
-     "desc": "在家 → 打通 185 三个转发口\n8090→204GUI / 8022→204SSH / 8091→本机GUI\n(纯 Python, 不再调用 ps1)"},
+     "desc": "在家 → 打通 公网服务器 三个转发口\n8090→实验室dshGUI / 8022→实验室dshSSH / 8091→本机GUI"},
     {"type": "py", "key": "connect-lab-dsh", "port": LAB_PORT,
      "backend": "python", "actions": ["start", "persist", "stop"],
-     "desc": "实验室局域网 → 直连 204 dsh GUI (本机 3090)\n(纯 Python)"},
+     "desc": "实验室局域网 → 直连 实验室dsh dsh GUI (本机 3090)"},
     {"type": "py", "key": "dsh-tunnel-reverse", "port": 0,
      "backend": "python", "actions": ["start", "persist", "stop"],
-     "desc": "本机 dsh → 185 反向隧道\n185:8091 → 本机 3080\n(纯 Python)"},
+     "desc": "本机 dsh → 公网服务器 反向隧道\n公网服务器:8091 → 本机 3080"},
     {"type": "py", "key": "update-dsh", "port": -1,
      "backend": "python", "actions": ["run"],
-     "desc": "运行一次完整更新:\ngit 拉取→依赖→构建→重启,\n期间 GUI 短暂断连\n(纯 Python)"},
+     "desc": "运行一次完整更新:\ngit 拉取→依赖→构建→重启,\n期间 GUI 短暂断连"},
 ]
 
 LOG_RING = 4000
@@ -225,7 +225,7 @@ class ConfigDialog(tk.Toplevel):
         "lab_server": "实验室服务器 IP(局域网直连用)",
         "lab_user": "实验室服务器 SSH 用户名",
         "lab_port": "实验室 dsh 本机映射端口(默认 3090)",
-        "reverse_port": "本机 dsh 暴露到中继的端口(185:端口 → 本机)",
+        "reverse_port": "本机 dsh 暴露到中继的端口(公网服务器:端口 → 本机)",
         "poll_seconds": "本机健康检查间隔(秒)",
         "remote_poll_seconds": "SSH 直查中继监听状态的间隔(秒)",
     }
@@ -233,7 +233,7 @@ class ConfigDialog(tk.Toplevel):
     TEMPLATES = {
         "在家→中继隧道": {"ssh_server": "YOUR_PUBLIC_IP", "ssh_user": "YOUR_USER",
                           "forward_ports": "8090,8022,8091", "reverse_port": "8091"},
-        "实验室→直连204": {"lab_server": "YOUR_LAB_IP", "lab_user": "YOUR_USER",
+        "实验室→直连实验室dsh": {"lab_server": "YOUR_LAB_IP", "lab_user": "YOUR_USER",
                            "lab_port": "3090"},
         "本机→中继反向": {"reverse_port": "8091"},
     }
@@ -436,21 +436,21 @@ class Dashboard:
         for port, label, note in LOCAL_PORTS:
             self._add_mon_cell(row1, f"L{port}", label, f"端口 {port}", note)
 
-        ttk.Label(mon, text="185 反向隧道（SSH 直查, 仅绑回环）", font=F_BOLD,
+        ttk.Label(mon, text="公网服务器 反向隧道（SSH 直查, 仅绑回环）", font=F_BOLD,
                   foreground="#555").pack(anchor="w")
         row2 = ttk.Frame(mon)
         row2.pack(fill="x", pady=(2, 4))
         for port, label, note in REMOTE_TUNNELS:
-            self._add_mon_cell(row2, f"R{port}", label, f"185 端口 {port}", note)
+            self._add_mon_cell(row2, f"R{port}", label, f"公网服务器 端口 {port}", note)
         f = ttk.Frame(row2)
         f.pack(side="left", expand=True, fill="both", padx=4)
-        dot185 = tk.Label(f, text="●", font=("Segoe UI", 13), fg=COLOR_OFF)
-        dot185.pack()
-        ttk.Label(f, text="185 SSH", font=F_BOLD).pack()
-        self.det185 = ttk.Label(f, text="--", font=F_SMALL, foreground="#888")
-        self.det185.pack()
+        dot公网服务器 = tk.Label(f, text="●", font=("Segoe UI", 13), fg=COLOR_OFF)
+        dot公网服务器.pack()
+        ttk.Label(f, text="公网服务器 SSH", font=F_BOLD).pack()
+        self.det公网服务器 = ttk.Label(f, text="--", font=F_SMALL, foreground="#888")
+        self.det公网服务器.pack()
         ttk.Label(f, text="公网 :22", font=F_SMALL, foreground="#aaa").pack()
-        self.mon_widgets["185"] = (dot185, self.det185)
+        self.mon_widgets["公网服务器"] = (dot公网服务器, self.det公网服务器)
 
         # ── 日志 ──
         logf = ttk.LabelFrame(self.root, text="运行日志", padding=8)
@@ -713,17 +713,17 @@ class Dashboard:
         """根据 config 构造一条 Tunnel。返回 tunnel_mgr.Tunnel 实例。"""
         key = cfg_item["key"]
         if key == "dsh-tunnel":
-            # 在家正向: 本机 8090/8022/8091 -> 185 同端口
+            # 在家正向: 本机 8090/8022/8091 -> 公网服务器 同端口
             forwards = [(p, "127.0.0.1", p) for p in FORWARD_PORTS]
             host, user, mode = SSH_SERVER, SSH_USER, "forward"
             watch = FORWARD_PORTS[0] if FORWARD_PORTS else None
         elif key == "connect-lab-dsh":
-            # 实验室直连: 本机 3090 -> 204 的 3090 (局域网, 不经 185)
+            # 实验室直连: 本机 3090 -> 实验室dsh 的 3090 (局域网, 不经 公网服务器)
             forwards = [(LAB_PORT, "127.0.0.1", LAB_PORT)]
             host, user, mode = LAB_SERVER, LAB_USER, "forward"
             watch = LAB_PORT
         elif key == "dsh-tunnel-reverse":
-            # 本机 -> 185 反向: 185 的 reverse_port -> 本机 dsh
+            # 本机 -> 公网服务器 反向: 公网服务器 的 reverse_port -> 本机 dsh
             forwards = [(REVERSE_PORT, "127.0.0.1", DASH_PORT)]
             host, user, mode = SSH_SERVER, SSH_USER, "reverse"
             watch = None   # 反向隧道本机无法直接探测; 用 PID 轨道判断
@@ -849,7 +849,7 @@ class Dashboard:
         results = {}
         for port, _, _ in LOCAL_PORTS:
             results[port] = tcp_ok("127.0.0.1", port)
-        results["185"] = tcp_ok(SSH_SERVER, 22)
+        results["公网服务器"] = tcp_ok(SSH_SERVER, 22)
         ssh_count = ssh_proc_count()
         self._render(results, ssh_count)
 
@@ -859,18 +859,18 @@ class Dashboard:
         self._render_remote(state)
 
     def _render(self, results, ssh_count):
-        # 本机端口健康（不含 185 公网连通, 概念分开）
+        # 本机端口健康（不含 公网服务器 公网连通, 概念分开）
         local_ok = [port for port, (ok, _) in results.items()
-                    if port != "185" and ok]
+                    if port != "公网服务器" and ok]
         local_total = len(LOCAL_PORTS)
-        ssh_ok = results.get("185", (False, -1))[0]
-        ssh_txt = "185 在线" if ssh_ok else "185 不可达"
+        ssh_ok = results.get("公网服务器", (False, -1))[0]
+        ssh_txt = "公网服务器 在线" if ssh_ok else "公网服务器 不可达"
         summary = (f"本机端口 {len(local_ok)}/{local_total} · {ssh_txt}"
                    f" · ssh.exe {ssh_count if ssh_count >= 0 else '?'}")
         def apply():
             for port, (ok, dt) in results.items():
-                if port == "185":
-                    dot, det = self.mon_widgets["185"]
+                if port == "公网服务器":
+                    dot, det = self.mon_widgets["公网服务器"]
                     dot.configure(fg=COLOR_ON if ok else COLOR_RED)
                     det.configure(text="在线" if ok else "不可达")
                     continue

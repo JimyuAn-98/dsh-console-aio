@@ -5,7 +5,7 @@ tunnel_mgr.py — 纯 Python SSH 隧道管理器（零依赖, Windows）
 
 支持的隧道形态:
   forward : ssh -N -L <本地>:127.0.0.1:<远端>  (在家打通的"正向隧道")
-  reverse : ssh -N -R <远端>:127.0.0.1:<本地>  (本机/204 -> 公网中转的"反向隧道")
+  reverse : ssh -N -R <远端>:127.0.0.1:<本地>  (本机/实验室dsh -> 公网中转的"反向隧道")
 
 生命周期（由调用方 GUI 负责线程调度）:
   start()       启动隧道(后台 CREATE_NO_WINDOW), 记录 PID
