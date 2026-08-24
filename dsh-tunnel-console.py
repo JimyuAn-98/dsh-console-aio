@@ -210,47 +210,157 @@ def probe_remote_tunnels():
 
 
 class ConfigDialog(tk.Toplevel):
-    """编辑 config.json 的对话框。保存后通过 self.saved_cfg 回传。"""
+    """配置向导: 分组 + 场景模板 + SSH 测试 + 完整隧道参数编辑。
+    保存后 self.result 持有用户改动字段(dict), 由上层合并写回 config.json。"""
+
+    HELP = {
+        "ssh_server": "公网可达的中转服务器 IP/域名(需已配置免密 SSH 登录)",
+        "ssh_user": "中转服务器上用于建隧道的用户名(需已配置免密)",
+        "ssh_port": "SSH 连接端口(仅用于测试, 默认 22)",
+        "dash_repo": "本机 dsh 仓库绝对路径, 如 D:/Applications/deepseek-harness",
+        "dash_port": "本机 dsh GUI 端口(默认 3080)",
+        "dash_cmd": "启动命令(空格分隔): pnpm.cmd dsh web",
+        "forward_ports": "在家正向隧道本机端口, 逗号分隔: 8090,8022,8091",
+        "lab_server": "实验室服务器 IP(局域网直连用)",
+        "lab_user": "实验室服务器 SSH 用户名",
+        "lab_port": "实验室 dsh 本机映射端口(默认 3090)",
+        "reverse_port": "本机 dsh 暴露到中继的端口(185:端口 → 本机)",
+        "poll_seconds": "本机健康检查间隔(秒)",
+        "remote_poll_seconds": "SSH 直查中继监听状态的间隔(秒)",
+    }
+
+    TEMPLATES = {
+        "在家→中继隧道": {"ssh_server": "YOUR_PUBLIC_IP", "ssh_user": "YOUR_USER",
+                          "forward_ports": "8090,8022,8091", "reverse_port": "8091"},
+        "实验室→直连204": {"lab_server": "YOUR_LAB_IP", "lab_user": "YOUR_USER",
+                           "lab_port": "3090"},
+        "本机→中继反向": {"reverse_port": "8091"},
+    }
+
+    LABELS = {
+        "ssh_server": "服务器 IP/域名", "ssh_user": "用户名", "ssh_port": "SSH 端口",
+        "dash_repo": "仓库路径", "dash_port": "端口", "dash_cmd": "启动命令",
+        "forward_ports": "在家正向端口", "lab_server": "实验室 IP",
+        "lab_user": "实验室用户", "lab_port": "实验室映射端口",
+        "reverse_port": "反向端口", "poll_seconds": "本机轮询(秒)",
+        "remote_poll_seconds": "远端轮询(秒)",
+    }
 
     def __init__(self, master, cfg):
         super().__init__(master)
-        self.title("配置 · config.json")
-        self.resizable(False, False)
-        self.configure(padx=12, pady=12)
+        self._master = master
+        self.title("隧道配置向导")
+        self.configure(padx=15, pady=10)
         self.result = None
         self._vars = {}
+        self._cfg = cfg
+        self._row = 0
+        self._build()
 
-        rows = [
-            ("ssh_server", "公网服务器 IP", "YOUR_PUBLIC_IP"),
-            ("ssh_user", "隧道用户名", "tunnel"),
-            ("dash_repo", "本机 dsh 仓库路径", ""),
-            ("dash_port", "本机 dsh 端口", ""),
-            ("dash_cmd", "启动命令 (空格分隔)", "pnpm.cmd dsh web"),
-            ("poll_seconds", "本机轮询(秒)", ""),
-            ("remote_poll_seconds", "SSH 直查间隔(秒)", ""),
-        ]
-        for i, (key, label, _ph) in enumerate(rows):
-            ttk.Label(self, text=label + ":").grid(row=i, column=0, sticky="w", pady=2)
-            v = tk.StringVar()
-            default = cfg.get(key)
-            if key == "dash_cmd" and isinstance(default, list):
-                default = " ".join(default)
-            v.set(str(default if default is not None else ""))
-            ent = ttk.Entry(self, textvariable=v, width=46)
-            ent.grid(row=i, column=1, sticky="ew", padx=(8, 0), pady=2)
-            self._vars[key] = v
-
-        btns = ttk.Frame(self)
-        btns.grid(row=len(rows), column=0, columnspan=2, pady=(14, 0))
+    def _build(self):
+        wrap = ttk.Frame(self)
+        wrap.pack(fill="both", expand=True)
+        tpl = ttk.LabelFrame(wrap, text="场景模板 (一键填充, 把占位符改成真实 IP/用户名)", padding=8)
+        tpl.pack(fill="x", pady=(0, 8))
+        for name in list(self.TEMPLATES) + ["自定义"]:
+            ttk.Button(tpl, text=name, command=lambda n=name: self._apply(n)).pack(side="left", padx=3, ipadx=2)
+        body = ttk.Frame(wrap)
+        body.pack(fill="both", expand=True)
+        self._body = body
+        self._sec("① 公网中转服务器")
+        self._field("ssh_server", None)
+        self._field("ssh_user", None)
+        self._field("ssh_port", "22")
+        self._test_btn = ttk.Button(body, text="测试 SSH 连接", command=self._test_ssh)
+        self._test_btn.grid(row=self._row, column=1, sticky="w", padx=(6, 0), pady=1)
+        self._test_lbl = ttk.Label(body, text="", font=F_SMALL, wraplength=340, justify="left")
+        self._test_lbl.grid(row=self._row, column=2, sticky="w", padx=6)
+        self._row += 1
+        self._sec("② 本机 dsh")
+        self._field("dash_repo", None)
+        self._field("dash_port", None)
+        self._field("dash_cmd", None)
+        self._sec("③ 隧道参数")
+        self._field("forward_ports", None)
+        self._field("lab_server", None)
+        self._field("lab_user", None)
+        self._field("lab_port", None)
+        self._field("reverse_port", None)
+        self._sec("④ 轮询与超时")
+        self._field("poll_seconds", None)
+        self._field("remote_poll_seconds", None)
+        btns = ttk.Frame(wrap)
+        btns.pack(fill="x", pady=(12, 0))
         ttk.Button(btns, text="保存", command=self._on_save).pack(side="left", padx=4)
         ttk.Button(btns, text="取消", command=self.destroy).pack(side="left", padx=4)
-        ttk.Label(self, text="local_ports / remote_tunnels 请直接编辑 config.json",
-                  font=F_SMALL, foreground="#888").grid(
-            row=len(rows) + 1, column=0, columnspan=2, sticky="w", pady=(8, 0))
-
-        # 让窗口作为对话框置顶于主窗
-        self.transient(master)
+        self.transient(self._master)
         self.grab_set()
+
+    def _sec(self, title):
+        ttk.Label(self._body, text=title, font=F_BOLD, foreground="#0af").grid(
+            row=self._row, column=0, columnspan=3, sticky="w", pady=(11, 3))
+        self._row += 1
+
+    def _field(self, key, placeholder):
+        body = self._body
+        ttk.Label(body, text=self.LABELS[key] + ":").grid(row=self._row, column=0, sticky="w", pady=1)
+        v = tk.StringVar()
+        default = self._cfg.get(key)
+        if key == "dash_cmd" and isinstance(default, list):
+            default = " ".join(default)
+        if placeholder and default in (None, ""):
+            default = placeholder
+        v.set(str(default if default is not None else ""))
+        ent = ttk.Entry(body, textvariable=v, width=38)
+        ent.grid(row=self._row, column=1, sticky="ew", padx=(6, 0), pady=1)
+        self._vars[key] = v
+        ttk.Label(body, text=self.HELP[key], font=F_SMALL, foreground="#888",
+                  wraplength=420, justify="left").grid(
+            row=self._row + 1, column=0, columnspan=3, sticky="w")
+        self._row += 2
+
+    def _apply(self, name):
+        tpl = self.TEMPLATES.get(name)
+        if not tpl:
+            return
+        for k, val in tpl.items():
+            if k in self._vars:
+                self._vars[k].set(val)
+
+    def _test_ssh(self):
+        host = self._vars["ssh_server"].get().strip()
+        user = self._vars["ssh_user"].get().strip()
+        port = self._vars["ssh_port"].get().strip() or "22"
+        if not host or not user:
+            self._test_lbl.configure(text="请先填服务器 IP 和用户名", foreground="#c33")
+            return
+        self._test_btn.configure(state="disabled")
+        self._test_lbl.configure(text="测试中…", foreground="#888")
+
+        def worker():
+            try:
+                import shutil
+                ssh = shutil.which("ssh")
+                if not ssh:
+                    raise FileNotFoundError("ssh 不在 PATH 中")
+                r = subprocess.run(
+                    [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=6",
+                     "-o", "StrictHostKeyChecking=accept-new",
+                     "-p", port, user + "@" + host, "echo ok"],
+                    capture_output=True, text=True, errors="replace", timeout=18,
+                    creationflags=subprocess.CREATE_NO_WINDOW)
+                ok = r.returncode == 0
+                if ok:
+                    msg, col = "✅ SSH 连接成功, 免密可用", "#3c3"
+                else:
+                    err = (r.stderr or r.stdout or "").strip().replace("\n", " ")[:180]
+                    msg, col = "❌ 失败 - 检查 IP/用户名/免密配置: " + err, "#c33"
+            except Exception as e:
+                msg, col = "测试异常: " + str(e)[:140], "#c33"
+            self.after(0, lambda: (self._test_lbl.configure(text=msg, foreground=col),
+                                   self._test_btn.configure(state="normal")))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_save(self):
         try:
@@ -260,10 +370,18 @@ class ConfigDialog(tk.Toplevel):
             cfg["dash_repo"] = self._vars["dash_repo"].get().strip()
             cfg["dash_port"] = int(self._vars["dash_port"].get())
             cfg["dash_cmd"] = self._vars["dash_cmd"].get().strip().split()
+            cfg["forward_ports"] = [int(x.strip()) for x in
+                                    self._vars["forward_ports"].get().split(",") if x.strip()]
             cfg["poll_seconds"] = int(self._vars["poll_seconds"].get())
             cfg["remote_poll_seconds"] = int(self._vars["remote_poll_seconds"].get())
+            cfg["lab_server"] = self._vars["lab_server"].get().strip()
+            cfg["lab_user"] = self._vars["lab_user"].get().strip()
+            lp = self._vars["lab_port"].get().strip()
+            cfg["lab_port"] = int(lp) if lp else int(self._cfg.get("lab_port", 3090))
+            rp = self._vars["reverse_port"].get().strip()
+            cfg["reverse_port"] = int(rp) if rp else int(self._cfg.get("reverse_port", 8091))
         except ValueError:
-            messagebox.showerror("输入错误", "端口/轮询间隔必须为整数。", parent=self)
+            messagebox.showerror("输入错误", "端口/轮询间隔/端口列表必须为整数.", parent=self)
             return
         self.result = cfg
         self.destroy()
