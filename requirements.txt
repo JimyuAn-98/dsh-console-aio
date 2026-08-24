@@ -1,0 +1,6 @@
+# dsh-tunnel-console 零运行时依赖：仅使用 Python 标准库（tkinter 随 Python 自带）。
+#
+# 若要打包成单个 exe（可选），安装 dev 依赖后运行 build_win.bat:
+#   pip install pyinstaller
+#
+# pyinstaller>=6.0
