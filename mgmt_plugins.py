@@ -141,16 +141,17 @@ class PluginDialog(tk.Toplevel):
                              "#c33")
 
     def _merge_entries(self, profile):
-        # 汇总插件列表: 基线 = read_profile_package(profile)['bundles'](已装插件),
+        # 汇总插件列表: 基线 = read_profile_package(profile) 的 bundles 字段(已装插件),
         # 版本取 dependencies; cordis.patch.yml 叠加 disabled 标记 / insert 新增。
         pkg = dsh_data.read_profile_package(profile)
         deps = pkg.get("dependencies") or {}
         out = []
         index = {}
         for bundle in pkg.get("bundles") or []:
+            # bundle 行: id/name 就是 bundle 名(patch 里 - id: X 的 X 也是 bundle 名, 直接可覆盖)
             name = str(bundle)
             row = {"id": name, "name": name,
-                   "version": deps.get(name, ""), "_src": "package.json"}
+                   "version": deps.get(name, ""), "_src": "bundle"}
             out.append(row)
             index.setdefault(name, row)
         for e in dsh_data.read_cordis_patch(profile) or []:
@@ -177,4 +178,248 @@ class PluginDialog(tk.Toplevel):
                 index[eid].update({k: v for k, v in e.items() if k != "_src"})
                 index[eid]["_src"] = "patch"
                 if not index[eid].get("version"):
-                    in
+                    index[eid]["version"] = deps.get(eid, "")
+            else:
+                # patch 里的其它行(如禁用不在 bundles 中的插件)也展示
+                row = dict(e)
+                row["_src"] = "patch"
+                row.setdefault("name", eid)
+                row.setdefault("version", deps.get(eid, ""))
+                out.append(row)
+                index[eid] = row
+        return out
+
+    def _refresh(self):
+        profile = self._profile_var.get().strip()
+        if not profile:
+            return
+        self._tree.delete(*self._tree.get_children())
+        self._entries = []
+        self._tree.tag_configure("disabled", foreground="#c33")
+        for i, e in enumerate(self._merge_entries(profile)):
+            iid = "row%d" % i
+            self._entries.append((iid, e))
+            status = "已停用" if e.get("disabled") else "已启用"
+            src = "cordis.patch.yml" if e.get("_src") == "patch" else "bundle"
+            self._tree.insert(
+                "", "end", iid=iid,
+                values=(status, e.get("name") or e.get("id") or "?",
+                        e.get("version") or "", src),
+                tags=("disabled",) if e.get("disabled") else ())
+        self._set_status("共 %d 个插件" % len(self._entries))
+        self._on_select()
+
+    def _selected_entry(self):
+        # 当前 Treeview 选中行对应的 entry dict; 未选中返回 None
+        sel = self._tree.selection()
+        if not sel:
+            return None
+        iid = sel[0]
+        for row_iid, e in self._entries:
+            if row_iid == iid:
+                return e
+        return None
+
+    def _on_select(self, _event=None):
+        # 根据是否选中行控制 停用/启用/卸载 按钮
+        st = "normal" if self._selected_entry() is not None else "disabled"
+        for btn in (self._disable_btn, self._enable_btn, self._remove_btn):
+            btn.configure(state=st)
+
+    def _set_status(self, text, color="#888"):
+        if self._status_lbl is not None:
+            try:
+                self._status_lbl.configure(text=text, foreground=color)
+            except tk.TclError:
+                pass    # 窗口已关闭, 忽略
+
+    def _log(self, msg, tag=""):
+        # 打到主界面日志区; 主窗口缺失或已销毁时静默
+        m = self._master
+        if m is not None and hasattr(m, "log"):
+            try:
+                m.log(msg, tag)
+            except Exception:
+                pass    # 主窗口已销毁等异常, 日志属附加信息, 不阻断操作
+
+    # ── 安装 / 卸载(官方命令) ─────────────────────────
+    def _install(self):
+        profile = self._profile_var.get().strip()
+        pkg = self._pkg_var.get().strip()
+        if not profile:
+            self._set_status("请先选择 Profile", "#c33")
+            return
+        if not pkg:
+            messagebox.showwarning("缺少包名", "请填写要安装的 npm 包名。", parent=self)
+            return
+        cmd = dsh_data.plugin_cmd(profile, "add", pkg)
+        ok = messagebox.askyesno(
+            "安装插件",
+            "将执行：\n  " + " ".join(cmd) + "\n\n是否继续？",
+            parent=self)
+        if not ok:
+            return
+        self._run_stream(cmd, "安装插件 " + pkg)
+
+    def _remove(self):
+        e = self._selected_entry()
+        if e is None:
+            return
+        profile = self._profile_var.get().strip()
+        eid = e.get("id")
+        pkg = e.get("name") or eid
+        if not profile or not pkg:
+            return
+        if self._is_protected(eid):
+            messagebox.showwarning("受保护", "这是 dsh 宿主基础插件，不允许卸载。", parent=self)
+            return
+        cmd = dsh_data.plugin_cmd(profile, "remove", pkg)
+        ok = messagebox.askyesno(
+            "卸载插件",
+            "将执行：\n  " + " ".join(cmd) + "\n\n卸载会移除插件文件与相关行，是否继续？",
+            parent=self)
+        if not ok:
+            return
+        self._run_stream(cmd, "卸载插件 " + pkg)
+
+    def _run_stream(self, cmd, desc):
+        # 后台线程流式执行官方命令(经主界面 _stream_cmd), 完成后回主线程刷新列表。
+        self._set_status("执行中: " + " ".join(cmd), "#c90")
+        def worker():
+            m = self._master
+            if not (m is not None and hasattr(m, "_stream_cmd") and hasattr(m, "log")):
+                # 无主界面时无法流式输出, 明确提示需从主界面打开
+                def hint():
+                    try:
+                        messagebox.showinfo(
+                            "无法执行",
+                            "请从主界面(dsh 控制台)打开插件管理，命令才会流式输出到主日志区。\n\n" +
+                            " ".join(cmd), parent=self)
+                    except tk.TclError:
+                        pass    # 窗口已关闭, 忽略
+                try:
+                    self.after(0, hint)
+                except tk.TclError:
+                    pass    # 窗口已关闭, 忽略
+                return
+            try:
+                m.log("[插件] " + desc + " 开始: " + " ".join(cmd), "warn")
+                ok = m._stream_cmd(cmd)
+            except Exception as ex:
+                ok = False
+                try:
+                    m.log("  [插件] 执行异常: " + str(ex), "err")
+                except Exception:
+                    pass    # 主窗口可能已销毁, 日志失败不阻断
+            def done():
+                try:
+                    self._refresh()
+                    self._set_status(
+                        "已" + ("完成" if ok else "失败") + "(详见主界面日志区)",
+                        "#3c3" if ok else "#c33")
+                except tk.TclError:
+                    pass    # 窗口已关闭, 忽略
+            try:
+                self.after(0, done)
+            except tk.TclError:
+                pass    # 窗口已关闭, 忽略
+        threading.Thread(target=worker, daemon=True).start()
+
+    # ── 停用 / 启用(patch 层) ─────────────────────────
+    def _disable(self):
+        e = self._selected_entry()
+        if e is None:
+            return
+        profile = self._profile_var.get().strip()
+        eid = e.get("id")
+        name = e.get("name") or eid
+        if not profile or not eid:
+            return
+        if self._is_protected(eid):
+            messagebox.showwarning("受保护", "这是 dsh 宿主基础插件，停用会破坏插件链本身，已拒绝。",
+                                   parent=self)
+            return
+        if e.get("disabled"):
+            messagebox.showinfo("已停用", "「%s」已处于停用状态。" % name, parent=self)
+            return
+        ok = messagebox.askyesno(
+            "停用插件",
+            "将把「%s」标记为已停用：\n写入 %s/cordis.patch.yml(写前自动备份，HMR 约 1 秒生效)。\n\n是否继续？"
+            % (name, profile),
+            parent=self)
+        if not ok:
+            return
+        self._set_disabled(profile, eid, True)
+
+    def _enable(self):
+        e = self._selected_entry()
+        if e is None:
+            return
+        profile = self._profile_var.get().strip()
+        eid = e.get("id")
+        name = e.get("name") or eid
+        if not profile or not eid:
+            return
+        if not e.get("disabled"):
+            messagebox.showinfo("未停用", "「%s」当前未停用，无需启用。" % name, parent=self)
+            return
+        ok = messagebox.askyesno(
+            "启用插件",
+            "将移除「%s」的 disabled 标记：\n写入 %s/cordis.patch.yml(写前自动备份，HMR 约 1 秒生效)。\n\n是否继续？"
+            % (name, profile),
+            parent=self)
+        if not ok:
+            return
+        self._set_disabled(profile, eid, False)
+
+    def _set_disabled(self, profile, eid, disabled):
+        # 读 patch → 增/改 disabled 标记 → dsh_data.write_cordis_patch(内部先 .bak 备份)。
+        # 停用: 无同名行则追加 `- id: X` + `disabled: true`; 有则原地置 True。
+        # 启用: 移除该行的 disabled 字段; 若只剩 id 则整行删除, 保持 patch 干净。
+        patch = dsh_data.read_cordis_patch(profile) or []
+        new_rows = []
+        touched = False
+        for row in patch:
+            if not isinstance(row, dict) or row.get("id") != eid:
+                new_rows.append(row)
+                continue
+            touched = True
+            row2 = dict(row)
+            if disabled:
+                row2["disabled"] = True
+                new_rows.append(row2)
+            else:
+                row2.pop("disabled", None)
+                if len(row2) > 1:
+                    new_rows.append(row2)
+                # 只剩 id 的裸行直接删除
+        if disabled and not touched:
+            new_rows.append({"id": eid, "disabled": True})
+        try:
+            dsh_data.write_cordis_patch(profile, new_rows)
+        except OSError as ex:
+            messagebox.showerror("写入失败", "无法写 cordis.patch.yml：%s" % ex, parent=self)
+            return
+        self._log("[插件] 已%s %s (cordis.patch.yml)" % ("停用" if disabled else "启用", eid), "ok")
+        self._set_status("已" + ("停用" if disabled else "启用") + " " + eid, "#3c3")
+        self._refresh()
+
+    # ── 其它 ──────────────────────────────────────────
+    def _is_protected(self, eid):
+        # 宿主基础设施行拒绝停用/卸载
+        return bool(eid and _PROTECTED_IDS.match(str(eid)))
+
+    def _open_patch(self):
+        profile = self._profile_var.get().strip()
+        if not profile:
+            return
+        p = os.path.join(dsh_data.profiles_dir(), profile, "cordis.patch.yml")
+        if not os.path.isfile(p):
+            messagebox.showinfo("文件不存在",
+                                "该 profile 还没有 cordis.patch.yml。\n可以先执行一次停用/启用操作生成。",
+                                parent=self)
+            return
+        try:
+            os.startfile(p)
+        except Exception as ex:
+            messagebox.showerror("无法打开", str(ex), parent=self)
