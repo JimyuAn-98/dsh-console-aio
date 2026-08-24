@@ -520,13 +520,19 @@ class EnvDialog(tk.Toplevel):
     }
 
     def __init__(self, master):
-        super().__init__(master)
-        self._master = master
+        # master 可以是 Dashboard 实例(推荐) 或 Tk 根窗口
+        if hasattr(master, "root"):
+            tk_master = master.root
+            self._master = master
+        else:
+            tk_master = master
+            self._master = None
+        super().__init__(tk_master)
         self.title("环境检查")
         self.configure(padx=15, pady=12)
         self._rows = {}
         self._build()
-        self.transient(master)
+        self.transient(tk_master)
         self.grab_set()
         self._refresh()
 
@@ -621,22 +627,39 @@ class EnvDialog(tk.Toplevel):
                 messagebox.showinfo(label + " " + name, payload, parent=self)
 
     def _run_cmd(self, cmd, desc):
+        # 后台线程执行, 输出流式打到主界面日志区(复用 Dashboard._stream_cmd), 完成弹结果框。
         def worker():
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
-                                   timeout=600, creationflags=subprocess.CREATE_NO_WINDOW)
-                tail = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()[-600:]
-                head = "完成" if r.returncode == 0 else "失败 (code=%s)" % r.returncode
-                body = head + "\n\n" + tail
+            m = self._master
+            use_stream = hasattr(m, "_stream_cmd") and hasattr(m, "log")
+            if use_stream:
+                m.log("[环境] " + desc + " 开始执行...", "warn")
                 try:
-                    self.after(0, lambda: messagebox.showinfo("结果: " + desc, body, parent=self))
+                    ok = m._stream_cmd(cmd)
+                except Exception as e:
+                    ok = False
+                    m.log("  [环境] 执行异常: " + str(e), "err")
+                try:
+                    self.after(0, lambda: messagebox.showinfo(
+                        "结果: " + desc, "已" + ("完成" if ok else "失败") + "（详见主界面日志区）", parent=self))
                 except tk.TclError:
                     pass
-            except Exception as e:
+            else:
+                # 容错回退: 无主界面时用 subprocess 捕获
                 try:
-                    self.after(0, lambda: messagebox.showerror("执行出错", str(e), parent=self))
-                except tk.TclError:
-                    pass
+                    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                                       timeout=600, creationflags=subprocess.CREATE_NO_WINDOW)
+                    tail = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()[-600:]
+                    head = "完成" if r.returncode == 0 else "失败 (code=%s)" % r.returncode
+                    body = head + "\n\n" + tail
+                    try:
+                        self.after(0, lambda: messagebox.showinfo("结果: " + desc, body, parent=self))
+                    except tk.TclError:
+                        pass
+                except Exception as e:
+                    try:
+                        self.after(0, lambda: messagebox.showerror("执行出错", str(e), parent=self))
+                    except tk.TclError:
+                        pass
         threading.Thread(target=worker, daemon=True).start()
 
     def _open_url(self, url):
@@ -925,7 +948,7 @@ class Dashboard:
         self.set_status("更新完成")
 
     def _open_env(self):
-        EnvDialog(self.root)
+        EnvDialog(self)
     # ── 安装 dsh ──────────────────────────
     def _open_install(self):
         dlg = InstallDialog(self.root)
