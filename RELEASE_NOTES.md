@@ -15,6 +15,11 @@
   - 自动环境预检（git / node / npm / pnpm 是否可用，缺失会明确提示）
   - 后台流式执行 clone → pnpm install → pnpm build
   - 安装完成后自动把 dash_repo 写入 config.json（重启生效）
+- **环境检查独立窗口（运维辅助）**
+  - 顶部新增"环境"按钮，独立窗口查看 git/node/npm/pnpm 版本
+  - 显示推荐基准版本（以作者开发机实测为准）
+  - 每个工具带"详情"引导：更新用官方命令，卸载引导到 Windows 设置-应用-安装的应用（ms-settings:appsfeatures）
+  - 安装 dsh 的目标目录支持系统文件夹选择弹窗（浏览…）
 
 ## v0.1.0 (草案)
 

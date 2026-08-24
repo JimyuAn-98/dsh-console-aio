@@ -25,7 +25,7 @@ import socket
 import threading
 import subprocess
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
 import tunnel_mgr  # 纯 Python 隧道管理器
 
@@ -417,7 +417,10 @@ class InstallDialog(tk.Toplevel):
                   font=F_SMALL, foreground="#888").pack(anchor="w")
         # 目标目录
         ttk.Label(wrap, text="安装到的目标目录（如 C:/Users/你的名字/dsh）:").pack(anchor="w", pady=(10, 0))
-        ttk.Entry(wrap, textvariable=self._dir, width=64).pack(anchor="w", fill="x")
+        drow = ttk.Frame(wrap)
+        drow.pack(anchor="w", fill="x")
+        ttk.Entry(drow, textvariable=self._dir, width=54).pack(side="left", fill="x", expand=True)
+        ttk.Button(drow, text="浏览…", command=self._browse_dir).pack(side="left", padx=4)
         ttk.Label(wrap, text="留空则默认安装到用户主目录下的 dsh 文件夹。",
                   font=F_SMALL, foreground="#888").pack(anchor="w")
         # 环境预检
@@ -449,6 +452,14 @@ class InstallDialog(tk.Toplevel):
             self.after(0, lambda: self._env_lbl.configure(text=text))
         threading.Thread(target=worker, daemon=True).start()
 
+    def _browse_dir(self):
+        from tkinter import filedialog
+        start = self._dir.get().strip() or os.path.expanduser("~")
+        chosen = filedialog.askdirectory(title="选择 dsh 安装目录", initialdir=start,
+                                         parent=self)
+        if chosen:
+            self._dir.set(chosen)
+
     def _start(self):
         url = self._url.get().strip()
         target = self._dir.get().strip()
@@ -459,6 +470,112 @@ class InstallDialog(tk.Toplevel):
         target = target or os.path.join(os.path.expanduser("~"), "dsh")
         self.result = (url, target)
         self.destroy()
+class EnvDialog(tk.Toplevel):
+    # 独立"环境检查"窗口: 展示 git/node/npm/pnpm 版本与推荐基准, 提供更新/卸载引导。
+
+    TOOLS = [
+        ("git",  "git",  ["git", "--version"]),
+        ("node", "node", ["node", "--version"]),
+        ("npm",  "npm",  ["npm.cmd", "--version"]),
+        ("pnpm", "pnpm", ["pnpm.cmd", "--version"]),
+    ]
+    RECOMMENDED = {
+        "git":  ">=2.x",
+        "node": ">=20 (作者机 v24 +1)",
+        "npm":  ">=10 (作者机 11 +1)",
+        "pnpm": ">=8 (作者机 11 +1)",
+    }
+
+    def __init__(self, master):
+        super().__init__(master)
+        self._master = master
+        self.title("环境检查")
+        self.configure(padx=15, pady=12)
+        self._rows = {}
+        self._build()
+        self.transient(master)
+        self.grab_set()
+        self._refresh()
+
+    def _build(self):
+        wrap = ttk.Frame(self)
+        wrap.pack(fill="both", expand=True)
+        ttk.Label(wrap, text="开发环境检查（git / node / npm / pnpm）",
+                  font=F_BOLD).pack(anchor="w", pady=(0, 6))
+        table = ttk.Frame(wrap)
+        table.pack(fill="x")
+        for j, t in enumerate(("工具", "当前版本", "推荐基准", "状态", "")):
+            ttk.Label(table, text=t, font=F_BOLD, width=12, anchor="w").grid(row=0, column=j, padx=2)
+        for i, (key, name, _cmd) in enumerate(self.TOOLS):
+            r = i + 1
+            ttk.Label(table, text=name, width=12, anchor="w").grid(row=r, column=0, sticky="w", pady=2)
+            ver = ttk.Label(table, text="...", width=12, anchor="w")
+            ver.grid(row=r, column=1, sticky="w", padx=2)
+            ttk.Label(table, text=self.RECOMMENDED.get(key, ""), width=16, anchor="w").grid(
+                row=r, column=2, sticky="w", padx=2)
+            status = ttk.Label(table, text="", width=8, anchor="w")
+            status.grid(row=r, column=3, sticky="w", padx=2)
+            ttk.Button(table, text="详情", width=6,
+                       command=lambda k=key: self._actions(k)).grid(row=r, column=4, padx=2)
+            self._rows[key] = (ver, status)
+        ttk.Label(wrap, text="点“详情”查看某工具的更新/卸载引导。",
+                  font=F_SMALL, foreground="#888").pack(anchor="w", pady=(12, 0))
+        ttk.Button(wrap, text="关闭", command=self.destroy).pack(anchor="e", pady=(12, 0))
+
+    def _get_version(self, cmd):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                               timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
+            return (r.stdout or r.stderr or "").strip().splitlines()[0] if (r.stdout or r.stderr) else None
+        except Exception:
+            return None
+
+    def _refresh(self):
+        def worker():
+            res = {}
+            for key, _name, cmd in self.TOOLS:
+                res[key] = self._get_version(cmd)
+            try:
+                self.after(0, lambda: self._apply(res))
+            except tk.TclError:
+                pass   # 窗口已关闭, 忽略
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply(self, res):
+        for key, (ver_lbl, st_lbl) in self._rows.items():
+            v = res.get(key)
+            if v is None:
+                ver_lbl.configure(text="未安装", foreground="#c33")
+                st_lbl.configure(text="缺失", foreground="#c33")
+            else:
+                ver_lbl.configure(text=v, foreground="#000")
+                st_lbl.configure(text="OK", foreground="#3c3")
+
+    def _actions(self, key):
+        tips = {
+            "git":  ("git",
+                     "更新: git update-git-for-windows 自升级, 或到 git-scm.com 下载新版。\n卸载: 在 Windows 设置 - 应用 - 安装的应用 找到 Git 卸载。"),
+            "node": ("Node.js (npm 随附)",
+                     "更新: 建议用 nvm-windows 或到 nodejs.org 下载 LTS。\n卸载: Windows 设置 - 应用 - 安装的应用 里卸载 Node.js。"),
+            "npm":  ("npm (随 Node.js)",
+                     "更新: npm install -g npm@latest。\n卸载: 随 Node.js 一起卸载。"),
+            "pnpm": ("pnpm",
+                     "更新: pnpm self-update, 或 npm i -g pnpm@latest。\n卸载: Windows 设置 - 应用 - 安装的应用。"),
+        }
+        name, tip = tips.get(key, (key, ""))
+        btn = messagebox.askyesnocancel(
+            name + " 操作",
+            tip + "\n\n是否打开 Windows“设置 - 应用 - 安装的应用”页面进行管理？",
+            parent=self)
+        if btn is True:
+            self._open_apps_page()
+
+    def _open_apps_page(self):
+        try:
+            os.startfile("ms-settings:appsfeatures")
+        except Exception as e:
+            messagebox.showerror("无法打开", str(e), parent=self)
+
 class Dashboard:
     def __init__(self, root):
         self.root = root
@@ -485,6 +602,7 @@ class Dashboard:
         ttk.Label(top, text="dsh 控制台", font=("Segoe UI", 16, "bold")).pack(side="left")
         ttk.Label(top, text=f"  本机轮询 {POLL_SECONDS}s · SSH直查 {REMOTE_POLL_SECONDS}s",
                   font=F_SMALL, foreground="#666").pack(side="left")
+        ttk.Button(top, text="环境", command=self._open_env).pack(side="right", padx=(0, 6))
         ttk.Button(top, text="安装 dsh", command=self._open_install).pack(side="right", padx=(0, 6))
         ttk.Button(top, text="配置", command=self._open_config).pack(side="right", padx=(0, 6))
         ttk.Button(top, text="立即刷新", command=self._force_refresh).pack(side="right")
@@ -732,6 +850,8 @@ class Dashboard:
         self.log("  [更新] 完成 ✓ 访问 http://127.0.0.1:%d" % DASH_PORT, "ok")
         self.set_status("更新完成")
 
+    def _open_env(self):
+        EnvDialog(self.root)
     # ── 安装 dsh ──────────────────────────
     def _open_install(self):
         dlg = InstallDialog(self.root)
@@ -761,12 +881,12 @@ class Dashboard:
                 return
         # 2) install
         self.log("[安装] 步骤2/3: pnpm install", "warn")
-        if not self._stream_cmd(["pnpm", "install"], cwd=target):
+        if not self._stream_cmd(["pnpm.cmd", "install"], cwd=target):
             self.set_status("安装失败: pnpm install")
             return
         # 3) build
         self.log("[安装] 步骤3/3: pnpm run build", "warn")
-        if not self._stream_cmd(["pnpm", "run", "build"], cwd=target):
+        if not self._stream_cmd(["pnpm.cmd", "run", "build"], cwd=target):
             self.set_status("安装失败: pnpm run build")
             return
         # 4) 写 config.dash_repo
