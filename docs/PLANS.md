@@ -153,6 +153,11 @@
 - **运行时监控**（已有健康监控的深化）：dsh 进程 PID/端口/启动时间；web 日志流；sessions 存储占用。
 - **模型/Provider 配置**：settings.yaml 的 agent-default-model（provider/model/reasoningEffort）+ llm-pi-ai providers
   - 查看当前默认模型；切换 provider/模型（改 settings.yaml，备份后写）。
+- **模型用量 / 价格统计** [优先]：数据源 = 解压全部 ~/.dsh/sessions/*/session-*/session.jsonl.zstd
+  - `request/header` 事件提供 provider + model；`assistant/chunk`(type=usage) 提供 inputTokens / outputTokens
+  - 聚合：按模型 / 按天 / 按会话；显示 token 总量、调用次数
+  - 价格估算：内置主流模型单价表（可编辑），输出估算费用
+  - 后台线程解压扫描（~/.dsh/sessions 约几十 MB 可控），结果缓存
 
 ### D. 安全与运维（新增发现）
 - **凭据管理**：.credentials.yaml —— 只做"是否存在/最后修改时间"提示，不明文展示密钥；引导用户自行编辑。
@@ -168,5 +173,5 @@
 2. Agent 模式管理
 3. Profile + 插件管理（dsh plugin 命令现成）
 4. 任务看板
-5. 主题 + LLM/模型配置（agent-default-model 切换 + 自定义 provider + 密钥环境变量引导）
+5. 主题 + LLM/模型配置（切换默认模型 + 自定义 provider + 用量价格统计 + 密钥引导）
 6. 备份/迁移 + 凭据提示 + 其余只读项
