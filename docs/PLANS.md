@@ -70,3 +70,51 @@
 - 已 force push 覆盖远程 main（83c483d → 7e4d209）。
 - 注意：曾 clone 过旧仓库的人本地仍有旧提交副本，无法远程抹除；GitHub 侧旧对象会在 GC 后移除。
 - 备份：本地 dsh-backup-history/.git-*（完整旧 .git 备份）。
+
+---
+
+## 6. 宏大计划：进化成"dsh 控制台"（dsh Console） [规划中]
+
+> 用户愿景：从"隧道管理工具"进化为专为 dsh 设计的控制台软件，帮小白用户上手 dsh。
+> 2025-08-25 调研了本地 deepseek-harness checkout，确认以下机制全部真实存在，路线可落地。
+
+### 调研结论（机制依据）
+
+- **Profile 机制**：`dsh --profile <name>` 是真实命令（`dsh web` 等价于 `dsh --profile web`）。
+  profile 位于 `~/.dsh/profiles/<name>/`，包含：cordis.yml（配置树）、cordis.patch.yml（补丁）、package.json + node_modules + pnpm-workspace.yaml（独立依赖）。
+  → profile 管理 = 列出/切换/创建 ~/.dsh/profiles 下的目录，用 `dsh --profile <name>` 启动。
+- **插件机制**：cordis.yml 用 `insert:` 行加载插件（id + npm 包名，如 @deepseek-ai/dsh-cordis-host-runner）；
+  profile 目录有 `.dsh-market/`（插件市场目录）；插件安装 = 改 profile 的 package.json + cordis.yml insert + pnpm install。
+  → 插件管理 = 读取/编辑 cordis.yml（YAML 增删 insert 行）+ 管理 profile 依赖。
+- **主题机制**：~/.dsh/settings.yaml 已有 UI 配置项（skin-background、dsh-better-sidebar、ui-onboarding 等）；
+  web 主题由 ui-theme 包（--dsw-* CSS token，light/dark）实现。
+  → 主题管理 = 读写 settings.yaml 的 UI 配置 + 提供预览。
+- **运行时监控**：dsh 运行时产物在 ~/.dsh/sessions/（会话）、storages/（存储）、remote-web-ui（远端访问配置）。
+  → 运行时监控 = 进程状态 + 3080 端口 + web 日志流 + 会话/任务看板。
+
+### 分阶段路线（小步快跑）
+
+- **阶段 0（已完成）**：隧道管理 + 健康监控 + 一键安装 dsh + 环境检查。
+- **阶段 1：dsh 运行时监控**
+  - dsh 进程状态卡片（PID / 启动时间 / 端口），web 日志实时流（复用 _stream_cmd 思想，tail 日志文件）
+  - 会话/存储占用概览
+- **阶段 2：dsh profile 管理**
+  - 列出 ~/.dsh/profiles 下的 profile，显示当前使用的 profile
+  - 一键切换默认 profile（写 config.json 或 settings.yaml），复制/新建 profile
+- **阶段 3：dsh 插件管理**
+  - 解析当前 profile 的 cordis.yml，列出已加载插件
+  - 从 .dsh-market 或 npm 搜索插件 → 安装（改 cordis.yml + package.json + pnpm install，流式日志）→ 卸载/启停
+  - 危险操作确认 + 配置备份（复制 cordis.yml）
+- **阶段 4：dsh web 主题管理**
+  - 读 settings.yaml 的 UI 配置项，提供主题切换（light/dark、皮肤开关）
+  - 主题预览（打开 web UI 或截图级预览）
+- **阶段 5：小白引导**
+  - 首次使用向导（检测环境 → 装 dsh → 配置中转 → 建隧道 → 打开 web）
+  - 一键诊断（环境/SSH 免密/端口/进程逐项检查并报告）
+  - FAQ 内嵌
+
+### 工程约束
+- 保持零依赖（tkinter）；YAML 解析用 PyYAML 会破坏零依赖 → 自己写最小 YAML 子集解析器，或仅在存在 PyYAML 时启用（回退只读）。
+- 所有写操作前备份（cordis.yml / settings.yaml / config.json 复制 .bak）。
+- 敏感信息（IP/用户名/凭据）只在本机 ~/.dsh 与 gitignored 文件，不进仓库。
+- 每个阶段先出"只读展示"，确认后再加"写操作"。

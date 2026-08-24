@@ -126,13 +126,19 @@
 
 ---
 
-## Roadmap（可能的下一步）
+## Roadmap（dsh 控制台进化路线）
 - [x] 配置外置到 config.json（IP/用户/端口/轮询）
 - [x] 全部卡片 Python 化（tunnel_mgr.py + 纯 Python 更新）
 - [x] 旧 .ps1 收进 legacy/
+- [x] 一键安装 dsh + 环境检查（更新/安装/卸载引导）
 - [ ] 打包成单文件 exe（PyInstaller）
 - [ ] 配置热重载（保存后无需重启）
 - [ ] 多套拓扑配置切换
+- [ ] **dsh 运行时监控**：dsh 进程状态 / CPU 内存 / web 日志实时流
+- [ ] **dsh 插件管理**：插件列表 / 安装 / 卸载 / 启停
+- [ ] **dsh profile 管理**：多套 dsh 配置方案一键切换
+- [ ] **dsh web 主题管理**：主题预览与切换
+- [ ] **小白引导**：首次使用向导 / 诊断助手 / 常见问题
 
 ## License
 MIT © 2025 dsh-tools
@@ -143,10 +149,12 @@ MIT © 2025 dsh-tools
 
 # dsh-tunnel-console (English)
 
-A **visual SSH-tunnel manager + service health monitor** for Windows. Wrap the command-line chore of starting/stopping SSH tunnels and monitoring services into one zero-dependency GUI.
+A **visual SSH-tunnel manager + service health monitor + dsh ops console** for Windows. It wraps the command-line chores of starting/stopping SSH tunnels, monitoring services, and installing/updating dsh into one zero-dependency GUI.
 
 ## Features
 - One-click control: local dsh GUI start/stop, three SSH tunnels (start/persist/stop), one-click dsh update
+- **One-click dsh install**: repo URL (default official deepseek-harness) + target dir → env pre-check → clone → pnpm install → build → auto-write config
+- **Environment check window**: git/node/npm/pnpm versions vs. recommended baseline, with Update / Install / Uninstall actions (confirm-before-run)
 - Two-layer health monitor: local ports + remote reverse-tunnels queried via SSH
 - External config: IP / user / repo path / ports / poll intervals all in config.json
 - Zero dependencies: pure Python stdlib (tkinter)
@@ -155,6 +163,23 @@ A **visual SSH-tunnel manager + service health monitor** for Windows. Wrap the c
 - Double-click 启动dsh控制台.bat (uses conda base pythonw first, falls back to PATH), or run:
       python dsh-tunnel-console.py
 - Requires Python 3 (Miniconda base recommended; the pythonw path is editable at the top of the .bat).
+
+## One-click dsh install
+Click the **Install dsh** button on the top bar: enter the git repo URL (default: official deepseek-harness) and target directory. The tool will:
+1. Pre-check environment (git / node / npm / pnpm; missing ones are called out)
+2. git clone into the target dir
+3. pnpm install
+4. pnpm run build
+5. Auto-write the target dir into config.json's dash_repo (takes effect after restart)
+
+The target directory can also be picked via the native Windows folder dialog (**Browse…**).
+
+## Environment check
+Click **Environment** on the top bar: a standalone window lists git / node / npm / pnpm with the current version, a recommended baseline (based on the author's dev machine), and an OK/missing status. Each tool row has three buttons:
+- **Update** — runs the official updater (e.g. `git update-git-for-windows`, `npm install -g npm@latest`, `pnpm self-update`)
+- **Install** — opens the official download page or runs the install command
+- **Uninstall** — CLI uninstall for npm/pnpm (`npm uninstall -g …`); system Apps & features page for git/node
+Every action shows what it will run and asks for confirmation first; output streams into the main log area.
 
 ## Configuration
 All tunables live in config.json (also editable via the **Config** button; save takes effect after restart). See the Chinese section above for the field table.
@@ -165,6 +190,19 @@ All tunables live in config.json (also editable via the **Config** button; save 
 
 ## Security
 - Relay ports bind loopback only by default; do not expose the unauthenticated GUI to public internet (remote-code-execution risk) unless you explicitly accept it.
+
+## Roadmap (dsh Console evolution)
+- [x] External config (config.json)
+- [x] All cards in pure Python
+- [x] One-click dsh install + environment check (update/install/uninstall)
+- [ ] Package as single-file exe (PyInstaller)
+- [ ] Config hot-reload
+- [ ] Multiple topology profiles
+- [ ] dsh runtime monitoring (process / CPU-RAM / live web logs)
+- [ ] dsh plugin manager (list / install / uninstall / enable-disable)
+- [ ] dsh profile manager (switch between config sets)
+- [ ] dsh web theme manager (preview & switch)
+- [ ] Beginner onboarding (first-run wizard / diagnostics / FAQ)
 
 ## License
 MIT © 2025 dsh-tools
