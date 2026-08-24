@@ -20,8 +20,9 @@
   - 显示推荐基准版本（直接写版本号：git 2.53 / node v24.19 / npm 11.17 / pnpm 11.7）
   - 每个工具带 更新/安装/卸载 三按钮：点击先说明将执行什么，确认后才执行
   - 更新：git 自带升级器 / npm i -g npm@latest / pnpm add -g pnpm@latest；node 提示用 nvm 或官网
+  - 更新/安装 pnpm 时自动把全局 bin 目录注入 PATH（解决新版 pnpm 的 PATH 检查报错）
   - 安装：git/node 打开官网下载页；pnpm 用 npm i -g pnpm；npm 随 Node.js
-  - 卸载：统一引导到 Windows 设置-应用-安装的应用（ms-settings:appsfeatures）
+  - 卸载：git/node 引导到 Windows 设置-应用-安装的应用；npm/pnpm 用命令行卸载（npm uninstall -g）
   - 安装 dsh 的目标目录支持系统文件夹选择弹窗（浏览…）
   - 安全：早期含真实 IP 的历史提交已用 git-filter-repo 重写脱敏并 force push
 

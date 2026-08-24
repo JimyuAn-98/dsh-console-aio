@@ -497,25 +497,25 @@ class EnvDialog(tk.Toplevel):
             name="Git",
             install=[("browser", "https://git-scm.com/download/win", "打开官网下载 Git 安装包")],
             update=[("cmd", ["git", "update-git-for-windows"], "运行 Git 自带升级器 (git update-git-for-windows)")],
-            uninstall="在 Windows 设置 - 应用 - 安装的应用 里卸载 Git",
+            uninstall=[("page", "ms-settings:appsfeatures", "打开 Windows 设置 - 应用 - 安装的应用，找到 Git 卸载")],
         ),
         "node": dict(
             name="Node.js",
             install=[("browser", "https://nodejs.org/zh-cn/download", "打开官网下载 Node.js LTS 安装包")],
             update=[("hint", "Node.js 无官方自升级命令。\n建议用 nvm-windows 管理版本, 或到官网 https://nodejs.org 下载新版安装包。")],
-            uninstall="在 Windows 设置 - 应用 - 安装的应用 里卸载 Node.js",
+            uninstall=[("page", "ms-settings:appsfeatures", "打开 Windows 设置 - 应用 - 安装的应用，找到 Node.js 卸载")],
         ),
         "npm": dict(
             name="npm",
             install=[("hint", "npm 随 Node.js 一起安装, 装好 Node.js 即自带 npm。")],
             update=[("cmd", ["npm.cmd", "install", "-g", "npm@latest"], "npm install -g npm@latest")],
-            uninstall="npm 随 Node.js 一起卸载",
+            uninstall=[("cmd", ["npm.cmd", "uninstall", "-g", "npm"], "npm uninstall -g npm（移除 npm 自身，Node.js 保留）")],
         ),
         "pnpm": dict(
             name="pnpm",
             install=[("cmd", ["npm.cmd", "install", "-g", "pnpm"], "npm install -g pnpm")],
             update=[("cmd", ["pnpm.cmd", "add", "-g", "pnpm@latest"], "pnpm add -g pnpm@latest")],
-            uninstall="在 Windows 设置 - 应用 - 安装的应用 里卸载 pnpm",
+            uninstall=[("cmd", ["npm.cmd", "uninstall", "-g", "pnpm"], "npm uninstall -g pnpm（卸载全局 pnpm 包）")],
         ),
     }
 
@@ -601,14 +601,6 @@ class EnvDialog(tk.Toplevel):
         if ops is None:
             return
         name = ops["name"]
-        if kind == "uninstall":
-            ok = messagebox.askyesno(
-                "卸载 " + name,
-                "将卸载 " + name + "。\n" + ops["uninstall"] + "\n\n是否打开系统卸载入口？",
-                parent=self)
-            if ok:
-                self._open_apps_page()
-            return
         plan = ops.get(kind) or []
         if not plan:
             return
@@ -623,6 +615,8 @@ class EnvDialog(tk.Toplevel):
                 self._run_cmd(payload, desc)
             elif typ == "browser":
                 self._open_url(payload)
+            elif typ == "page":
+                self._open_apps_page()
             elif typ == "hint":
                 messagebox.showinfo(label + " " + name, payload, parent=self)
 
@@ -634,7 +628,14 @@ class EnvDialog(tk.Toplevel):
             if use_stream:
                 m.log("[环境] " + desc + " 开始执行...", "warn")
                 try:
-                    ok = m._stream_cmd(cmd)
+                    env = None
+                    if cmd and str(cmd[0]).lower().startswith("pnpm"):
+                        # pnpm 要求全局 bin 目录在 PATH 中, 自动注入避免报错
+                        env = dict(os.environ)
+                        pnpm_bin = os.path.join(os.environ.get("LOCALAPPDATA", ""), "pnpm", "bin")
+                        if pnpm_bin and pnpm_bin not in env.get("PATH", ""):
+                            env["PATH"] = env.get("PATH", "") + os.pathsep + pnpm_bin
+                    ok = m._stream_cmd(cmd, env=env)
                 except Exception as e:
                     ok = False
                     m.log("  [环境] 执行异常: " + str(e), "err")
@@ -999,12 +1000,12 @@ class Dashboard:
             self.log(f"[安装] 写 config 失败: {e}", "warn")
         self.set_status("dsh 安装完成 ✓ 重启后生效")
 
-    def _stream_cmd(self, cmd, cwd=None):
+    def _stream_cmd(self, cmd, cwd=None, env=None):
         """流式运行命令, 输出逐行打进日志。返回 True/False。"""
         self.log("  $ " + " ".join(cmd))
         try:
             p = subprocess.Popen(
-                cmd, cwd=cwd,
+                cmd, cwd=cwd, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 encoding="utf-8", errors="replace", bufsize=1, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW)
