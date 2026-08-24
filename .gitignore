@@ -22,3 +22,6 @@ Thumbs.db
 .DS_Store
 # ── 运行时状态（隧道 PID 轨道等）──
 tunnel-pids.json
+
+# ── 个人使用指南(含真实内网信息, 不入库) ──
+dsh使用指南.txt

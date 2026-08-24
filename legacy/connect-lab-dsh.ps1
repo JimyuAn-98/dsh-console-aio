@@ -6,9 +6,9 @@
 #   powershell -ExecutionPolicy Bypass -File connect-lab-dsh.ps1 -Persist   # 常驻重连
 #   powershell -ExecutionPolicy Bypass -File connect-lab-dsh.ps1 -Stop      # 关闭
 #
-# 前置: Windows 的 ~/.ssh/id_ed25519 已授权到 204 的 hjy 用户
+# 前置: Windows 的 ~/.ssh/id_ed25519 已授权到 204 的 YOUR_USER 用户
 #（Windows 没有 ssh-copy-id，手动装公钥）:
-#   type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh hjy@10.1.12.204 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+#   type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh YOUR_USER@YOUR_LAB_SERVER_IP "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
 
 param(
     [switch]$NoBrowser,
@@ -19,8 +19,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # ── 配置（改这里）────────────────────────
-$ServerHost = '10.1.12.204'    # 实验室服务器
-$ServerUser = 'hjy'            # 服务器用户名
+$ServerHost = 'YOUR_LAB_SERVER_IP'    # 实验室服务器
+$ServerUser = 'YOUR_USER'            # 服务器用户名
 $LocalGUI   = 3090             # 本机浏览器访问的端口
 $RemoteGUI  = 3090             # 服务器上 dsh GUI 监听的端口
 # ─────────────────────────────────────────
