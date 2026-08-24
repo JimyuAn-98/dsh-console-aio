@@ -514,7 +514,7 @@ class EnvDialog(tk.Toplevel):
         "pnpm": dict(
             name="pnpm",
             install=[("cmd", ["npm.cmd", "install", "-g", "pnpm"], "npm install -g pnpm")],
-            update=[("cmd", ["pnpm.cmd", "add", "-g", "pnpm@latest"], "pnpm add -g pnpm@latest")],
+            update=[("cmd", ["pnpm.cmd", "self-update"], "pnpm self-update（官方推荐的 pnpm 更新方式）")],
             uninstall=[("cmd", ["npm.cmd", "uninstall", "-g", "pnpm"], "npm uninstall -g pnpm（卸载全局 pnpm 包）")],
         ),
     }
