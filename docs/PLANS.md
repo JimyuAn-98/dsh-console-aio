@@ -142,6 +142,10 @@
   - 列出已加载插件（解析 cordis.yml insert）；安装/卸载（dsh plugin 命令转发 pnpm，流式日志）；启停（注释 insert 行）。
 - **主题/皮肤管理**：settings.yaml 的 UI 配置（skin-background / dsh-better-sidebar / ui-onboarding 等）+ ui-theme(--dsw-* token)
   - 切换皮肤开关/侧边栏配置；light/dark；主题预览。
+- **LLM / 模型配置** [优先]：settings.yaml 的 agent-default-model + llm-pi-ai.providers
+  - 查看/切换默认模型（provider / model / reasoningEffort），可选模型来自内置 provider 与自定义 provider 的 models 列表
+  - 自定义 provider 管理：列出（baseURL / api 协议 / models），新增/编辑/删除（写前备份 settings.yaml）
+  - **密钥安全设计**：apiKeyEnv 只存环境变量名，密钥在系统环境变量里 → 控制台只显示"使用了哪个环境变量、是否已设置"，引导用户配置环境变量，绝不读写密钥明文
 
 ### C. 运行时与任务（新增发现）
 - **任务看板** [优先]：task-board/ledger-v2.json + scheduler-v2.json（tasks / scheduler / recentRequests）
@@ -164,5 +168,5 @@
 2. Agent 模式管理
 3. Profile + 插件管理（dsh plugin 命令现成）
 4. 任务看板
-5. 主题 + 模型配置
+5. 主题 + LLM/模型配置（agent-default-model 切换 + 自定义 provider + 密钥环境变量引导）
 6. 备份/迁移 + 凭据提示 + 其余只读项
