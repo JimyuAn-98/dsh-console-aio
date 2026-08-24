@@ -10,14 +10,20 @@ dsh-tunnel-console — 零依赖 Windows GUI（Python stdlib tkinter），面向
 
 ## 仓库布局
 
-dsh-tunnel-console.py   主程序（单文件 GUI，约 1100 行）
+dsh-tunnel-console.py   主程序（GUI + 隧道/监控/环境/安装 + 顶部"dsh 管理"菜单）
 tunnel_mgr.py           纯 Python 隧道管理器（Tunnel 类: forward/reverse, start/persist/stop）
+dsh_data.py             数据层（~/.dsh 各数据域读取/写入/备份，纯函数零依赖）
+mgmt_*.py               管理窗口模块（会话/Agent模式/Profile/插件/任务看板/用量/LLM/主题/运维）
 config.json             本地配置（真实 IP/用户名/路径，gitignore，绝不提交）
 config.example.json     配置模板（全占位符）
 启动dsh控制台.bat        双击启动器（conda pythonw 优先）
 legacy/                 旧 .ps1（只读历史参考，界面不再调用）
-docs/                   方案归档（PLANS.md：功能全景与路线）
+docs/                   方案归档（ARCHITECTURE.md 架构 + PLANS.md 功能全景与路线）
 .agents/notes/          Agent Note 决策记录（见 .agents/notes/README.md）
+
+架构分层（详见 docs/ARCHITECTURE.md）：主程序只管导航与既有功能；数据层 dsh_data.py
+（纯函数）与 UI 分离；每个管理窗口一个 mgmt_*.py，提供 Toplevel 子类，由主程序
+_open_mgmt() 动态加载。新增管理窗口 = 新文件 + 在 _build_ui 的菜单注册一行。
 
 ## 命令
 

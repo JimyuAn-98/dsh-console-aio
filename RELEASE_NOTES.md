@@ -1,5 +1,20 @@
 # Release Notes
 
+## v0.3.0 (未发布)
+
+### 新增：dsh 管理（v2 架构）
+
+- 架构：数据层 dsh_data.py（~/.dsh 各数据域，零依赖最小 YAML 解析器）+ 管理窗口模块 mgmt_*.py + 主程序顶部“dsh 管理”菜单动态加载
+- 会话与工作区管理：按工作目录分组浏览/归档/恢复/删除（二次确认）
+- Agent 模式管理：浏览 preset 与说明
+- Profile 管理：列出/复制/删除 profile
+- 插件管理：浏览已装 bundle、dsh plugin 官方命令安装/卸载、patch 层停用/启用
+- 任务看板：ledger + scheduler 只读展示
+- 模型用量统计：解压 session 聚合 token（按模型/天），价格估算（内置单价可编辑）
+- LLM 配置：默认模型切换 + 自定义 provider 浏览（密钥仅环境变量名提示）
+- 主题外观：settings.yaml UI 开关切换
+- 备份与运维：~/.dsh 一键备份（排除凭据）、日志浏览、凭据存在性提示
+
 ## v0.2.1 (未发布)
 
 ### 新增

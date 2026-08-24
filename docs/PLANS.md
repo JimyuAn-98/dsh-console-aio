@@ -73,7 +73,7 @@
 
 ---
 
-## 6. 宏大计划：进化成"dsh 控制台"（dsh Console） [规划中]
+## 6. 宏大计划：进化成"dsh 控制台"（dsh Console） [实现中·v2 启动]
 
 > 用户愿景：从"隧道管理工具"进化为专为 dsh 设计的控制台软件，帮小白用户上手 dsh。
 > 2025-08-25 调研了本地 deepseek-harness checkout，确认以下机制全部真实存在，路线可落地。
@@ -125,7 +125,7 @@
 
 > 2025-08-25 调研 ~/.dsh 与 dsh CLI 后整理。标注 [优先] 为推荐先做的。
 
-### A. 会话与工作区（用户已提）
+### A. 会话与工作区（用户已提） [v0.3.0 已实现: mgmt_sessions.py]
 - **Session 管理** [优先]：~/.dsh/sessions/<编码工作目录>/session-<uuid>/session.jsonl.zstd
   - 按工作目录浏览会话；查看会话数量/大小；删除；导出（解压 jsonl）。
 - **Workspace 管理** [优先]：storages/workspace.json（workspaceIds 列表）
@@ -135,7 +135,7 @@
 - **Agent 模式管理** [优先]：~/.dsh/.agent-presets/<名>/（preset.yml + agent.cordis.yml + .mjs 钩子）
   - 列出可用模式（anchored-standard / liangshen 等）；查看说明；切换默认；复制新建。
 
-### B. 配置与外观（用户已提）
+### B. 配置与外观（用户已提） [v0.3.0 已实现: mgmt_profiles / mgmt_plugins / mgmt_theme / mgmt_llm]
 - **Profile 管理** [优先]：$DSH_HOME/profiles/<名>/（dsh --profile <名> 启动）
   - 列出/切换/新建/复制 profile；显示当前 profile；dsh web 等价 --profile web。
 - **插件管理** [优先]：`dsh plugin --profile <名> add <package>` + cordis.yml insert 行 + .dsh-market/
@@ -147,7 +147,7 @@
   - 自定义 provider 管理：列出（baseURL / api 协议 / models），新增/编辑/删除（写前备份 settings.yaml）
   - **密钥安全设计**：apiKeyEnv 只存环境变量名，密钥在系统环境变量里 → 控制台只显示"使用了哪个环境变量、是否已设置"，引导用户配置环境变量，绝不读写密钥明文
 
-### C. 运行时与任务（新增发现）
+### C. 运行时与任务（新增发现） [v0.3.0 已实现: mgmt_taskboard / mgmt_usage]
 - **任务看板** [优先]：task-board/ledger-v2.json + scheduler-v2.json（tasks / scheduler / recentRequests）
   - 查看任务列表/状态；暂停恢复定时调度；新建简单定时任务。
 - **运行时监控**（已有健康监控的深化）：dsh 进程 PID/端口/启动时间；web 日志流；sessions 存储占用。
@@ -159,7 +159,7 @@
   - 价格估算：内置主流模型单价表（可编辑），输出估算费用
   - 后台线程解压扫描（~/.dsh/sessions 约几十 MB 可控），结果缓存
 
-### D. 安全与运维（新增发现）
+### D. 安全与运维（新增发现） [v0.3.0 已实现: mgmt_ops]
 - **凭据管理**：.credentials.yaml —— 只做"是否存在/最后修改时间"提示，不明文展示密钥；引导用户自行编辑。
 - **SSH 配置**：dsh-ssh.json —— 查看/编辑 dsh 自身 SSH 参数。
 - **远端 Web 访问**：settings.yaml remote-web-ui.publicBaseUrl —— 查看/修改公网访问地址。
@@ -168,10 +168,12 @@
 - **数据统计**：.anonymous-user-id —— 查看/关闭匿名统计。
 - **pet 开关**：settings.yaml pet.enabled。
 
-### 建议实施顺序
-1. Session + Workspace + 归档（同一批数据域，UI 类似）
-2. Agent 模式管理
-3. Profile + 插件管理（dsh plugin 命令现成）
-4. 任务看板
-5. 主题 + LLM/模型配置（切换默认模型 + 自定义 provider + 用量价格统计 + 密钥引导）
-6. 备份/迁移 + 凭据提示 + 其余只读项
+### 建议实施顺序 [v0.3.0 全部完成 ✅]
+1. Session + Workspace + 归档（同一批数据域，UI 类似）→ mgmt_sessions.py
+2. Agent 模式管理 → mgmt_agents.py
+3. Profile + 插件管理（dsh plugin 命令现成）→ mgmt_profiles.py + mgmt_plugins.py
+4. 任务看板 → mgmt_taskboard.py
+5. 主题 + LLM/模型配置 → mgmt_theme.py + mgmt_llm.py + mgmt_usage.py
+6. 备份/迁移 + 凭据提示 → mgmt_ops.py
+
+架构: dsh_data.py 数据层(零依赖最小YAML解析器/写前备份) + 主程序顶部 dsh 管理菜单动态加载, 见 docs/ARCHITECTURE.md

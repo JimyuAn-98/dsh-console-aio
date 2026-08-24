@@ -23,6 +23,7 @@ import json
 import time
 import socket
 import threading
+import importlib
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -700,6 +701,22 @@ class Dashboard:
         ttk.Label(top, text="dsh 控制台", font=("Segoe UI", 16, "bold")).pack(side="left")
         ttk.Label(top, text=f"  本机轮询 {POLL_SECONDS}s · SSH直查 {REMOTE_POLL_SECONDS}s",
                   font=F_SMALL, foreground="#666").pack(side="left")
+        mgmt_btn = tk.Menubutton(top, text="dsh 管理", relief="raised", padx=6)
+        mgmt_menu = tk.Menu(mgmt_btn, tearoff=0)
+        mgmt_btn.configure(menu=mgmt_menu)
+        for _label, _mod, _cls in [
+            ("会话与工作区", "mgmt_sessions", "SessionDialog"),
+            ("Agent 模式", "mgmt_agents", "AgentDialog"),
+            ("Profile 管理", "mgmt_profiles", "ProfileDialog"),
+            ("插件管理", "mgmt_plugins", "PluginDialog"),
+            ("任务看板", "mgmt_taskboard", "TaskboardDialog"),
+            ("模型用量", "mgmt_usage", "UsageDialog"),
+            ("LLM 配置", "mgmt_llm", "LlmDialog"),
+            ("主题外观", "mgmt_theme", "ThemeDialog"),
+            ("备份与运维", "mgmt_ops", "OpsDialog"),
+        ]:
+            mgmt_menu.add_command(label=_label, command=lambda m=_mod, c=_cls: self._open_mgmt(m, c))
+        mgmt_btn.pack(side="right", padx=(0, 6))
         ttk.Button(top, text="环境", command=self._open_env).pack(side="right", padx=(0, 6))
         ttk.Button(top, text="安装 dsh", command=self._open_install).pack(side="right", padx=(0, 6))
         ttk.Button(top, text="配置", command=self._open_config).pack(side="right", padx=(0, 6))
@@ -947,6 +964,16 @@ class Dashboard:
         self._dsh_start()
         self.log("  [更新] 完成 ✓ 访问 http://127.0.0.1:%d" % DASH_PORT, "ok")
         self.set_status("更新完成")
+
+    def _open_mgmt(self, module_name, class_name):
+        # 动态加载管理窗口模块并打开(独立文件 mgmt_*.py)
+        try:
+            mod = importlib.import_module(module_name)
+            cls = getattr(mod, class_name)
+            cls(self)
+        except Exception as e:
+            self.log(f"打开 {class_name} 失败: {e}", "err")
+            messagebox.showerror("打开失败", str(e), parent=self.root)
 
     def _open_env(self):
         EnvDialog(self)

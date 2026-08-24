@@ -134,10 +134,16 @@
 - [ ] 打包成单文件 exe（PyInstaller）
 - [ ] 配置热重载（保存后无需重启）
 - [ ] 多套拓扑配置切换
-- [ ] **dsh 运行时监控**：dsh 进程状态 / CPU 内存 / web 日志实时流
-- [ ] **dsh 插件管理**：插件列表 / 安装 / 卸载 / 启停
-- [ ] **dsh profile 管理**：多套 dsh 配置方案一键切换
-- [ ] **dsh web 主题管理**：主题预览与切换
+- [x] **dsh 管理菜单**（v2 架构：数据层 dsh_data.py + mgmt_*.py 模块）
+- [x] **会话与工作区管理**：分组浏览 / 归档 / 恢复 / 删除（二次确认）
+- [x] **Agent 模式管理**：preset 浏览与说明
+- [x] **Profile 管理**：列出 / 复制 / 删除
+- [ ] **dsh 插件管理**：插件列表 / 安装 / 卸载 / 启停（实现中）
+- [x] **任务看板**：ledger + scheduler 只读展示
+- [x] **模型用量统计**：token 聚合（按模型/天）+ 价格估算
+- [ ] **dsh web 主题管理**：主题预览与切换（实现中）
+- [ ] **LLM 配置**：默认模型切换 + provider 浏览（实现中）
+- [ ] **备份与运维**：~/.dsh 一键备份 / 日志 / 凭据提示（实现中）
 - [ ] **小白引导**：首次使用向导 / 诊断助手 / 常见问题
 
 ## License
@@ -198,10 +204,16 @@ All tunables live in config.json (also editable via the **Config** button; save 
 - [ ] Package as single-file exe (PyInstaller)
 - [ ] Config hot-reload
 - [ ] Multiple topology profiles
-- [ ] dsh runtime monitoring (process / CPU-RAM / live web logs)
-- [ ] dsh plugin manager (list / install / uninstall / enable-disable)
-- [ ] dsh profile manager (switch between config sets)
-- [ ] dsh web theme manager (preview & switch)
+- [x] dsh management menu (v2: dsh_data.py data layer + mgmt_*.py modules)
+- [x] Session & workspace manager (group browse / archive / restore / delete)
+- [x] Agent preset manager (browse & docs)
+- [x] Profile manager (list / copy / delete)
+- [ ] dsh plugin manager (list / install / uninstall / enable-disable) — in progress
+- [x] Task board (ledger + scheduler read-only)
+- [x] Model usage stats (token aggregation by model/day + cost estimate)
+- [ ] dsh web theme manager (preview & switch) — in progress
+- [ ] LLM config (default model switch + provider browse) — in progress
+- [ ] Backup & ops (~/.dsh one-click backup / logs / credential hints) — in progress
 - [ ] Beginner onboarding (first-run wizard / diagnostics / FAQ)
 
 ## License
