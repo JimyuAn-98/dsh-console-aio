@@ -471,7 +471,8 @@ class InstallDialog(tk.Toplevel):
         self.result = (url, target)
         self.destroy()
 class EnvDialog(tk.Toplevel):
-    # 独立"环境检查"窗口: 展示 git/node/npm/pnpm 版本与推荐基准, 提供更新/卸载引导。
+    # 独立"环境检查"窗口: 展示 git/node/npm/pnpm 版本与推荐基准,
+    # 提供 更新/安装/卸载 操作(点击确认后执行)。
 
     TOOLS = [
         ("git",  "git",  ["git", "--version"]),
@@ -479,11 +480,43 @@ class EnvDialog(tk.Toplevel):
         ("npm",  "npm",  ["npm.cmd", "--version"]),
         ("pnpm", "pnpm", ["pnpm.cmd", "--version"]),
     ]
+    # 推荐基准版本(作者开发机实测可跑 dsh 的版本)
     RECOMMENDED = {
-        "git":  ">=2.x",
-        "node": ">=20 (作者机 v24 +1)",
-        "npm":  ">=10 (作者机 11 +1)",
-        "pnpm": ">=8 (作者机 11 +1)",
+        "git":  "2.53",
+        "node": "v24.19",
+        "npm":  "11.17",
+        "pnpm": "11.7",
+    }
+    # 每个工具的操作定义:
+    #   install/uninstall: 安装/卸载引导
+    #   update: 更新操作(可多条)
+    #   每条: (类型, 内容, 描述)
+    #   类型: cmd=执行命令 / browser=打开网页 / hint=仅提示
+    OPS = {
+        "git": dict(
+            name="Git",
+            install=[("browser", "https://git-scm.com/download/win", "打开官网下载 Git 安装包")],
+            update=[("cmd", ["git", "update-git-for-windows"], "运行 Git 自带升级器 (git update-git-for-windows)")],
+            uninstall="在 Windows 设置 - 应用 - 安装的应用 里卸载 Git",
+        ),
+        "node": dict(
+            name="Node.js",
+            install=[("browser", "https://nodejs.org/zh-cn/download", "打开官网下载 Node.js LTS 安装包")],
+            update=[("hint", "Node.js 无官方自升级命令。\n建议用 nvm-windows 管理版本, 或到官网 https://nodejs.org 下载新版安装包。")],
+            uninstall="在 Windows 设置 - 应用 - 安装的应用 里卸载 Node.js",
+        ),
+        "npm": dict(
+            name="npm",
+            install=[("hint", "npm 随 Node.js 一起安装, 装好 Node.js 即自带 npm。")],
+            update=[("cmd", ["npm.cmd", "install", "-g", "npm@latest"], "npm install -g npm@latest")],
+            uninstall="npm 随 Node.js 一起卸载",
+        ),
+        "pnpm": dict(
+            name="pnpm",
+            install=[("cmd", ["npm.cmd", "install", "-g", "pnpm"], "npm install -g pnpm")],
+            update=[("cmd", ["pnpm.cmd", "add", "-g", "pnpm@latest"], "pnpm add -g pnpm@latest")],
+            uninstall="在 Windows 设置 - 应用 - 安装的应用 里卸载 pnpm",
+        ),
     }
 
     def __init__(self, master):
@@ -504,21 +537,27 @@ class EnvDialog(tk.Toplevel):
                   font=F_BOLD).pack(anchor="w", pady=(0, 6))
         table = ttk.Frame(wrap)
         table.pack(fill="x")
-        for j, t in enumerate(("工具", "当前版本", "推荐基准", "状态", "")):
-            ttk.Label(table, text=t, font=F_BOLD, width=12, anchor="w").grid(row=0, column=j, padx=2)
+        for j, t in enumerate(("工具", "当前版本", "推荐基准", "状态", "操作")):
+            ttk.Label(table, text=t, font=F_BOLD, width=11, anchor="w").grid(row=0, column=j, padx=2)
         for i, (key, name, _cmd) in enumerate(self.TOOLS):
             r = i + 1
-            ttk.Label(table, text=name, width=12, anchor="w").grid(row=r, column=0, sticky="w", pady=2)
-            ver = ttk.Label(table, text="...", width=12, anchor="w")
+            ttk.Label(table, text=name, width=11, anchor="w").grid(row=r, column=0, sticky="w", pady=2)
+            ver = ttk.Label(table, text="...", width=11, anchor="w")
             ver.grid(row=r, column=1, sticky="w", padx=2)
-            ttk.Label(table, text=self.RECOMMENDED.get(key, ""), width=16, anchor="w").grid(
+            ttk.Label(table, text=self.RECOMMENDED.get(key, ""), width=14, anchor="w").grid(
                 row=r, column=2, sticky="w", padx=2)
             status = ttk.Label(table, text="", width=8, anchor="w")
             status.grid(row=r, column=3, sticky="w", padx=2)
-            ttk.Button(table, text="详情", width=6,
-                       command=lambda k=key: self._actions(k)).grid(row=r, column=4, padx=2)
+            ops = ttk.Frame(table)
+            ops.grid(row=r, column=4, sticky="w", padx=2)
+            ttk.Button(ops, text="更新", width=5,
+                       command=lambda k=key: self._do_action(k, "update", "更新")).pack(side="left", padx=1)
+            ttk.Button(ops, text="安装", width=5,
+                       command=lambda k=key: self._do_action(k, "install", "安装")).pack(side="left", padx=1)
+            ttk.Button(ops, text="卸载", width=5,
+                       command=lambda k=key: self._do_action(k, "uninstall", "卸载")).pack(side="left", padx=1)
             self._rows[key] = (ver, status)
-        ttk.Label(wrap, text="点“详情”查看某工具的更新/卸载引导。",
+        ttk.Label(wrap, text="点“更新/安装/卸载”会先说明将执行什么, 确认后才执行。",
                   font=F_SMALL, foreground="#888").pack(anchor="w", pady=(12, 0))
         ttk.Button(wrap, text="关闭", command=self.destroy).pack(anchor="e", pady=(12, 0))
 
@@ -551,31 +590,66 @@ class EnvDialog(tk.Toplevel):
                 ver_lbl.configure(text=v, foreground="#000")
                 st_lbl.configure(text="OK", foreground="#3c3")
 
-    def _actions(self, key):
-        tips = {
-            "git":  ("git",
-                     "更新: git update-git-for-windows 自升级, 或到 git-scm.com 下载新版。\n卸载: 在 Windows 设置 - 应用 - 安装的应用 找到 Git 卸载。"),
-            "node": ("Node.js (npm 随附)",
-                     "更新: 建议用 nvm-windows 或到 nodejs.org 下载 LTS。\n卸载: Windows 设置 - 应用 - 安装的应用 里卸载 Node.js。"),
-            "npm":  ("npm (随 Node.js)",
-                     "更新: npm install -g npm@latest。\n卸载: 随 Node.js 一起卸载。"),
-            "pnpm": ("pnpm",
-                     "更新: pnpm self-update, 或 npm i -g pnpm@latest。\n卸载: Windows 设置 - 应用 - 安装的应用。"),
-        }
-        name, tip = tips.get(key, (key, ""))
-        btn = messagebox.askyesnocancel(
-            name + " 操作",
-            tip + "\n\n是否打开 Windows“设置 - 应用 - 安装的应用”页面进行管理？",
-            parent=self)
-        if btn is True:
-            self._open_apps_page()
+    def _do_action(self, key, kind, label):
+        ops = self.OPS.get(key)
+        if ops is None:
+            return
+        name = ops["name"]
+        if kind == "uninstall":
+            ok = messagebox.askyesno(
+                "卸载 " + name,
+                "将卸载 " + name + "。\n" + ops["uninstall"] + "\n\n是否打开系统卸载入口？",
+                parent=self)
+            if ok:
+                self._open_apps_page()
+            return
+        plan = ops.get(kind) or []
+        if not plan:
+            return
+        for typ, payload, desc in plan:
+            ok = messagebox.askyesno(
+                label + " " + name,
+                "将执行：\n" + desc + "\n\n是否继续？",
+                parent=self)
+            if not ok:
+                return
+            if typ == "cmd":
+                self._run_cmd(payload, desc)
+            elif typ == "browser":
+                self._open_url(payload)
+            elif typ == "hint":
+                messagebox.showinfo(label + " " + name, payload, parent=self)
+
+    def _run_cmd(self, cmd, desc):
+        def worker():
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                                   timeout=600, creationflags=subprocess.CREATE_NO_WINDOW)
+                tail = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()[-600:]
+                head = "完成" if r.returncode == 0 else "失败 (code=%s)" % r.returncode
+                body = head + "\n\n" + tail
+                try:
+                    self.after(0, lambda: messagebox.showinfo("结果: " + desc, body, parent=self))
+                except tk.TclError:
+                    pass
+            except Exception as e:
+                try:
+                    self.after(0, lambda: messagebox.showerror("执行出错", str(e), parent=self))
+                except tk.TclError:
+                    pass
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _open_url(self, url):
+        try:
+            os.startfile(url)
+        except Exception as e:
+            messagebox.showerror("无法打开", str(e), parent=self)
 
     def _open_apps_page(self):
         try:
             os.startfile("ms-settings:appsfeatures")
         except Exception as e:
             messagebox.showerror("无法打开", str(e), parent=self)
-
 class Dashboard:
     def __init__(self, root):
         self.root = root

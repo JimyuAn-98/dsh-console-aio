@@ -17,9 +17,13 @@
   - 安装完成后自动把 dash_repo 写入 config.json（重启生效）
 - **环境检查独立窗口（运维辅助）**
   - 顶部新增"环境"按钮，独立窗口查看 git/node/npm/pnpm 版本
-  - 显示推荐基准版本（以作者开发机实测为准）
-  - 每个工具带"详情"引导：更新用官方命令，卸载引导到 Windows 设置-应用-安装的应用（ms-settings:appsfeatures）
+  - 显示推荐基准版本（直接写版本号：git 2.53 / node v24.19 / npm 11.17 / pnpm 11.7）
+  - 每个工具带 更新/安装/卸载 三按钮：点击先说明将执行什么，确认后才执行
+  - 更新：git 自带升级器 / npm i -g npm@latest / pnpm add -g pnpm@latest；node 提示用 nvm 或官网
+  - 安装：git/node 打开官网下载页；pnpm 用 npm i -g pnpm；npm 随 Node.js
+  - 卸载：统一引导到 Windows 设置-应用-安装的应用（ms-settings:appsfeatures）
   - 安装 dsh 的目标目录支持系统文件夹选择弹窗（浏览…）
+  - 安全：早期含真实 IP 的历史提交已用 git-filter-repo 重写脱敏并 force push
 
 ## v0.1.0 (草案)
 

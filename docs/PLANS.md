@@ -37,11 +37,14 @@
 > 用户：环境监测做成**独立窗口**；推荐版本以**当前开发机为基准**（当前能跑 = 基准）；卸载走提示。
 
 - **目标**：独立"环境检查"窗口，随时可看 git / node / npm / pnpm 的版本与状态。
-- **推荐版本**：以当前开发电脑实际安装版本为基准（能跑即基准），而非硬编码版本号。
+- **推荐版本**：以当前开发电脑实际安装版本为基准（能跑即基准），直接写版本号（如 v24.19 / 11.17），不额外说明来源。
 - **安装目录**：InstallDialog 目标目录改为"浏览…"按钮调用系统文件夹选择（filedialog.askdirectory）。
-- **操作**：
-  - 更新：能用官方自升级命令的做（pnpm self-update / git update-git-for-windows；node 装 nvm 才有），否则提示。
-  - 卸载：不做直接执行，改为提示 + 尝试打开系统"设置-应用-安装的应用"页（ms-settings:appsfeatures）。
+- **操作（更新/安装/卸载三按钮）**：
+  - 每个工具一行，带 更新/安装/卸载 三个按钮；点击后先说明将执行什么，确认（是/否）后才执行。
+  - 更新：git → git update-git-for-windows；npm → npm install -g npm@latest；pnpm → pnpm add -g pnpm@latest；node → 提示用 nvm-windows 或官网。
+  - 安装：git/node → 打开官网下载页；pnpm → npm install -g pnpm；npm → 提示随 Node.js。
+  - 卸载：统一打开系统"设置-应用-安装的应用"页（ms-settings:appsfeatures），不自动执行卸载。
+  - 命令执行在后台线程（CREATE_NO_WINDOW + 超时），完成后弹结果框。
 
 ---
 
@@ -54,3 +57,16 @@
 ---
 
 *最近更新：2025（dsh-tunnel-console）*
+
+---
+
+## 5. 历史脱敏（重要安全操作） [已完成]
+
+> 2025-08-25：早期 3 个 commit（初版 / 脱敏legacy / 配置向导）含真实 IP 与用户名，已用 git-filter-repo 全局重写历史。
+
+- 工具：git-filter-repo（pip install git-filter-repo），--replace-text 规则替换。
+- 替换：185.238.250.148 → YOUR_PUBLIC_IP；10.1.12.204 → YOUR_LAB_IP；hjy → YOUR_USER；huangjiy → YOUR_NAME；路径 → 占位。
+- 验证：7 个 commit 全部文件 + 提交信息 敏感命中 = 0。
+- 已 force push 覆盖远程 main（83c483d → 7e4d209）。
+- 注意：曾 clone 过旧仓库的人本地仍有旧提交副本，无法远程抹除；GitHub 侧旧对象会在 GC 后移除。
+- 备份：本地 dsh-backup-history/.git-*（完整旧 .git 备份）。
