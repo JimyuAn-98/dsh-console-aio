@@ -118,3 +118,51 @@
 - 所有写操作前备份（cordis.yml / settings.yaml / config.json 复制 .bak）。
 - 敏感信息（IP/用户名/凭据）只在本机 ~/.dsh 与 gitignored 文件，不进仓库。
 - 每个阶段先出"只读展示"，确认后再加"写操作"。
+
+---
+
+## 7. 功能全景清单（dsh 控制台 候选功能域）
+
+> 2025-08-25 调研 ~/.dsh 与 dsh CLI 后整理。标注 [优先] 为推荐先做的。
+
+### A. 会话与工作区（用户已提）
+- **Session 管理** [优先]：~/.dsh/sessions/<编码工作目录>/session-<uuid>/session.jsonl.zstd
+  - 按工作目录浏览会话；查看会话数量/大小；删除；导出（解压 jsonl）。
+- **Workspace 管理** [优先]：storages/workspace.json（workspaceIds 列表）
+  - 列出/重命名/新建 workspace；设置默认工作目录。
+- **归档 Session 管理**：workspace.json 的 archivedSessionIds
+  - 列出归档会话；恢复（移出归档）；彻底删除。
+- **Agent 模式管理** [优先]：~/.dsh/.agent-presets/<名>/（preset.yml + agent.cordis.yml + .mjs 钩子）
+  - 列出可用模式（anchored-standard / liangshen 等）；查看说明；切换默认；复制新建。
+
+### B. 配置与外观（用户已提）
+- **Profile 管理** [优先]：$DSH_HOME/profiles/<名>/（dsh --profile <名> 启动）
+  - 列出/切换/新建/复制 profile；显示当前 profile；dsh web 等价 --profile web。
+- **插件管理** [优先]：`dsh plugin --profile <名> add <package>` + cordis.yml insert 行 + .dsh-market/
+  - 列出已加载插件（解析 cordis.yml insert）；安装/卸载（dsh plugin 命令转发 pnpm，流式日志）；启停（注释 insert 行）。
+- **主题/皮肤管理**：settings.yaml 的 UI 配置（skin-background / dsh-better-sidebar / ui-onboarding 等）+ ui-theme(--dsw-* token)
+  - 切换皮肤开关/侧边栏配置；light/dark；主题预览。
+
+### C. 运行时与任务（新增发现）
+- **任务看板** [优先]：task-board/ledger-v2.json + scheduler-v2.json（tasks / scheduler / recentRequests）
+  - 查看任务列表/状态；暂停恢复定时调度；新建简单定时任务。
+- **运行时监控**（已有健康监控的深化）：dsh 进程 PID/端口/启动时间；web 日志流；sessions 存储占用。
+- **模型/Provider 配置**：settings.yaml 的 agent-default-model（provider/model/reasoningEffort）+ llm-pi-ai providers
+  - 查看当前默认模型；切换 provider/模型（改 settings.yaml，备份后写）。
+
+### D. 安全与运维（新增发现）
+- **凭据管理**：.credentials.yaml —— 只做"是否存在/最后修改时间"提示，不明文展示密钥；引导用户自行编辑。
+- **SSH 配置**：dsh-ssh.json —— 查看/编辑 dsh 自身 SSH 参数。
+- **远端 Web 访问**：settings.yaml remote-web-ui.publicBaseUrl —— 查看/修改公网访问地址。
+- **备份/迁移** [优先]：一键备份整个 ~/.dsh（zip，排除凭据）；导入/恢复。
+- **日志管理**：dsh web 日志文件查看/清理（TEMP/dsh-dash/*.log）。
+- **数据统计**：.anonymous-user-id —— 查看/关闭匿名统计。
+- **pet 开关**：settings.yaml pet.enabled。
+
+### 建议实施顺序
+1. Session + Workspace + 归档（同一批数据域，UI 类似）
+2. Agent 模式管理
+3. Profile + 插件管理（dsh plugin 命令现成）
+4. 任务看板
+5. 主题 + 模型配置
+6. 备份/迁移 + 凭据提示 + 其余只读项
