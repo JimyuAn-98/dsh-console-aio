@@ -1,4 +1,4 @@
-# dsh-tunnel-console
+# dsh-console-aio
 
 > 中文 | [English](#english)
 
@@ -20,7 +20,7 @@
 双击 **启动dsh控制台.bat** —— 它优先使用 conda base 的 pythonw 启动，找不到再回退 PATH。
 
 ### 方式二：命令行
-    python dsh-tunnel-console.py
+    python dsh-console-aio.py
 
 > 💡 需要本机安装 Python 3（建议 Miniconda base，路径可改 启动dsh控制台.bat 顶部的 PYW）。
 
@@ -191,7 +191,7 @@ MIT © 2025 dsh-tools
 
 <a name="english"></a>
 
-# dsh-tunnel-console (English)
+# dsh-console-aio (English)
 
 A **visual SSH-tunnel manager + service health monitor + dsh ops console** for Windows. It wraps the command-line chores of starting/stopping SSH tunnels, monitoring services, and installing/updating dsh into one zero-dependency GUI.
 
@@ -207,7 +207,7 @@ A **visual SSH-tunnel manager + service health monitor + dsh ops console** for W
 
 ## Quick Start
 - Double-click 启动dsh控制台.bat (uses conda base pythonw first, falls back to PATH), or run:
-      python dsh-tunnel-console.py
+      python dsh-console-aio.py
 - Requires Python 3 (Miniconda base recommended; the pythonw path is editable at the top of the .bat).
 
 ## One-click dsh install

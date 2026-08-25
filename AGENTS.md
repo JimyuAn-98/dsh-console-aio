@@ -1,6 +1,6 @@
 # AGENTS.md
 
-dsh-tunnel-console — 零依赖 Windows GUI（Python stdlib tkinter），面向 dsh 用户的"控制台"：隧道管理、本机 dsh 启停/安装/更新、环境检查、健康监控，并逐步扩展 dsh 数据域管理（会话/工作区/插件/profile/用量统计等）。
+dsh-console-aio — 零依赖 Windows GUI（Python stdlib tkinter），面向 dsh 用户的"控制台"：隧道管理、本机 dsh 启停/安装/更新、环境检查、健康监控，并逐步扩展 dsh 数据域管理（会话/工作区/插件/profile/用量统计等）。
 
 ## 项目定位
 
@@ -10,7 +10,7 @@ dsh-tunnel-console — 零依赖 Windows GUI（Python stdlib tkinter），面向
 
 ## 仓库布局
 
-dsh-tunnel-console.py   主程序（GUI + 隧道/监控/环境/安装 + 顶部"dsh 管理"菜单）
+dsh-console-aio.py   主程序（GUI + 隧道/监控/环境/安装 + 顶部"dsh 管理"菜单）
 tunnel_mgr.py           纯 Python 隧道管理器（Tunnel 类: forward/reverse, start/persist/stop）
 dsh_data.py             数据层（~/.dsh 各数据域读取/写入/备份，纯函数零依赖）
 mgmt_*.py               管理窗口模块（会话/Agent模式/Profile/插件/任务看板/用量/LLM/主题/运维）
@@ -27,8 +27,8 @@ _open_mgmt() 动态加载。新增管理窗口 = 新文件 + 在 _build_ui 的�
 
 ## 命令
 
-    python -m py_compile dsh-tunnel-console.py tunnel_mgr.py   # 编译检查（每次改动必跑）
-    python dsh-tunnel-console.py                                # 运行 GUI
+    python -m py_compile dsh-console-aio.py tunnel_mgr.py   # 编译检查（每次改动必跑）
+    python dsh-console-aio.py                                # 运行 GUI
     git diff --cached --check                                   # 提交前检查（文件尾换行等）
     git push origin HEAD                                        # 推送（分支 main）
 

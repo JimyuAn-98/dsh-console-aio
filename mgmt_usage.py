@@ -9,7 +9,7 @@ from tkinter import ttk, messagebox
 
 import dsh_data
 
-# 与 dsh-tunnel-console.py 顶部一致的风格常量(独立文件, 不复用主程序避免循环导入)
+# 与 dsh-console-aio.py 顶部一致的风格常量(独立文件, 不复用主程序避免循环导入)
 F_BOLD = ("Segoe UI", 10, "bold")
 F_SMALL = ("Segoe UI", 9)
 

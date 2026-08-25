@@ -14,7 +14,7 @@ import dsh_data
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
-# 与 dsh-tunnel-console.py 顶部的风格常量保持一致
+# 与 dsh-console-aio.py 顶部的风格常量保持一致
 F_BOLD = ("Segoe UI", 10, "bold")
 F_SMALL = ("Segoe UI", 9)
 

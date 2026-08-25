@@ -6,7 +6,7 @@
 ## 分层
 
 ```
-dsh-tunnel-console.py   主程序：现有功能 + 顶部"dsh 管理"菜单（导航到各管理窗口）
+dsh-console-aio.py   主程序：现有功能 + 顶部"dsh 管理"菜单（导航到各管理窗口）
 dsh_data.py             数据层：~/.dsh 各数据域读取/写入/备份（纯函数，无 GUI）
 mgmt_*.py               管理窗口模块：每个提供一个 Toplevel 类（或 open(app) 函数）
   mgmt_sessions.py        会话 / 工作区 / 归档

@@ -5,9 +5,9 @@ setlocal
 cd /d "%~dp0"
 
 python -m PyInstaller --noconfirm --clean --onefile --windowed ^
-  --name dsh-tunnel-console ^
+  --name dsh-console-aio ^
   --add-data "config.example.json;." ^
-  dsh-tunnel-console.py
+  dsh-console-aio.py
 
 if errorlevel 1 (
     echo [ERROR] Build failed. Make sure 'pip install pyinstaller' ran.
@@ -15,7 +15,7 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo Build OK: dist\dsh-tunnel-console.exe
+echo Build OK: dist\dsh-console-aio.exe
 echo Note: first run on another machine will use built-in defaults;
 echo       copy config.example.json to config.json and edit it.
 pause

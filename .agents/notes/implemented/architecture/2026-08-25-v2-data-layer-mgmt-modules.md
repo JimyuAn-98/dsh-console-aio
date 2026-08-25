@@ -6,7 +6,7 @@
 ## 背景
 
 宏大计划（dsh 控制台）涉及 9 个管理窗口（会话/工作区/Agent模式/Profile/插件/任务看板/用量/LLM/主题/运维）。
-若全部塞进单文件 dsh-tunnel-console.py（~1100 行）会失控；5 个并行 subagent 协同也要求文件边界清晰。
+若全部塞进单文件 dsh-console-aio.py（~1100 行）会失控；5 个并行 subagent 协同也要求文件边界清晰。
 
 ## 决策
 

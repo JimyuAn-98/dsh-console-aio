@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-dsh-tunnel-console — dsh SSH 隧道管理 + 本机 dsh 启停 + 健康监控
+dsh-console-aio — dsh SSH 隧道管理 + 本机 dsh 启停 + 健康监控
                       （纯 Windows 原生 GUI）
-唯一入口: 双击运行 或  python dsh-tunnel-console.py
+唯一入口: 双击运行 或  python dsh-console-aio.py
 
 功能:
   · 本机 dsh 卡片: 一键 启动 / 停止 本机 dsh web（pnpm dsh web）
@@ -32,6 +32,7 @@ import tunnel_mgr  # 纯 Python 隧道管理器
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+APP_VERSION = "0.3.0"   # 与 RELEASE_NOTES.md 对齐; 更新检查用
 
 # ─────────────────────────────────────────
 #  默认配置（当 config.json 缺失/字段缺失时使用）
@@ -678,7 +679,7 @@ class EnvDialog(tk.Toplevel):
 class Dashboard:
     def __init__(self, root):
         self.root = root
-        root.title("dsh 控制台 · 隧道与健康监控")
+        root.title("dsh 控制台 · 隧道与健康监控  v" + APP_VERSION)
         # 窗口尺寸自适应屏幕: 默认 1200x840, 但不超过屏幕可用高度,
         # 否则日志区和底部状态栏会被挤到屏幕外。
         sw = root.winfo_screenwidth()
@@ -869,7 +870,7 @@ class Dashboard:
         path = script_path(cfg_item)
         if not os.path.exists(path):
             messagebox.showerror("找不到脚本",
-                                 f"{path}\n不存在。请确认脚本与 dsh-tunnel-console.py 放在同一目录。")
+                                 f"{path}\n不存在。请确认脚本与 dsh-console-aio.py 放在同一目录。")
             return
         self.log(f"[{cfg_item['key']}] 模式: {mode}", "warn")
         self.set_status(f"正在执行 {mode} → {os.path.basename(path)} ...")

@@ -17,7 +17,7 @@ import dsh_data
 # 风格常量优先复用主程序顶部定义, 独立运行时用等价回退, 保证 UI 观感一致
 try:
     import importlib
-    _console = importlib.import_module("dsh-tunnel-console")
+    _console = importlib.import_module("dsh-console-aio")
     F_BOLD = _console.F_BOLD
     F_SMALL = _console.F_SMALL
 except Exception:

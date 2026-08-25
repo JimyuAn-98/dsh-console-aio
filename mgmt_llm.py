@@ -2,7 +2,7 @@
 # mgmt_llm.py — LLM / 模型配置管理窗口
 # 数据: ~/.dsh/settings.yaml 的 agent-default-model(读写) 与 llm-pi-ai.providers(只读)。
 # 密钥安全: apiKeyEnv 只引用环境变量名, 本窗口不读取/不写入/不展示密钥明文。
-# 风格: 与主程序 dsh-tunnel-console.py 的 EnvDialog 一致(ttk + transient + grab_set)。
+# 风格: 与主程序 dsh-console-aio.py 的 EnvDialog 一致(ttk + transient + grab_set)。
 
 import os
 import tkinter as tk
@@ -10,7 +10,7 @@ from tkinter import ttk, messagebox
 
 import dsh_data
 
-# 风格常量与主程序 dsh-tunnel-console.py 顶部保持一致。
+# 风格常量与主程序 dsh-console-aio.py 顶部保持一致。
 # 主程序文件名含连字符无法常规 import, 此处直接定义同值常量, 避免循环依赖。
 F_BOLD = ("Segoe UI", 10, "bold")
 F_SMALL = ("Segoe UI", 9)

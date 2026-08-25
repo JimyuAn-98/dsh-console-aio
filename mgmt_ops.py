@@ -12,7 +12,7 @@ from tkinter import ttk, messagebox, filedialog
 
 import dsh_data
 
-# 风格常量与主程序 dsh-tunnel-console.py 顶部保持一致(文件含连字符无法常规 import)
+# 风格常量与主程序 dsh-console-aio.py 顶部保持一致(文件含连字符无法常规 import)
 F_BOLD = ("Segoe UI", 10, "bold")
 F_SMALL = ("Segoe UI", 9)
 F_MONO = ("Consolas", 9)

@@ -1,5 +1,5 @@
 @echo off
-rem dsh-tunnel-console launcher - double-click to open GUI (no command needed)
+rem dsh-console-aio launcher - double-click to open GUI (no command needed)
 rem Uses conda base pythonw (no console window); falls back to PATH pythonw.
 setlocal
 cd /d "%~dp0"
@@ -19,11 +19,11 @@ if not exist "%PYW%" (
     set "PYW=pythonw"
 )
 
-if not exist "%~dp0dsh-tunnel-console.py" (
-    echo [ERROR] dsh-tunnel-console.py not found next to this launcher.
+if not exist "%~dp0dsh-console-aio.py" (
+    echo [ERROR] dsh-console-aio.py not found next to this launcher.
     pause
     exit /b 1
 )
 
-start "" "%PYW%" "%~dp0dsh-tunnel-console.py"
+start "" "%PYW%" "%~dp0dsh-console-aio.py"
 exit /b 0

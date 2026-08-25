@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# mgmt_plugins.py — dsh 插件管理窗口(独立 Toplevel), 供 dsh-tunnel-console.py 集成。
+# mgmt_plugins.py — dsh 插件管理窗口(独立 Toplevel), 供 dsh-console-aio.py 集成。
 # 设计要点:
 #   - 已装插件真实来源 = profile/package.json 的 dsh.profile.bundles 数组
 #     (cordis.yml 是空组合架构, 只读参考; 用户可写层是 cordis.patch.yml)。
@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 
 import dsh_data
 
-# 与主程序一致的风格常量(独立模块自带, 避免强依赖导入 dsh-tunnel-console.py)
+# 与主程序一致的风格常量(独立模块自带, 避免强依赖导入 dsh-console-aio.py)
 F_BOLD = ("Segoe UI", 10, "bold")
 F_SMALL = ("Segoe UI", 9)
 

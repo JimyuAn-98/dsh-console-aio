@@ -8,7 +8,7 @@ from tkinter import ttk, messagebox
 
 import dsh_data
 
-# 与 dsh-tunnel-console.py 顶部的风格常量保持一致(该模块名带连字符, 无法直接 import)
+# 与 dsh-console-aio.py 顶部的风格常量保持一致(该模块名带连字符, 无法直接 import)
 F_BOLD = ("Segoe UI", 10, "bold")
 F_SMALL = ("Segoe UI", 9)
 F_MONO = ("Consolas", 9)

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # mgmt_taskboard.py — 任务看板管理窗口(只读): 展示 task-board 的 ledger 与 scheduler。
 # 设计: 纯只读展示 + 刷新, 不提供任何写操作; 定时任务编辑属高级操作, 请使用 dsh web。
-# 风格跟随 dsh-tunnel-console.py 的 EnvDialog: Toplevel 子类 + ttk + F_BOLD/F_SMALL。
+# 风格跟随 dsh-console-aio.py 的 EnvDialog: Toplevel 子类 + ttk + F_BOLD/F_SMALL。
 
 import datetime
 import tkinter as tk
@@ -9,7 +9,7 @@ from tkinter import ttk, messagebox
 
 import dsh_data
 
-# 与 dsh-tunnel-console.py 顶部一致的风格常量(独立文件, 不复用主程序避免循环导入)
+# 与 dsh-console-aio.py 顶部一致的风格常量(独立文件, 不复用主程序避免循环导入)
 F_BOLD = ("Segoe UI", 10, "bold")
 F_SMALL = ("Segoe UI", 9)
 
