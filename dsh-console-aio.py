@@ -986,7 +986,7 @@ class TunnelsPage(BasePage):
                 if not t.is_running():
                     self.app.loge("  [%s] 隧道断开, 尝试重连..." % key, "warn")
                     t.start()
-                stop_f
+                stop_flag.wait(5)
 
 
 if __name__ == "__main__":
