@@ -61,3 +61,38 @@ mgmt_*.py               管理窗口模块：每个提供一个 Toplevel 类（�
 - dsh-market（https://github.com/dsh-market/dsh-market）：插件安装走官方 `dsh plugin --profile <name> add <pkg>`；
   热启停写 cordis.patch.yml 的 `- id: … disabled: true|false`；更新逐插件对比 npm 版本；
   备份/恢复用合并方式；写入前校验、失败自动回滚。
+
+---
+
+## 5. 多部署远程抽象（v0.4）
+
+### DshRemote 接口（dsh_data.py）
+
+统一"本机 / 远程部署"两种数据访问模式，现有数据域函数全部通过它取值：
+
+```
+class DshRemote:
+    # 模式: local(直接路径) / ssh(远程执行)
+    def __init__(self, deployment=None)   # None=本机
+    def read_file(self, rel_path) -> str  # 本地 open; 远程 ssh "cat <dsh_home>/<rel>"
+    def list_dir(self, rel_path) -> list  # 本地 os.listdir; 远程 ssh "ls"
+    def stat_dir(self, rel_path)          # 本地 os.stat; 远程 ssh "du -sb" 等
+    def exec(self, cmd) -> str            # 本地 subprocess; 远程 ssh "<cmd>"
+
+# 数据域函数签名统一改为 remote 参数(默认 None=本机):
+#   list_sessions(remote=None), read_workspace(remote=None), ...
+```
+
+### 部署清单（config.json, gitignored）
+
+```json
+"deployments": [
+  {"name": "本机", "host": "", "user": "", "port": 22, "dsh_home": "~/.dsh"},
+  {"name": "实验室", "host": "10.x.x.x", "user": "hjy", "port": 22}
+]
+```
+
+### 约束
+- 远程只用 ssh 免密（复用隧道配置的凭据体系）；写操作一律 UI 确认。
+- 阶段 A 远程只读轻量指标（cat 小文件 + ls/du）；不做远程 zstd 解压（远程未必有 python）。
+- 远程命令超时 + 中文错误提示；不可达部署显示"离线"。

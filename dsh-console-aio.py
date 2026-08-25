@@ -743,6 +743,7 @@ class Dashboard:
             ("主题外观", "mgmt_theme", "ThemeDialog"),
             ("备份与运维", "mgmt_ops", "OpsDialog"),
             ("关于与更新", "mgmt_version", "VersionDialog"),
+            ("部署管理", "mgmt_deployments", "DeploymentDialog"),
         ]:
             mgmt_menu.add_command(label=_label, command=lambda m=_mod, c=_cls: self._open_mgmt(m, c))
         mgmt_btn.pack(side="right", padx=(0, 6))

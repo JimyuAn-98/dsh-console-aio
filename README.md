@@ -164,6 +164,7 @@
 | LLM 配置 | 默认模型切换、自定义 provider 浏览（密钥只提示环境变量名） |
 | 主题外观 | settings.yaml UI 开关切换 |
 | 备份与运维 | ~/.dsh 一键备份（排除凭据）、日志、凭据存在性提示 |
+| **部署管理** | 多台 dsh 部署统一管理：CRUD、连接测试、只读状态总览（版本/会话/插件/在线离线） |
 
 ![会话与工作区（截图待补充）](docs/screenshots/sessions.png)
 
@@ -266,6 +267,7 @@ The **dsh management** menu on the top bar opens 9 management windows over the d
 | LLM config | switch default model, browse custom providers (API keys only hinted by env-var name) |
 | Theme & appearance | toggle settings.yaml UI switches |
 | Backup & ops | one-click ~/.dsh backup (credentials excluded), logs, credential hints |
+| Deployments | manage multiple dsh deployments: CRUD, connection test, read-only status overview (version/sessions/plugins/online) |
 
 ![Sessions & workspace (screenshot pending)](docs/screenshots/sessions.png)
 

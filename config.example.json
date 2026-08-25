@@ -23,5 +23,9 @@
     [8022, "公网服务器:8022", "←实验室dsh SSH"],
     [8091, "公网服务器:8091", "←本机GUI"]
   ],
-  "forward_ports": [8090, 8022, 8091]
+  "forward_ports": [8090, 8022, 8091],
+
+  "deployments": [
+    {"name": "实验室服务器", "host": "YOUR_LAB_IP", "user": "YOUR_USER", "port": 22, "dsh_home": "~/.dsh"}
+  ]
 }

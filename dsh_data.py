@@ -501,3 +501,184 @@ def list_agent_presets():
             info["files"] = len([f for f in os.listdir(dp) if os.path.isfile(os.path.join(dp, f))])
             out.append(info)
     return out
+
+def load_deployments():
+    # 部署清单: config.json 的 deployments 数组(gitignored, 含主机信息)
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    try:
+        with io.open(p, encoding='utf-8', errors='replace') as fh:
+            d = json.load(fh)
+        depl = d.get('deployments') or []
+        return [x for x in depl if isinstance(x, dict)]
+    except (OSError, ValueError):
+        return []
+
+
+def save_deployments(deployments):
+    # 写回 config.json 的 deployments(保留其他字段, 写前备份)
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    backup_file(p)
+    try:
+        with io.open(p, encoding='utf-8', errors='replace') as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        d = {}
+    d['deployments'] = deployments
+    with io.open(p, 'w', encoding='utf-8', newline='') as fh:
+        json.dump(d, fh, ensure_ascii=False, indent=2)
+    return p
+
+
+# ── 多部署远程抽象 ────────────────────────────────────
+# DshRemote: 统一"本机/远程部署"数据访问。本机=直接文件系统; 远程=ssh 只读命令+文件拉取。
+# 部署清单在 config.json 的 deployments(见 docs/ARCHITECTURE.md 第 5 节)。
+
+def _ssh_base(host, user, port):
+    # 组装 ssh 前缀(免密, 静默, 超时)
+    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+            "-p", str(port), user + "@" + host]
+
+
+def _ssh_run(cmd_list, timeout=15):
+    # 执行远程命令, 返回 stdout(utf-8, errors=replace); 失败抛异常
+    import subprocess
+    r = subprocess.run(cmd_list, capture_output=True, text=True, errors="replace",
+                       timeout=timeout, creationflags=subprocess.CREATE_NO_WINDOW)
+    if r.returncode != 0:
+        raise OSError((r.stderr or "").strip() or ("ssh 退出码 %d" % r.returncode))
+    return r.stdout
+
+
+class DshRemote:
+    # deployment: None=本机; 否则 {"name","host","user","port","dsh_home"}
+    def __init__(self, deployment=None):
+        self.deployment = deployment
+        self.is_remote = bool(deployment and deployment.get("host"))
+
+    def _home(self):
+        # 远程 dsh_home 默认 ~/.dsh
+        if self.is_remote:
+            return self.deployment.get("dsh_home") or "~/.dsh"
+        return dsh_home()
+
+    def read_file(self, rel_path):
+        # 读取 dsh_home 下的相对文件(文本)
+        if self.is_remote:
+            return _ssh_run(_ssh_base(self.deployment["host"], self.deployment["user"],
+                                      self.deployment.get("port") or 22) +
+                            ["cat", self._home() + "/" + rel_path])
+        with io.open(os.path.join(self._home(), rel_path), encoding="utf-8",
+                     errors="replace") as fh:
+            return fh.read()
+
+    def list_dir(self, rel_path):
+        # 列出目录项名
+        if self.is_remote:
+            out = _ssh_run(_ssh_base(self.deployment["host"], self.deployment["user"],
+                                     self.deployment.get("port") or 22) +
+                           ["ls", "-1", self._home() + "/" + rel_path])
+            return [l for l in out.splitlines() if l.strip()]
+        p = os.path.join(self._home(), rel_path)
+        if not os.path.isdir(p):
+            return []
+        return sorted(os.listdir(p))
+
+    def dir_stats(self, rel_path):
+        # 返回 {dirs: {name: bytes}, total: bytes} 用于会话/目录大小统计
+        if self.is_remote:
+            out = _ssh_run(_ssh_base(self.deployment["host"], self.deployment["user"],
+                                     self.deployment.get("port") or 22) +
+                           ["bash", "-lc",
+                            "du -sb " + self._home() + "/" + rel_path + "/* 2>/dev/null | tail -200"])
+            res = {}
+            total = 0
+            for line in out.splitlines():
+                parts = line.split("\t")
+                if len(parts) == 2:
+                    try:
+                        b = int(parts[0])
+                    except ValueError:
+                        continue
+                    name = parts[1].rstrip("/").split("/")[-1]
+                    res[name] = b
+                    total += b
+            return {"dirs": res, "total": total}
+        base = os.path.join(self._home(), rel_path)
+        res = {}
+        total = 0
+        if os.path.isdir(base):
+            for d in os.listdir(base):
+                dp = os.path.join(base, d)
+                if os.path.isdir(dp):
+                    b = sum(os.path.getsize(os.path.join(dp, f)) for f in os.listdir(dp)
+                            if os.path.isfile(os.path.join(dp, f)))
+                    res[d] = b
+                    total += b
+        return {"dirs": res, "total": total}
+
+    def exec(self, cmd):
+        # 执行任意命令(本地 subprocess / 远程 ssh), 返回 stdout
+        if self.is_remote:
+            return _ssh_run(_ssh_base(self.deployment["host"], self.deployment["user"],
+                                      self.deployment.get("port") or 22) + [cmd])
+        import subprocess
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                           timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+        if r.returncode != 0:
+            raise OSError((r.stderr or "").strip() or ("退出码 %d" % r.returncode))
+        return r.stdout
+
+
+def deployment_snapshot(remote):
+    # 单部署只读状态总览(轻量指标, 不用远程解压)
+    snap = {"ok": False, "error": None, "name": None, "version": None,
+            "web_ok": False, "sessions": 0, "session_bytes": 0,
+            "plugins": 0, "profiles": 0, "presets": 0}
+    try:
+        if remote.deployment:
+            snap["name"] = remote.deployment.get("name") or remote.deployment.get("host")
+        # profile 目录(含 dsh 版本线索)
+        try:
+            profiles = remote.list_dir("profiles")
+        except OSError:
+            profiles = []
+        snap["profiles"] = len([p for p in profiles if p != "node_modules"])
+        # web profile 的 package.json -> 读 dsh 相关版本
+        try:
+            if "web" in profiles:
+                pkg = remote.read_file("profiles/web/package.json")
+                import json as _json
+                try:
+                    d = _json.loads(pkg)
+                    deps = d.get("dependencies") or {}
+                    snap["version"] = deps.get("dsh") or deps.get("dshmarket") or "?"
+                except ValueError:
+                    pass
+        except OSError:
+            pass
+        # 会话统计
+        try:
+            st = remote.dir_stats("sessions")
+            snap["sessions"] = len(st["dirs"])
+            snap["session_bytes"] = st["total"]
+        except OSError:
+            pass
+        # 插件数: web profile bundles
+        try:
+            pkg = remote.read_file("profiles/web/package.json")
+            import json as _json
+            d = _json.loads(pkg)
+            prof = d.get("dsh", {}).get("profile", {})
+            snap["plugins"] = len(prof.get("bundles") or [])
+        except (OSError, ValueError):
+            pass
+        # agent presets
+        try:
+            snap["presets"] = len(remote.list_dir(".agent-presets"))
+        except OSError:
+            pass
+        snap["ok"] = True
+    except Exception as e:
+        snap["error"] = str(e)
+    return snap
+

@@ -46,6 +46,7 @@ installer.iss                                                # Inno Setup 安装
 - 真实值（服务器 IP、ssh 用户名、仓库路径）只存在 gitignore 的 config.json；DEFAULTS / README / docs / legacy / config.example.json 一律占位符（YOUR_PUBLIC_IP 等）。
 - 历史已用 git-filter-repo 脱敏并 force push；任何新提交不得再引入真实 IP/用户名。
 - 写 settings.yaml / cordis.yml / config.json 等用户配置前，先复制 .bak 备份；凭据类只做存在性提示，绝不读写密钥明文（dsh 的 apiKeyEnv 只引用环境变量名）。
+- **多部署远程操作**：部署清单（主机/用户）只存 gitignored 的 config.json；远程操作默认只读，写操作必须确认 + 流式日志；ssh 一律 BatchMode + 超时。
 
 ## 约定（Conventions）
 

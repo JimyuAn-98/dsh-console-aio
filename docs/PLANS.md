@@ -177,3 +177,32 @@
 6. 备份/迁移 + 凭据提示 → mgmt_ops.py
 
 架构: dsh_data.py 数据层(零依赖最小YAML解析器/写前备份) + 主程序顶部 dsh 管理菜单动态加载, 见 docs/ARCHITECTURE.md
+
+---
+
+## 8. 多部署管理（v0.4 方向） [实现中]
+
+> 用户愿景(2026-08-25): 在隧道基础上, 成为"对所有部署的 dsh 的管理"控制台——
+> 统一查看/管理分布在各机器上的 dsh 实例(家里PC/公司机/实验室服务器/云主机)。
+> 差异化定位: dsh-desktop(anywhere-labs)是"跑 dsh 的桌面端", 我们是"管 dsh 的控制台"。
+
+### 调研结论
+- dsh-desktop: 把 dsh web + 插件系统封装成桌面应用(单机), 无多部署管理。
+- 我们的 SSH 隧道架构已打通多机网络层(现成基础设施)。
+- dsh_data.py 是纯函数路径操作, 可加"远程抽象"复用全部数据域接口。
+
+### 架构设计(见 docs/ARCHITECTURE.md 第 5 节)
+- DshRemote 抽象: 本地模式=直接文件系统; 远程模式=SSH 执行只读命令 + 文件拉取(cat)。
+- 部署清单: config.json 的 deployments 数组(gitignored, 含主机信息): {name, host, user, port, dsh_home}
+- 复用现有 SSH 免密凭据; 远程写操作一律确认 + 流式日志。
+
+### 分阶段
+- **阶段 A(本次)**: 部署管理窗口(mgmt_deployments.py)
+  - 部署 CRUD + 连接测试 + 只读状态总览(每部署: dsh 版本/web状态/会话数大小/插件数/profile 数)
+  - 远程数据: ssh cat 小文件 + ls/du 统计; 不做远程解压用量(无 python 环境风险)
+- **阶段 B**: 各管理窗口加部署选择器(远程化 session/plugin/LLM 等); 远程用量统计(远程 zstd)
+- **阶段 C**: 统一状态总览卡片(健康监控升级到 dsh 层); 部署间隧道联动
+
+### 安全原则
+- 只读优先; 远程写操作确认 + 日志; 部署信息只存 gitignored 的 config.json
+
