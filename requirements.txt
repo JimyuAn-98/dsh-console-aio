@@ -1,6 +1,6 @@
-# dsh-console-aio 零运行时依赖：仅使用 Python 标准库（tkinter 随 Python 自带）。
-#
-# 若要打包成单个 exe（可选），安装 dev 依赖后运行 build_win.bat:
-#   pip install pyinstaller
-#
-# pyinstaller>=6.0
+# dsh-console-aio 运行依赖
+# PySide6 为 GUI 框架(安装包会内置; 源码运行需 pip install -r requirements.txt)
+pyside6>=6.6
+
+# 开发/打包(可选):
+#   pip install pyinstaller   # 运行 build_win.bat 打包单文件 exe + Inno 安装包

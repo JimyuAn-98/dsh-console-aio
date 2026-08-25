@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/JimyuAn-98/dsh-console-aio)](LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows&logoColor=white)](https://github.com/JimyuAn-98/dsh-console-aio)
 [![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Dependencies](https://img.shields.io/badge/dependencies-zero-green)](requirements.txt)
+[![UI](https://img.shields.io/badge/UI-PySide6%20%2F%20Qt-41CD52?logo=qt&logoColor=white)](requirements.txt)
 
 > 中文 | [English](#english)
 

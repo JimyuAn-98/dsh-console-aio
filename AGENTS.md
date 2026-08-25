@@ -1,6 +1,6 @@
 # AGENTS.md
 
-dsh-console-aio — 零依赖 Windows GUI（Python stdlib tkinter），面向 dsh 用户的"控制台"：隧道管理、本机 dsh 启停/安装/更新、环境检查、健康监控，并逐步扩展 dsh 数据域管理（会话/工作区/插件/profile/用量统计等）。
+dsh-console-aio — PySide6（Qt）Windows GUI，面向 dsh 用户的"控制台"：隧道管理、本机 dsh 启停/安装/更新、环境检查、健康监控，并逐步扩展 dsh 数据域管理（会话/工作区/插件/profile/用量统计等）。依赖: pyside6（见 requirements.txt）。
 
 ## 项目定位
 
@@ -29,7 +29,7 @@ dsh-console-aio — 零依赖 Windows GUI（Python stdlib tkinter），面向 ds
 dsh-console-aio.py   主程序（控制台布局: 顶部部署栏 + 左导航 + 中栏页面容器 + 右状态 + 底部日志）
 tunnel_mgr.py           纯 Python 隧道管理器（Tunnel 类: forward/reverse, start/persist/stop）
 dsh_data.py             数据层（~/.dsh 各数据域读取/写入/备份，纯函数零依赖）
-mgmt_*.py               管理窗口模块（会话/Agent模式/Profile/插件/任务看板/用量/LLM/主题/运维/版本管理）
+pyside/                  PySide6 页面包(pages_*.py: 会话/Agent/Profile/插件/看板/用量/LLM/运维/密钥/版本/部署; dialogs.py 对话框)
 version.json             发版版本源(检查更新读远程 main 分支此文件, 发版时更新)
 config.json             本地配置（真实 IP/用户名/路径，gitignore，绝不提交）
 config.example.json     配置模板（全占位符）
@@ -38,7 +38,7 @@ legacy/                 旧 .ps1（只读历史参考，界面不再调用）
 docs/                   方案归档（ARCHITECTURE.md 架构 + PLANS.md 功能全景与路线）
 .agents/notes/          Agent Note 决策记录（见 .agents/notes/README.md）
 
-架构分层（详见 docs/ARCHITECTURE.md）：主程序控制台布局（顶部部署栏 + 左导航 + 中栏页面容器 + 右状态 + 底部日志）；数据层 dsh_data.py（纯函数，含 DshRemote 远程抽象）；每个管理域一个 mgmt_*.py，提供 XxxPage(ttk.Frame) 页面类（左导航切换）与 XxxDialog(Toplevel) 兼容包装。新增页面 = 新文件 + NAV_ITEMS/PAGE_MODULES 注册。页面用 self._app 访问主程序；部署联动用 app._current_deploy 构造 DshRemote。
+架构分层（详见 docs/ARCHITECTURE.md）：主程序 MainWindow（顶部部署栏 + 左导航 + QStackedWidget 页面 + 右状态栏 + 底部日志，QSS 主题 ui/theme.qss）；数据层 dsh_data.py（纯函数，含 DshRemote 远程抽象）；pyside/ 包每页面一个 pages_*.py，继承 BasePage(app)，左导航路由注册在 NAV_ITEMS/_show_page；部署联动用 app._current_deploy 构造 DshRemote。
 
 ## 命令
 
@@ -51,8 +51,8 @@ installer.iss                                                # Inno Setup 安装
 
 冒烟测试约定（只在本机无头环境做）：
 - GUI 测试用 timeout -k 3 N python 包裹，防止 600s 挂起（真实 SSH 到不可达主机是挂起主因，测试勿触发）。
-- 测试结束先 app.monitor_stop.set() 再 root.destroy()，避免 "main thread is not in main loop"。
-- 版本/环境命令测试可用真实 mainloop（root.after(...); root.mainloop()）验证 after 回调。
+- 测试结束执行 win.close() + QApplication.processEvents() 或 app.quit() 正常退出。
+- 页面构造冒烟: 实例化 MainWindow 后遍历 NAV_ITEMS 逐个 _show_page + processEvents。
 - 不真跑 git clone / pnpm install / 升级命令；用 monkeypatch 拦截 _stream_cmd 验证命令参数与 env。
 
 ## 安全与密钥
@@ -66,11 +66,11 @@ installer.iss                                                # Inno Setup 安装
 
 - 编码：源文件 UTF-8；子进程一律 text=True, errors="replace"（防 GBK UnicodeDecodeError 崩溃）。
 - 子进程：Windows 批处理 shim 必须用 .cmd 后缀（pnpm.cmd / npm.cmd），否则 subprocess 找不到；一律 creationflags=CREATE_NO_WINDOW（防 pythonw 下弹黑窗）。
-- 后台任务：工作线程 + self.root.after(0, ...) 回主线程更新 UI；窗口已销毁时 after 回调要 try/except tk.TclError。
-- Tk 线程安全：只有主线程可操作 Tk 组件；工作线程只做 IO/子进程，结果经 after 回传。
+- 后台任务：工作线程仍用 threading(纯 IO/子进程)，**不直接改 Qt 组件**；结果经**类级 Signal + BasePage.safe_emit 回主线程**更新 UI（页面销毁竞态由 safe_emit 吞 RuntimeError）。
+- Qt 线程安全：只有主线程可操作 QWidget；后台线程 emit 类级 Signal，槽函数在 Qt 事件循环中运行。
 - 三引号 docstring 禁令（本项目血泪教训）：经 JSON/补丁链路插入的多行字符串，三引号可能损坏成双引号导致 SyntaxError（invalid character '。'）。新代码一律用 # 注释代替 docstring；若必须用三引号，只写英文纯 ASCII 内容。
 - 错误处理：空 except 必须注释说明吞了什么、为何其他异常到不了这里；不静默失败，失败要有中文日志（self.log(..., "err")）与状态提示。
-- 危险操作：安装/更新/卸载/写配置一律先 messagebox.askyesno 确认"将执行什么"，用户点是才执行；命令流式输出到主日志区（复用 _stream_cmd）。
+- 危险操作：安装/更新/卸载/写配置一律先 QMessageBox.question 确认"将执行什么"，用户点是才执行；命令流式输出到主日志区（复用 _stream_cmd）。
 - 注释与文档：中文注释写契约与上下文，不叙述控制流，不注释代码中显而易见的事实；用直接具体的词，不用隐喻。
 - 命令输出：长耗时命令用 _stream_cmd（Popen 流式读行 + 超时 deadline + kill 兜底），不 capture 完再弹窗。
 - 文件结尾：恰好一个换行；git diff --cached --check 门禁。
