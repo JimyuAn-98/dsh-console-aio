@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# mgmt_ops.py — 备份与运维管理窗口
+# mgmt_ops.py — 备份与运维管理(页面化): OpsPage 嵌入主界面, OpsDialog 兼容包装
 # 备份 ~/.dsh 到 zip(数据层自动排除凭据/密钥/sessions/node_modules)、
 # 查看 dsh web 日志(目录/尾部)、凭据文件只提示存在性与时间(不明文展示)。
 
@@ -31,27 +31,15 @@ def _fmt_size(n):
         n /= 1024.0
 
 
-class OpsDialog(tk.Toplevel):
+class OpsPage(ttk.Frame):
     # 备份/日志/凭据三个运维分区, 均不触碰密钥明文。
-
-    def __init__(self, master):
-        # master 兼容 Dashboard 实例(推荐)或 Tk 根窗口
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("备份与运维")
-        self.geometry("640x500")
-        self.minsize(600, 460)
-        self.configure(padx=15, pady=12)
+    # parent=容器 Frame, app=Dashboard 实例(可为 None); 页面高度随容器自适应, 不设窗口尺寸。
+    def __init__(self, parent, app):
+        super().__init__(parent, padding=(15, 12))
+        self._app = app
         # dsh web 日志目录固定为 %TEMP%/dsh-dash
         self._log_dir = os.path.join(os.environ.get("TEMP") or tempfile.gettempdir(), "dsh-dash")
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
         self._refresh_logs()
         self._refresh_cred()
 
@@ -99,9 +87,7 @@ class OpsDialog(tk.Toplevel):
                        "控制台不读取、不写入、不展示密钥明文。",
                   font=F_SMALL, foreground="#888", justify="left").pack(anchor="w", pady=(6, 0))
 
-        foot = ttk.Frame(wrap)
-        foot.pack(fill="x", pady=(10, 0))
-        ttk.Button(foot, text="关闭", command=self.destroy).pack(side="right")
+        # 页面无"关闭"按钮: 页面随容器销毁, 关闭是外层 Toplevel 的事
 
     def _refresh_logs(self):
         # 列出 %TEMP%/dsh-dash/*.log 的文件名/大小/修改时间
@@ -203,7 +189,7 @@ class OpsDialog(tk.Toplevel):
                 err = str(e)
 
                 def fail():
-                    # 窗口可能已关闭, TclError 忽略
+                    # 页面可能已随容器销毁, TclError 忽略
                     try:
                         self._backup_btn.configure(state="normal")
                         self._backup_lbl.configure(text="备份失败", foreground="#c33")
@@ -256,3 +242,24 @@ class OpsDialog(tk.Toplevel):
         else:
             lines.append(".anonymous-user-id：不存在")
         self._cred_lbl.configure(text="\n".join(lines))
+
+
+class OpsDialog(tk.Toplevel):
+    # 兼容包装: 内容由 OpsPage 提供, 保留原 Toplevel 的窗口行为(标题/尺寸/transient/grab_set)
+    def __init__(self, master):
+        # master 兼容 Dashboard 实例(推荐)或 Tk 根窗口
+        if hasattr(master, "root"):
+            tk_master = master.root
+            app = master
+        else:
+            tk_master = master
+            app = None
+        super().__init__(tk_master)
+        self._master = app
+        self.title("备份与运维")
+        self.geometry("640x500")
+        self.minsize(600, 460)
+        self._page = OpsPage(self, app)
+        self._page.pack(fill="both", expand=True)
+        self.transient(tk_master)
+        self.grab_set()

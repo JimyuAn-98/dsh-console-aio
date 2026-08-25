@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# mgmt_agents.py — Agent 模式管理对话框: 只读浏览 .agent-presets 各模式并展示 preset.yml。
+# mgmt_agents.py — Agent 模式管理(AgentPage 页面 + AgentDialog 兼容包装):
+# 只读浏览 .agent-presets 各模式并展示 preset.yml。
 # 数据全部来自 dsh_data.list_agent_presets() / dsh_data.read_yaml(), 不做任何写入。
 
 import os
@@ -87,27 +88,17 @@ def _fmt_yaml(data, indent=0):
     return lines
 
 
-class AgentDialog(tk.Toplevel):
-    # Agent 模式管理: 浏览 .agent-presets 下各模式, 只读展示 preset.yml。
-    # Agent 模式是会话级选择(session 记录 agent-preset/selected), 控制台不做修改。
+class AgentPage(ttk.Frame):
+    # Agent 模式管理页面: 浏览 .agent-presets 下各模式, 只读展示 preset.yml。
+    # 挂载到容器 Frame, app 为 Dashboard 实例(可 None); 页面不负责窗口级行为。
 
-    def __init__(self, master):
-        # master 可以是 Dashboard 实例(推荐) 或 Tk 根窗口
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("Agent 模式管理")
-        self.configure(padx=15, pady=12)
-        self.geometry("860x520")
-        self.minsize(700, 420)
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self._app = app
+        # master 兼容: 无 Dashboard(裸 Tk 根窗口)时相关转发静默
+        self._master = app
         self._presets = []
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
         self._refresh()
 
     def _build(self):
@@ -151,12 +142,11 @@ class AgentDialog(tk.Toplevel):
         txt.pack(side="left", fill="both", expand=True)
         tsb.pack(side="right", fill="y")
         self._detail = txt
-        # 底部按钮
+        # 底部按钮(关闭按钮由 Dialog 包装层提供, 页面随容器销毁)
         btns = ttk.Frame(wrap)
         btns.pack(fill="x", pady=(12, 0))
         ttk.Button(btns, text="打开 .agent-presets 目录", command=self._open_dir).pack(side="left", padx=4)
         ttk.Button(btns, text="刷新", command=self._refresh).pack(side="left", padx=4)
-        ttk.Button(btns, text="关闭", command=self.destroy).pack(side="right", padx=4)
 
     def _refresh(self):
         self._presets = dsh_data.list_agent_presets()
@@ -204,3 +194,29 @@ class AgentDialog(tk.Toplevel):
             os.startfile(base)
         except Exception as e:
             messagebox.showerror("无法打开", str(e), parent=self)
+
+
+class AgentDialog(tk.Toplevel):
+    # 兼容包装: 主程序菜单仍以独立窗口打开, 实际 UI 是内嵌的 AgentPage。
+    # master 兼容 Dashboard 实例或 Tk 根窗口(hasattr(master, "root") 判断)。
+
+    def __init__(self, master):
+        # master 可以是 Dashboard 实例(推荐) 或 Tk 根窗口
+        if hasattr(master, "root"):
+            tk_master = master.root
+            app = master
+        else:
+            tk_master = master
+            app = None
+        super().__init__(tk_master)
+        self.title("Agent 模式管理")
+        self.configure(padx=15, pady=12)
+        self.geometry("860x520")
+        self.minsize(700, 420)
+        self._master = app  # 兼容旧代码访问
+        self._page = AgentPage(self, app)
+        self._page.pack(fill="both", expand=True)
+        # 关闭按钮由包装层提供(页面内不负责销毁)
+        ttk.Button(self, text="关闭", command=self.destroy).pack(anchor="e", padx=15, pady=(0, 12))
+        self.transient(tk_master)
+        self.grab_set()

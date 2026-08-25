@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# mgmt_profiles.py — Profile 管理对话框: 浏览/复制/删除 ~/.dsh/profiles。
+# mgmt_profiles.py — Profile 管理(ProfilePage 页面 + ProfileDialog 兼容包装):
+# 浏览/复制/删除 ~/.dsh/profiles。
 # 复制排除 node_modules; web 是默认 Profile 不可删除。dsh web 等价 dsh --profile web。
 
 import os
@@ -30,29 +31,19 @@ def _load_dash_cmd():
         return []
 
 
-class ProfileDialog(tk.Toplevel):
-    # Profile 管理: dsh 用 dsh --profile <名> 启动; dsh web 等价 dsh --profile web。
+class ProfilePage(ttk.Frame):
+    # Profile 管理页面: 浏览/复制/删除 ~/.dsh/profiles。
+    # 挂载到容器 Frame, app 为 Dashboard 实例(可 None); 页面不负责窗口级行为。
 
-    def __init__(self, master, dash_cmd=None):
-        # master 可以是 Dashboard 实例(推荐) 或 Tk 根窗口
-        # dash_cmd 允许上层注入, 缺省读 config.json
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("Profile 管理")
-        self.configure(padx=15, pady=12)
-        self.geometry("640x480")
-        self.minsize(560, 400)
+    def __init__(self, parent, app, dash_cmd=None):
+        super().__init__(parent)
+        self._app = app
+        # master 兼容: 无 Dashboard(裸 Tk 根窗口)时相关转发静默
+        self._master = app
         if dash_cmd is None:
             dash_cmd = _load_dash_cmd()
         self._is_web_current = "web" in dash_cmd
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
         self._refresh()
 
     def _build(self):
@@ -80,13 +71,13 @@ class ProfileDialog(tk.Toplevel):
         tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self._tree = tree
+        # 底部按钮(关闭按钮由 Dialog 包装层提供, 页面随容器销毁)
         btns = ttk.Frame(wrap)
         btns.pack(fill="x", pady=(10, 0))
         ttk.Button(btns, text="复制 Profile", command=self._copy_profile).pack(side="left", padx=4)
         ttk.Button(btns, text="删除 Profile", command=self._delete_profile).pack(side="left", padx=4)
         ttk.Button(btns, text="打开目录", command=self._open_dir).pack(side="left", padx=4)
         ttk.Button(btns, text="刷新", command=self._refresh).pack(side="left", padx=4)
-        ttk.Button(btns, text="关闭", command=self.destroy).pack(side="right", padx=4)
 
     def _refresh(self):
         self._tree.delete(*self._tree.get_children())
@@ -149,6 +140,12 @@ class ProfileDialog(tk.Toplevel):
         threading.Thread(target=worker, daemon=True).start()
 
     def _copy_done(self, msg, err):
+        try:
+            self._copy_done_do(msg, err)
+        except tk.TclError:
+            pass  # 页面已随容器销毁, 丢弃收尾
+
+    def _copy_done_do(self, msg, err):
         self._refresh()
         if err:
             messagebox.showerror("复制 Profile", "%s：%s" % (msg, err), parent=self)
@@ -186,6 +183,12 @@ class ProfileDialog(tk.Toplevel):
         threading.Thread(target=worker, daemon=True).start()
 
     def _delete_done(self, msg, err):
+        try:
+            self._delete_done_do(msg, err)
+        except tk.TclError:
+            pass  # 页面已随容器销毁, 丢弃收尾
+
+    def _delete_done_do(self, msg, err):
         self._refresh()
         if err:
             messagebox.showerror("删除 Profile", "%s：%s" % (msg, err), parent=self)
@@ -206,3 +209,30 @@ class ProfileDialog(tk.Toplevel):
             os.startfile(target)
         except Exception as e:
             messagebox.showerror("无法打开", str(e), parent=self)
+
+
+class ProfileDialog(tk.Toplevel):
+    # 兼容包装: 主程序菜单仍以独立窗口打开, 实际 UI 是内嵌的 ProfilePage。
+    # master 兼容 Dashboard 实例或 Tk 根窗口(hasattr(master, "root") 判断);
+    # dash_cmd 允许上层注入, 缺省读 config.json。
+
+    def __init__(self, master, dash_cmd=None):
+        # master 可以是 Dashboard 实例(推荐) 或 Tk 根窗口
+        if hasattr(master, "root"):
+            tk_master = master.root
+            app = master
+        else:
+            tk_master = master
+            app = None
+        super().__init__(tk_master)
+        self.title("Profile 管理")
+        self.configure(padx=15, pady=12)
+        self.geometry("640x480")
+        self.minsize(560, 400)
+        self._master = app  # 兼容旧代码访问
+        self._page = ProfilePage(self, app, dash_cmd=dash_cmd)
+        self._page.pack(fill="both", expand=True)
+        # 关闭按钮由包装层提供(页面内不负责销毁)
+        ttk.Button(self, text="关闭", command=self.destroy).pack(anchor="e", padx=15, pady=(0, 12))
+        self.transient(tk_master)
+        self.grab_set()

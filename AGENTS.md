@@ -10,7 +10,7 @@ dsh-console-aio — 零依赖 Windows GUI（Python stdlib tkinter），面向 ds
 
 ## 仓库布局
 
-dsh-console-aio.py   主程序（GUI + 隧道/监控/环境/安装 + 顶部"dsh 管理"菜单）
+dsh-console-aio.py   主程序（控制台布局: 顶部部署栏 + 左导航 + 中栏页面容器 + 右状态 + 底部日志）
 tunnel_mgr.py           纯 Python 隧道管理器（Tunnel 类: forward/reverse, start/persist/stop）
 dsh_data.py             数据层（~/.dsh 各数据域读取/写入/备份，纯函数零依赖）
 mgmt_*.py               管理窗口模块（会话/Agent模式/Profile/插件/任务看板/用量/LLM/主题/运维/版本管理）
@@ -22,9 +22,7 @@ legacy/                 旧 .ps1（只读历史参考，界面不再调用）
 docs/                   方案归档（ARCHITECTURE.md 架构 + PLANS.md 功能全景与路线）
 .agents/notes/          Agent Note 决策记录（见 .agents/notes/README.md）
 
-架构分层（详见 docs/ARCHITECTURE.md）：主程序只管导航与既有功能；数据层 dsh_data.py
-（纯函数）与 UI 分离；每个管理窗口一个 mgmt_*.py，提供 Toplevel 子类，由主程序
-_open_mgmt() 动态加载。新增管理窗口 = 新文件 + 在 _build_ui 的菜单注册一行。
+架构分层（详见 docs/ARCHITECTURE.md）：主程序控制台布局（顶部部署栏 + 左导航 + 中栏页面容器 + 右状态 + 底部日志）；数据层 dsh_data.py（纯函数，含 DshRemote 远程抽象）；每个管理域一个 mgmt_*.py，提供 XxxPage(ttk.Frame) 页面类（左导航切换）与 XxxDialog(Toplevel) 兼容包装。新增页面 = 新文件 + NAV_ITEMS/PAGE_MODULES 注册。页面用 self._app 访问主程序；部署联动用 app._current_deploy 构造 DshRemote。
 
 ## 命令
 

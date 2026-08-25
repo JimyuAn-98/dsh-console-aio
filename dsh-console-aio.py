@@ -36,7 +36,8 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-import tunnel_mgr  # 纯 Python 隧道管理器
+import tunnel_mgr
+import dsh_data  # 纯 Python 隧道管理器
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
@@ -133,6 +134,35 @@ REVERSE_PORT = CONFIG["reverse_port"]
 #   start / persist / stop   (隧道脚本, 支持 -Persist / -Stop)
 #   start / stop             (本机 dsh, 本地服务)
 #   run                      (update-dsh: 一次完整更新, 无启停语义)
+# 左导航页面注册: (显示名, key); PAGE_MODULES: key -> (模块, Page类)
+NAV_ITEMS = [
+    ("总览", "overview"),
+    ("会话与工作区", "sessions"),
+    ("Agent 模式", "agents"),
+    ("Profile 管理", "profiles"),
+    ("插件管理", "plugins"),
+    ("任务看板", "taskboard"),
+    ("模型用量", "usage"),
+    ("LLM 配置", "llm"),
+    ("主题外观", "theme"),
+    ("备份与运维", "ops"),
+    ("关于与更新", "version"),
+    ("部署管理", "deployments"),
+]
+PAGE_MODULES = {
+    "sessions": ("mgmt_sessions", "SessionPage"),
+    "agents": ("mgmt_agents", "AgentPage"),
+    "profiles": ("mgmt_profiles", "ProfilePage"),
+    "plugins": ("mgmt_plugins", "PluginPage"),
+    "taskboard": ("mgmt_taskboard", "TaskboardPage"),
+    "usage": ("mgmt_usage", "UsagePage"),
+    "llm": ("mgmt_llm", "LlmPage"),
+    "theme": ("mgmt_theme", "ThemePage"),
+    "ops": ("mgmt_ops", "OpsPage"),
+    "version": ("mgmt_version", "VersionPage"),
+    "deployments": ("mgmt_deployments", "DeploymentPage"),
+}
+
 ITEMS = [
     {"type": "dsh",    "key": "dsh-web", "title": "本机 dsh", "port": DASH_PORT,
      "actions": ["start", "stop"],
@@ -724,11 +754,24 @@ class Dashboard:
     # ── UI ────────────────────────────────
     def _build_ui(self):
         pad = 10
+        # ── 顶部栏: 标题 + 部署选择器 + 动作按钮 ──
         top = ttk.Frame(self.root)
         top.pack(fill="x", padx=pad, pady=(pad, 4))
         ttk.Label(top, text="dsh 控制台", font=("Segoe UI", 16, "bold")).pack(side="left")
-        ttk.Label(top, text=f"  本机轮询 {POLL_SECONDS}s · SSH直查 {REMOTE_POLL_SECONDS}s",
+        ttk.Label(top, text="  v" + APP_VERSION, font=F_SMALL, foreground="#888").pack(side="left")
+        ttk.Label(top, text="   部署:").pack(side="left")
+        self.deploy_var = tk.StringVar(value="本机")
+        self.deploy_combo = ttk.Combobox(top, textvariable=self.deploy_var,
+                                         state="readonly", width=14, font=F_SMALL)
+        self.deploy_combo.pack(side="left", padx=(2, 8))
+        self.deploy_combo.bind("<<ComboboxSelected>>", self._on_deploy_changed)
+        ttk.Label(top, text=f"轮询 {POLL_SECONDS}s·{REMOTE_POLL_SECONDS}s",
                   font=F_SMALL, foreground="#666").pack(side="left")
+        # 右侧按钮
+        ttk.Button(top, text="立即刷新", command=self._force_refresh).pack(side="right")
+        ttk.Button(top, text="配置", command=self._open_config).pack(side="right", padx=(0, 6))
+        ttk.Button(top, text="安装 dsh", command=self._open_install).pack(side="right", padx=(0, 6))
+        ttk.Button(top, text="环境", command=self._open_env).pack(side="right", padx=(0, 6))
         mgmt_btn = tk.Menubutton(top, text="dsh 管理", relief="raised", padx=6)
         mgmt_menu = tk.Menu(mgmt_btn, tearoff=0)
         mgmt_btn.configure(menu=mgmt_menu)
@@ -747,62 +790,69 @@ class Dashboard:
         ]:
             mgmt_menu.add_command(label=_label, command=lambda m=_mod, c=_cls: self._open_mgmt(m, c))
         mgmt_btn.pack(side="right", padx=(0, 6))
-        ttk.Button(top, text="环境", command=self._open_env).pack(side="right", padx=(0, 6))
-        ttk.Button(top, text="安装 dsh", command=self._open_install).pack(side="right", padx=(0, 6))
-        ttk.Button(top, text="配置", command=self._open_config).pack(side="right", padx=(0, 6))
-        ttk.Button(top, text="立即刷新", command=self._force_refresh).pack(side="right")
 
-        cards = ttk.LabelFrame(self.root, text="操控", padding=8)
-        cards.pack(fill="x", padx=pad, pady=4)
-        self.cards = {}
-        for i, cfg_item in enumerate(ITEMS):
-            cards.columnconfigure(i, weight=1)
-            self.cards[cfg_item["key"]] = self._build_card(cards, cfg_item, i)
-
-        # ── 健康监控 ──
-        mon = ttk.LabelFrame(self.root, text="健康监控", padding=8)
-        mon.pack(fill="x", padx=pad, pady=4)
+        # ── 主体: 左导航 + 中栏页面 + 右状态 ──
+        body = ttk.Frame(self.root)
+        body.pack(fill="both", expand=True, padx=pad, pady=4)
+        navf = ttk.Frame(body)
+        navf.pack(side="left", fill="y")
+        self.nav_list = tk.Listbox(navf, width=13, font=F_SMALL, relief="flat",
+                                   highlightthickness=1, activestyle="none")
+        self.nav_list.pack(fill="both", expand=True)
+        for _label, _key in NAV_ITEMS:
+            self.nav_list.insert("end", _label)
+        self.nav_list.bind("<<ListboxSelect>>", self._on_nav)
+        # 中栏页面容器
+        center = ttk.Frame(body)
+        center.pack(side="left", fill="both", expand=True, padx=(6, 0))
+        self.page_host = ttk.Frame(center)
+        self.page_host.pack(fill="both", expand=True)
+        # 右状态栏
+        right = ttk.LabelFrame(body, text="状态", padding=6)
+        right.pack(side="left", fill="y", padx=(6, 0))
         self.mon_widgets = {}
-
-        ttk.Label(mon, text="本机端口", font=F_BOLD,
-                  foreground="#555").pack(anchor="w")
-        row1 = ttk.Frame(mon)
-        row1.pack(fill="x", pady=(2, 8))
+        ttk.Label(right, text="本机端口", font=F_BOLD, foreground="#555").pack(anchor="w")
+        r1 = ttk.Frame(right)
+        r1.pack(fill="x", pady=(2, 8))
         for port, label, note in LOCAL_PORTS:
-            self._add_mon_cell(row1, f"L{port}", label, f"端口 {port}", note)
-
-        ttk.Label(mon, text="公网服务器 反向隧道（SSH 直查, 仅绑回环）", font=F_BOLD,
-                  foreground="#555").pack(anchor="w")
-        row2 = ttk.Frame(mon)
-        row2.pack(fill="x", pady=(2, 4))
+            self._add_mon_cell(r1, "L" + str(port), label, "端口 " + str(port), note)
+        ttk.Label(right, text="公网服务器 反向隧道", font=F_BOLD, foreground="#555").pack(anchor="w")
+        r2 = ttk.Frame(right)
+        r2.pack(fill="x", pady=(2, 4))
         for port, label, note in REMOTE_TUNNELS:
-            self._add_mon_cell(row2, f"R{port}", label, f"公网服务器 端口 {port}", note)
-        f = ttk.Frame(row2)
+            self._add_mon_cell(r2, "R" + str(port), label, "端口 " + str(port), note)
+        f = ttk.Frame(r2)
         f.pack(side="left", expand=True, fill="both", padx=4)
-        dot公网服务器 = tk.Label(f, text="●", font=("Segoe UI", 13), fg=COLOR_OFF)
-        dot公网服务器.pack()
+        d = tk.Label(f, text="●", font=("Segoe UI", 12), fg=COLOR_OFF)
+        d.pack()
         ttk.Label(f, text="公网服务器 SSH", font=F_BOLD).pack()
-        self.det公网服务器 = ttk.Label(f, text="--", font=F_SMALL, foreground="#888")
-        self.det公网服务器.pack()
-        ttk.Label(f, text="公网 :22", font=F_SMALL, foreground="#aaa").pack()
-        self.mon_widgets["公网服务器"] = (dot公网服务器, self.det公网服务器)
+        det = ttk.Label(f, text="--", font=F_SMALL, foreground="#888")
+        det.pack()
+        self.mon_widgets["公网服务器"] = (d, det)
 
-        # ── 日志 ──
-        logf = ttk.LabelFrame(self.root, text="运行日志", padding=8)
-        logf.pack(fill="both", expand=True, padx=pad, pady=4)
-        self.log_text = tk.Text(logf, height=8, wrap="word", font=F_MONO,
+        # ── 底部: 控制台输出 ──
+        logf = ttk.LabelFrame(self.root, text="控制台输出", padding=4)
+        logf.pack(fill="both", expand=True, padx=pad, pady=(4, 0))
+        self.log_text = tk.Text(logf, height=7, wrap="word", font=F_MONO,
                                 state="disabled", bg="#1e1e1e", fg="#e6e6e6")
         sb = ttk.Scrollbar(logf, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=sb.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        self.log_text.tag_configure("ok",   foreground="#7ecb6a")
-        self.log_text.tag_configure("err",  foreground=COLOR_RED)
+        self.log_text.tag_configure("ok", foreground="#7ecb6a")
+        self.log_text.tag_configure("err", foreground=COLOR_RED)
         self.log_text.tag_configure("warn", foreground=COLOR_WARN)
 
-        self.status = ttk.Label(self.root, text="就绪",
-                                anchor="w", font=F_SMALL, relief="sunken")
+        self.status = ttk.Label(self.root, text="就绪", anchor="w",
+                                font=F_SMALL, relief="sunken")
         self.status.pack(fill="x", side="bottom")
+
+        # ── 部署列表 + 默认页 ──
+        self._current_deploy = None
+        self._current_page_key = None
+        self._refresh_deploy_list()
+        self._show_page("overview")
+
 
     def _add_mon_cell(self, parent, key, label, portline, note):
         f = ttk.Frame(parent)
@@ -814,6 +864,66 @@ class Dashboard:
         det.pack()
         ttk.Label(f, text=portline, font=F_SMALL, foreground="#aaa").pack()
         self.mon_widgets[key] = (dot, det)
+
+    # ── 导航与页面 ──────────────────────────
+    def _on_nav(self, _evt=None):
+        sel = self.nav_list.curselection()
+        if not sel:
+            return
+        self._show_page(NAV_ITEMS[sel[0]][1])
+
+    def _show_page(self, key):
+        # 切换中栏页面: 销毁旧页面并构建新页面(总览内置, 其余动态加载 mgmt 模块 Page)
+        for w in self.page_host.winfo_children():
+            w.destroy()
+        self._current_page_key = key
+        if key == "overview":
+            self._build_overview_page(self.page_host)
+            return
+        mod_name, cls_name = PAGE_MODULES.get(key, (None, None))
+        if not mod_name:
+            self.log("未知页面: " + str(key), "err")
+            return
+        try:
+            mod = importlib.import_module(mod_name)
+            cls = getattr(mod, cls_name)
+            if key == "version":
+                page = cls(self.page_host, self, APP_VERSION)
+            else:
+                page = cls(self.page_host, self)
+            page.pack(fill="both", expand=True)
+        except Exception as e:
+            self.log("打开页面 " + str(key) + " 失败: " + str(e), "err")
+
+    def _build_overview_page(self, parent):
+        # 总览页: 隧道操控卡片(健康状态在右侧栏)
+        cards = ttk.LabelFrame(parent, text="操控", padding=8)
+        cards.pack(fill="x", pady=(0, 6))
+        self.cards = {}
+        for i, cfg_item in enumerate(ITEMS):
+            cards.columnconfigure(i, weight=1)
+            self.cards[cfg_item["key"]] = self._build_card(cards, cfg_item, i)
+        ttk.Label(parent, text="隧道/健康状态见右侧状态栏；更多管理功能见左侧导航。",
+                  font=F_SMALL, foreground="#888").pack(anchor="w")
+
+    # ── 部署选择器 ──────────────────────────
+    def _refresh_deploy_list(self):
+        self._deployments = [{"name": "本机", "host": ""}] + dsh_data.load_deployments()
+        self.deploy_combo["values"] = [d.get("name") or "?" for d in self._deployments]
+        self.deploy_var.set("本机")
+        self._current_deploy = None
+
+    def _on_deploy_changed(self, _evt=None):
+        name = self.deploy_var.get()
+        dep = None
+        for d in self._deployments:
+            if d.get("name") == name and d.get("host"):
+                dep = d
+                break
+        self._current_deploy = dep
+        self.log("切换部署: " + name + (" (" + dep.get("host") + ")" if dep else ""), "warn")
+        if self._current_page_key:
+            self._show_page(self._current_page_key)
 
     def _open_config(self):
         from copy import deepcopy
@@ -1251,14 +1361,28 @@ class Dashboard:
             results[port] = tcp_ok("127.0.0.1", port)
         results["公网服务器"] = tcp_ok(SSH_SERVER, 22)
         ssh_count = ssh_proc_count()
-        self._render(results, ssh_count)
+        # 后台线程预计算隧道状态(端口探测/读PID), 主线程 apply 只做 UI 更新(防阻塞)
+        py_state = {}
+        cards = getattr(self, "cards", {}) or {}
+        for key, card in cards.items():
+            cfg_item = card.get("cfg") or {}
+            port = cfg_item.get("port")
+            if port is None or port < 0:
+                py_state[key] = False
+            elif cfg_item.get("backend") == "python":
+                try:
+                    t = self._build_tunnel(cfg_item)
+                    py_state[key] = t.is_running()
+                except Exception:
+                    py_state[key] = False
+        self._render(results, ssh_count, py_state)
 
     def _remote_tick(self):
         state = probe_remote_tunnels()
         self.remote_state = state
         self._render_remote(state)
 
-    def _render(self, results, ssh_count):
+    def _render(self, results, ssh_count, py_state=None):
         # 本机端口健康（不含 公网服务器 公网连通, 概念分开）
         local_ok = [port for port, (ok, _) in results.items()
                     if port != "公网服务器" and ok]
@@ -1268,36 +1392,42 @@ class Dashboard:
         summary = (f"本机端口 {len(local_ok)}/{local_total} · {ssh_txt}"
                    f" · ssh.exe {ssh_count if ssh_count >= 0 else '?'}")
         def apply():
-            for port, (ok, dt) in results.items():
-                if port == "公网服务器":
-                    dot, det = self.mon_widgets["公网服务器"]
-                    dot.configure(fg=COLOR_ON if ok else COLOR_RED)
-                    det.configure(text="在线" if ok else "不可达")
-                    continue
-                key = f"L{port}"
-                if key not in self.mon_widgets:
-                    continue
-                dot, det = self.mon_widgets[key]
-                dot.configure(fg=COLOR_ON if ok else COLOR_RED)
-                det.configure(text=f"{dt}ms" if ok else "未就绪")
-            for key, card in self.cards.items():
-                cfg_item = card["cfg"]
-                port = cfg_item["port"]
-                if port is None or port < 0:
-                    card["st"].configure(text="○ 空闲", fg=COLOR_OFF)
-                    continue
-                on = False
-                if cfg_item.get("backend") == "python":
-                    # 纯 Python 隧道: 用隧道管理器判断(forward 看端口, reverse 看 PID 轨道)
-                    on = self._py_tunnel_running(cfg_item)
-                elif port:
-                    on = port in results and results[port][0]
-                else:
-                    on = ssh_count > 0
-                card["st"].configure(text="● 运行中" if on else "○ 停止",
-                                     fg=COLOR_ON if on else COLOR_OFF)
-            self.status.configure(text=summary)
+            try:
+                self._render_apply(results, ssh_count, py_state, summary)
+            except tk.TclError:
+                pass   # 页面已切换/窗口关闭, 卡片销毁, 忽略
         self.root.after(0, apply)
+
+    def _render_apply(self, results, ssh_count, py_state, summary):
+        # 主线程 UI 更新(无 IO): 监控点 + 卡片 + 状态栏
+        for port, (ok, dt) in results.items():
+            if port == "公网服务器":
+                dot, det = self.mon_widgets["公网服务器"]
+                dot.configure(fg=COLOR_ON if ok else COLOR_RED)
+                det.configure(text="在线" if ok else "不可达")
+                continue
+            key = "L" + str(port)
+            if key not in self.mon_widgets:
+                continue
+            dot, det = self.mon_widgets[key]
+            dot.configure(fg=COLOR_ON if ok else COLOR_RED)
+            det.configure(text=str(dt) + "ms" if ok else "未就绪")
+        cards = getattr(self, "cards", {}) or {}
+        for key, card in cards.items():
+            cfg_item = card.get("cfg") or {}
+            port = cfg_item.get("port")
+            if port is None or port < 0:
+                card["st"].configure(text="○ 空闲", fg=COLOR_OFF)
+                continue
+            if cfg_item.get("backend") == "python":
+                on = bool((py_state or {}).get(key))
+            elif port:
+                on = port in results and results[port][0]
+            else:
+                on = ssh_count > 0
+            card["st"].configure(text="● 运行中" if on else "○ 停止",
+                                 fg=COLOR_ON if on else COLOR_OFF)
+        self.status.configure(text=summary)
 
     def _py_tunnel_running(self, cfg_item):
         """纯 Python 隧道在线判断: forward 探测端口, reverse 查 PID 轨道。"""

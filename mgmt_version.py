@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# mgmt_version.py — 版本管理窗口: 当前版本/检查更新/更新日志/一键自动更新。
+# mgmt_version.py — 版本管理: 当前版本/检查更新/更新日志/一键自动更新。
+# 提供 VersionPage(ttk.Frame 内嵌页面) 与 VersionDialog(Toplevel 兼容包装)。
 import os
 import sys
 import json
@@ -56,25 +57,19 @@ def _resource_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-class VersionDialog(tk.Toplevel):
-    # master 兼容 Dashboard / Tk root; version = 当前 APP_VERSION
+class VersionPage(ttk.Frame):
+    # 版本管理内嵌页面: parent=容器 Frame, app=Dashboard 实例, version=当前 APP_VERSION。
+    # 检查更新/更新日志/一键更新逻辑与原 VersionDialog 完全一致;
+    # 窗口级职责(标题/transient/grab_set)交给外层 Toplevel。
 
-    def __init__(self, master, version):
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
+    def __init__(self, parent, app, version):
+        super().__init__(parent)
+        self._app = app
+        self._master = app   # 兼容原 self._master 用法(页面内按需访问)
         self._version = version
         self._latest = None       # 最新版本号或 None
         self._latest_notes = ""
-        self.title("关于与更新")
-        self.configure(padx=15, pady=12)
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
 
     def _build(self):
         wrap = ttk.Frame(self)
@@ -233,7 +228,8 @@ class VersionDialog(tk.Toplevel):
         messagebox.showerror("更新失败", "更新未完成，程序未改动。\n错误: " + err, parent=self)
 
     def _restart(self):
-        # 重启程序: 打包(exe)后直接重启 exe; 源码模式用解释器重启脚本
+        # 重启程序: 打包(exe)后直接重启 exe; 源码模式用解释器重启脚本。
+        # 页面本身不销毁, 关闭的是承载它的外层 Toplevel。
         base = _base_dir()
         try:
             subprocess = __import__("subprocess")
@@ -247,7 +243,7 @@ class VersionDialog(tk.Toplevel):
         except Exception:
             pass
         try:
-            self.destroy()
+            self.winfo_toplevel().destroy()
         except tk.TclError:
             pass
 
@@ -262,3 +258,24 @@ class VersionDialog(tk.Toplevel):
             os.startfile("https://github.com/JimyuAn-98/dsh-console-aio")
         except Exception as e:
             messagebox.showerror("无法打开", str(e), parent=self)
+
+
+class VersionDialog(tk.Toplevel):
+    # 兼容包装: 保持原 Toplevel 入口(master 兼容 Dashboard / Tk root), 内部内嵌 VersionPage。
+    # 窗口级职责(标题/transient/grab_set)只在这里, 页面不含。
+    def __init__(self, master, version):
+        if hasattr(master, "root"):
+            tk_master = master.root
+            self._master = master
+            app = master
+        else:
+            tk_master = master
+            self._master = None
+            app = None
+        super().__init__(tk_master)
+        self.title("关于与更新")
+        self.configure(padx=15, pady=12)
+        self._page = VersionPage(self, app, version)
+        self._page.pack(fill="both", expand=True)
+        self.transient(tk_master)
+        self.grab_set()

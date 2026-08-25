@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-# mgmt_usage.py — 模型用量统计窗口: 解压 ~/.dsh/sessions 聚合 token 用量并按模型/天展示。
-# 解压扫描较慢, 一律后台线程执行, 结果经 after(0,...) 回主线程更新(窗口关闭后忽略 TclError)。
+# mgmt_usage.py — 模型用量统计页面(UsagePage, ttk.Frame) + 独立窗口兼容包装(UsageDialog)。
+# 解压扫描较慢, 一律后台线程执行, 结果经 after(0,...) 回主线程更新(页面销毁后忽略 TclError)。
 # 价格表为内置估算单价(元/百万 token), 仅内存修改, 不写回任何文件。
 
 import threading
@@ -37,36 +37,23 @@ def _num(v):
         return "0"
 
 
-class UsageDialog(tk.Toplevel):
-    # 只读"模型用量统计"窗口 + 价格表(内存)编辑
-
-    def __init__(self, master):
-        # master 可以是 Dashboard(推荐) 或 Tk 根窗口
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("模型用量统计")
-        self.configure(padx=12, pady=10)
-        self.geometry("760x560")
-        self.minsize(720, 500)
+class UsagePage(ttk.Frame):
+    # 只读"模型用量统计"页面 + 价格表(内存)编辑。
+    # parent=容器 Frame, app=Dashboard 实例(裸 Tk 打开时为 None)。
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self._app = app
+        self._master = app   # 兼容旧逻辑(本页未用, 保持与其它页面一致)
         self._stats = None      # 最近一次 usage_stats() 结果(供价格修改后重算费用)
         self._busy = False
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
         self._refresh()
 
     def _build(self):
-        wrap = ttk.Frame(self)
-        wrap.pack(fill="both", expand=True)
+        # 页面自身即容器; pack 填充, 高度自适应(不写死)
+        ttk.Label(self, text="模型用量统计", font=F_BOLD).pack(anchor="w", pady=(0, 6))
 
-        ttk.Label(wrap, text="模型用量统计", font=F_BOLD).pack(anchor="w", pady=(0, 6))
-
-        top = ttk.Frame(wrap)
+        top = ttk.Frame(self)
         top.pack(fill="x", pady=(0, 6))
         self._status = ttk.Label(top, text="", font=F_SMALL, foreground="#888")
         self._status.pack(side="left")
@@ -77,7 +64,7 @@ class UsageDialog(tk.Toplevel):
         ttk.Button(top, text="编辑价格", command=self._edit_prices).pack(side="right", padx=(0, 4))
 
         # 按模型表格
-        mbox = ttk.LabelFrame(wrap, text="按模型", padding=6)
+        mbox = ttk.LabelFrame(self, text="按模型", padding=6)
         mbox.pack(fill="both", expand=True, pady=(0, 6))
         cols = [c[0] for c in MODEL_COLS]
         self._mtree = ttk.Treeview(mbox, columns=cols, show="headings", height=8)
@@ -91,7 +78,7 @@ class UsageDialog(tk.Toplevel):
         msb.pack(side="right", fill="y")
 
         # 按天表格
-        dbox = ttk.LabelFrame(wrap, text="按天", padding=6)
+        dbox = ttk.LabelFrame(self, text="按天", padding=6)
         dbox.pack(fill="x")
         dcols = [c[0] for c in DAY_COLS]
         self._dtree = ttk.Treeview(dbox, columns=dcols, show="headings", height=5)
@@ -103,11 +90,8 @@ class UsageDialog(tk.Toplevel):
         self._dtree.pack(side="left", fill="both", expand=True)
         dsb.pack(side="right", fill="y")
 
-        ttk.Label(wrap, text="估算费用按内置单价(元/百万 token)计算; 价格修改仅本次运行生效, 不写入文件。",
+        ttk.Label(self, text="估算费用按内置单价(元/百万 token)计算; 价格修改仅本次运行生效, 不写入文件。",
                   font=F_SMALL, foreground="#888").pack(anchor="w", pady=(8, 0))
-        btns = ttk.Frame(wrap)
-        btns.pack(fill="x", pady=(8, 0))
-        ttk.Button(btns, text="关闭", command=self.destroy).pack(side="left")
 
     def _refresh(self):
         # 后台线程扫描解压 session 文件, 完成后回主线程更新
@@ -280,3 +264,24 @@ class PriceDialog(tk.Toplevel):
         for name, p in updates.items():
             dsh_data.DEFAULT_PRICES[name] = p
         self.destroy()
+
+
+class UsageDialog(tk.Toplevel):
+    # 兼容包装: 独立窗口内嵌 UsagePage(保留原窗口行为: 标题/尺寸/transient/grab_set)。
+    def __init__(self, master):
+        # master 可以是 Dashboard(推荐) 或 Tk 根窗口
+        if hasattr(master, "root"):
+            tk_master = master.root
+            app = master
+        else:
+            tk_master = master
+            app = None
+        super().__init__(tk_master)
+        self.title("模型用量统计")
+        self.configure(padx=12, pady=10)
+        self.geometry("760x560")
+        self.minsize(720, 500)
+        self._page = UsagePage(self, app)
+        self._page.pack(fill="both", expand=True)
+        self.transient(tk_master)
+        self.grab_set()

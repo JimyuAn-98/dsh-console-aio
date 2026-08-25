@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# mgmt_deployments.py — 部署管理对话框(DeploymentDialog): v0.4 多部署管理。
+# mgmt_deployments.py — 部署管理: v0.4 多部署管理。
+# 提供 DeploymentPage(ttk.Frame 内嵌页面) 与 DeploymentDialog(Toplevel 兼容包装)。
 # 部署清单只存本地 config.json(gitignored); 远程操作为只读(cat/ls/du/echo),
 # 写操作(安装/升级/配置)留待后续版本。
 # 数据层接口: dsh_data.load_deployments() / save_deployments() / DshRemote / deployment_snapshot()。
@@ -110,9 +111,11 @@ class _AddDeployDialog(tk.Toplevel):
         self.destroy()
 
 
-class DeploymentDialog(tk.Toplevel):
-    # 部署管理: 上半区部署列表(本机 + config.json deployments), 下半区选中部署的只读快照详情。
-    # master 兼容 Dashboard 实例或 Tk 根窗口(hasattr(master, "root") 判断)。
+class DeploymentPage(ttk.Frame):
+    # 部署管理内嵌页面: 上半区部署列表(本机 + config.json deployments),
+    # 下半区选中部署的只读快照详情。parent=容器 Frame, app=Dashboard 实例。
+    # CRUD/快照刷新逻辑与原 DeploymentDialog 完全一致;
+    # 窗口级职责(标题/geometry/transient/grab_set)交给外层 Toplevel。
 
     # 详情区字段: (快照键, 界面名)
     _FIELDS = (
@@ -127,19 +130,10 @@ class DeploymentDialog(tk.Toplevel):
         ("error", "错误信息"),
     )
 
-    def __init__(self, master):
-        # 兼容两种 master: Dashboard(有 .root) 或裸 Tk 根窗口
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("部署管理")
-        self.geometry("720x540")
-        self.minsize(680, 480)
-        self.configure(padx=12, pady=10)
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self._app = app
+        self._master = app   # 兼容原 self._master 用法(页面内按需访问)
         self._deployments = []
         self._rows = []          # [{"iid", "deployment", "snap", "dep_index", "gen"}], 与 Treeview 行一一对应
         self._gen = 0            # 列表重建代数, 用于丢弃过期快照回调
@@ -151,8 +145,6 @@ class DeploymentDialog(tk.Toplevel):
         self._status_lbl = None
         self._detail_lbls = {}
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
         self._load()
 
     # ── UI 构建 ──────────────────────────────
@@ -415,3 +407,26 @@ class DeploymentDialog(tk.Toplevel):
     def _set_status(self, text, color="#888"):
         if self._status_lbl is not None:
             self._status_lbl.configure(text=text, foreground=color)
+
+
+class DeploymentDialog(tk.Toplevel):
+    # 兼容包装: 保持原 Toplevel 入口(master 兼容 Dashboard 实例或 Tk 根窗口),
+    # 内部内嵌 DeploymentPage。窗口级职责(标题/geometry/transient/grab_set)只在这里。
+    def __init__(self, master):
+        if hasattr(master, "root"):
+            tk_master = master.root
+            self._master = master
+            app = master
+        else:
+            tk_master = master
+            self._master = None
+            app = None
+        super().__init__(tk_master)
+        self.title("部署管理")
+        self.geometry("720x540")
+        self.minsize(680, 480)
+        self.configure(padx=12, pady=10)
+        self._page = DeploymentPage(self, app)
+        self._page.pack(fill="both", expand=True)
+        self.transient(tk_master)
+        self.grab_set()

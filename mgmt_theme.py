@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# mgmt_theme.py — 主题 / 外观配置管理窗口
+# mgmt_theme.py — 主题 / 外观配置管理(页面化): ThemePage 嵌入主界面, ThemeDialog 兼容包装
 # 只读展示 + 开关 settings.yaml 里的 UI 配置项, 每次切换前确认, 写后提示重启 dsh web 生效。
 
 import tkinter as tk
@@ -35,7 +35,7 @@ def _set_path(data, path, value):
     return data
 
 
-class ThemeDialog(tk.Toplevel):
+class ThemePage(ttk.Frame):
     # 开关项: (settings.yaml 键路径, 界面名, 说明)
     ITEMS = [
         (("skin-background", "enabled"), "皮肤背景", "web 界面使用皮肤背景"),
@@ -44,23 +44,12 @@ class ThemeDialog(tk.Toplevel):
         (("pet", "enabled"), "桌宠", "是否启用桌面宠物"),
     ]
 
-    def __init__(self, master):
-        # master 兼容 Dashboard 实例(推荐)或 Tk 根窗口
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("主题 / 外观")
-        self.geometry("560x420")
-        self.minsize(520, 380)
-        self.configure(padx=15, pady=12)
+    # parent=容器 Frame, app=Dashboard 实例(可为 None); 页面高度随容器自适应, 不设窗口尺寸。
+    def __init__(self, parent, app):
+        super().__init__(parent, padding=(15, 12))
+        self._app = app
         self._settings = self._load_settings()
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
 
     def _load_settings(self):
         # 读取 settings.yaml; 缺失/损坏时按空 dict 处理
@@ -96,8 +85,8 @@ class ThemeDialog(tk.Toplevel):
         foot.pack(fill="x", pady=(14, 0))
         ttk.Label(foot, text="修改写入 settings.yaml（自动备份 .bak），重启 dsh web 生效。",
                   font=F_SMALL, foreground="#888").pack(side="left")
-        ttk.Button(foot, text="重新读取", command=self._reload).pack(side="right", padx=(6, 0))
-        ttk.Button(foot, text="关闭", command=self.destroy).pack(side="right")
+        # 页面无"关闭"按钮: 页面随容器销毁, 关闭是外层 Toplevel 的事
+        ttk.Button(foot, text="重新读取", command=self._reload).pack(side="right")
         self._refresh()
 
     def _refresh(self):
@@ -132,7 +121,7 @@ class ThemeDialog(tk.Toplevel):
             messagebox.showerror("保存失败", "写入 settings.yaml 失败：%s" % e, parent=self)
             return
         self._refresh()
-        m = self._master
+        m = self._app
         if m is not None and hasattr(m, "log"):
             m.log("[主题] %s 已切换为 %s" % (label, new_txt), "ok")
         messagebox.showinfo("已保存", "「%s」已改为 %s。\n重启 dsh web 生效。" % (label, new_txt),
@@ -142,3 +131,24 @@ class ThemeDialog(tk.Toplevel):
         # 重新读取 settings.yaml 并刷新开关显示
         self._settings = self._load_settings()
         self._refresh()
+
+
+class ThemeDialog(tk.Toplevel):
+    # 兼容包装: 内容由 ThemePage 提供, 保留原 Toplevel 的窗口行为(标题/尺寸/transient/grab_set)
+    def __init__(self, master):
+        # master 兼容 Dashboard 实例(推荐)或 Tk 根窗口
+        if hasattr(master, "root"):
+            tk_master = master.root
+            app = master
+        else:
+            tk_master = master
+            app = None
+        super().__init__(tk_master)
+        self._master = app
+        self.title("主题 / 外观")
+        self.geometry("560x420")
+        self.minsize(520, 380)
+        self._page = ThemePage(self, app)
+        self._page.pack(fill="both", expand=True)
+        self.transient(tk_master)
+        self.grab_set()

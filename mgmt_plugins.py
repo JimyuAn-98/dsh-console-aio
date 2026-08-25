@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# mgmt_plugins.py — dsh 插件管理窗口(独立 Toplevel), 供 dsh-console-aio.py 集成。
+# mgmt_plugins.py — dsh 插件管理页面(PluginPage, ttk.Frame) + 独立窗口兼容包装(PluginDialog)。
+# 供 dsh-console-aio.py 集成: 左导航中栏内嵌 PluginPage; 旧入口仍可打开 PluginDialog 独立窗口。
 # 设计要点:
 #   - 已装插件真实来源 = profile/package.json 的 dsh.profile.bundles 数组
 #     (cordis.yml 是空组合架构, 只读参考; 用户可写层是 cordis.patch.yml)。
@@ -34,20 +35,13 @@ _PROTECTED_IDS = re.compile(
 )
 
 
-class PluginDialog(tk.Toplevel):
-    # master 可以是 Dashboard 实例(推荐) 或 Tk 根窗口; 与 EnvDialog 同样的兼容方式。
-    def __init__(self, master):
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("插件管理")
-        self.geometry("700x520")
-        self.minsize(660, 480)
-        self.configure(padx=12, pady=10)
+class PluginPage(ttk.Frame):
+    # 插件管理页面: parent=容器 Frame, app=Dashboard 实例(裸 Tk 打开时为 None)。
+    # 页面只负责内容与布局, 不做窗口级行为(标题/尺寸/transient/grab_set 属包装窗口)。
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self._app = app
+        self._master = app   # 兼容旧逻辑: _log/_run_stream 读取 self._master
         self._profiles = []
         self._entries = []      # [(tree_iid, entry_dict)], 与 Treeview 行一一对应
         self._tree = None
@@ -58,17 +52,14 @@ class PluginDialog(tk.Toplevel):
         self._profile_var = tk.StringVar()
         self._pkg_var = tk.StringVar(value="dshmarket")
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
         self._load_profiles()
 
     # ── UI ────────────────────────────────────────────
     def _build(self):
-        wrap = ttk.Frame(self)
-        wrap.pack(fill="both", expand=True)
+        # 页面自身即容器; pack 填充, 高度自适应(不写死)
 
         # 顶部: Profile 选择 + 刷新 + 打开 patch
-        top = ttk.Frame(wrap)
+        top = ttk.Frame(self)
         top.pack(fill="x", pady=(0, 6))
         ttk.Label(top, text="Profile:").pack(side="left")
         self._profile_cb = ttk.Combobox(top, textvariable=self._profile_var,
@@ -81,7 +72,7 @@ class PluginDialog(tk.Toplevel):
                   font=F_SMALL, foreground="#888").pack(side="right")
 
         # 插件列表
-        list_frame = ttk.Frame(wrap)
+        list_frame = ttk.Frame(self)
         list_frame.pack(fill="both", expand=True)
         cols = ("status", "name", "version", "source")
         self._tree = ttk.Treeview(list_frame, columns=cols, show="headings", height=12)
@@ -98,7 +89,7 @@ class PluginDialog(tk.Toplevel):
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
 
         # 安装行: npm 包名 + 官方 dsh plugin add
-        inst = ttk.Frame(wrap)
+        inst = ttk.Frame(self)
         inst.pack(fill="x", pady=(8, 2))
         ttk.Label(inst, text="安装插件( npm 包名 ):").pack(side="left")
         ttk.Entry(inst, textvariable=self._pkg_var, width=28).pack(side="left", padx=4)
@@ -107,7 +98,7 @@ class PluginDialog(tk.Toplevel):
                   font=F_SMALL, foreground="#888").pack(side="left", padx=6)
 
         # 操作行
-        btns = ttk.Frame(wrap)
+        btns = ttk.Frame(self)
         btns.pack(fill="x", pady=(6, 0))
         self._disable_btn = ttk.Button(btns, text="停用", command=self._disable, state="disabled")
         self._disable_btn.pack(side="left", padx=2)
@@ -117,10 +108,9 @@ class PluginDialog(tk.Toplevel):
         self._remove_btn.pack(side="left", padx=2)
         ttk.Label(btns, text="停用/启用写入 cordis.patch.yml(写前自动备份, HMR 约 1 秒生效)",
                   font=F_SMALL, foreground="#888").pack(side="left", padx=10)
-        ttk.Button(btns, text="关闭", command=self.destroy).pack(side="right")
 
         # 底部状态
-        self._status_lbl = ttk.Label(wrap, text="", font=F_SMALL, foreground="#888")
+        self._status_lbl = ttk.Label(self, text="", font=F_SMALL, foreground="#888")
         self._status_lbl.pack(fill="x", pady=(8, 0))
 
     # ── Profile / 列表 ────────────────────────────────
@@ -423,3 +413,24 @@ class PluginDialog(tk.Toplevel):
             os.startfile(p)
         except Exception as ex:
             messagebox.showerror("无法打开", str(ex), parent=self)
+
+
+class PluginDialog(tk.Toplevel):
+    # 兼容包装: 独立窗口内嵌 PluginPage(保留原窗口行为: 标题/尺寸/transient/grab_set)。
+    def __init__(self, master):
+        # master 可以是 Dashboard 实例(推荐) 或 Tk 根窗口; 与 EnvDialog 同样的兼容方式。
+        if hasattr(master, "root"):
+            tk_master = master.root
+            app = master
+        else:
+            tk_master = master
+            app = None
+        super().__init__(tk_master)
+        self.title("插件管理")
+        self.geometry("700x520")
+        self.minsize(660, 480)
+        self.configure(padx=12, pady=10)
+        self._page = PluginPage(self, app)
+        self._page.pack(fill="both", expand=True)
+        self.transient(tk_master)
+        self.grab_set()

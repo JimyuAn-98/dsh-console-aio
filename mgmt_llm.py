@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# mgmt_llm.py — LLM / 模型配置管理窗口
+# mgmt_llm.py — LLM / 模型配置管理(页面化): LlmPage 嵌入主界面, LlmDialog 兼容包装
 # 数据: ~/.dsh/settings.yaml 的 agent-default-model(读写) 与 llm-pi-ai.providers(只读)。
 # 密钥安全: apiKeyEnv 只引用环境变量名, 本窗口不读取/不写入/不展示密钥明文。
 # 风格: 与主程序 dsh-console-aio.py 的 EnvDialog 一致(ttk + transient + grab_set)。
@@ -21,29 +21,17 @@ BUILTIN_MODELS = list(dsh_data.DEFAULT_PRICES.keys())
 REASONING_LEVELS = ["min", "medium", "max"]
 
 
-class LlmDialog(tk.Toplevel):
+class LlmPage(ttk.Frame):
     # 查看/切换 agent-default-model, 只读展示自定义 providers。
-
-    def __init__(self, master):
-        # master 兼容 Dashboard 实例(推荐)或 Tk 根窗口
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("LLM / 模型配置")
-        self.geometry("720x540")
-        self.minsize(640, 480)
-        self.configure(padx=15, pady=12)
+    # parent=容器 Frame, app=Dashboard 实例(可为 None); 页面高度随容器自适应, 不设窗口尺寸。
+    def __init__(self, parent, app):
+        super().__init__(parent, padding=(15, 12))
+        self._app = app
         self._settings = self._load_settings()
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
 
     def _load_settings(self):
-        # 读取 settings.yaml; 文件缺失或损坏时按空 dict 处理, 不让窗口白屏
+        # 读取 settings.yaml; 文件缺失或损坏时按空 dict 处理, 不让页面白屏
         try:
             s = dsh_data.read_settings()
         except Exception:
@@ -109,11 +97,11 @@ class LlmDialog(tk.Toplevel):
         self._tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
 
+        # 页面无"关闭"按钮: 页面随容器销毁, 关闭是外层 Toplevel 的事
         foot = ttk.Frame(wrap)
         foot.pack(fill="x", pady=(10, 0))
         ttk.Label(foot, text="修改写入 settings.yaml（自动备份 .bak），重启 dsh web 生效。",
                   font=F_SMALL, foreground="#888").pack(side="left")
-        ttk.Button(foot, text="关闭", command=self.destroy).pack(side="right")
 
         self._provider_cb.bind("<<ComboboxSelected>>", self._on_provider_changed)
         self._load_current()
@@ -213,7 +201,7 @@ class LlmDialog(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("保存失败", "写入 settings.yaml 失败：%s" % e, parent=self)
             return
-        m = self._master
+        m = self._app
         if m is not None and hasattr(m, "log"):
             m.log("[LLM] 默认模型已改为 %s / %s" % (provider, model), "ok")
         messagebox.showinfo("已保存",
@@ -225,3 +213,24 @@ class LlmDialog(tk.Toplevel):
         self._settings = self._load_settings()
         self._load_current()
         self._fill_providers()
+
+
+class LlmDialog(tk.Toplevel):
+    # 兼容包装: 内容由 LlmPage 提供, 保留原 Toplevel 的窗口行为(标题/尺寸/transient/grab_set)
+    def __init__(self, master):
+        # master 兼容 Dashboard 实例(推荐)或 Tk 根窗口
+        if hasattr(master, "root"):
+            tk_master = master.root
+            app = master
+        else:
+            tk_master = master
+            app = None
+        super().__init__(tk_master)
+        self._master = app
+        self.title("LLM / 模型配置")
+        self.geometry("720x540")
+        self.minsize(640, 480)
+        self._page = LlmPage(self, app)
+        self._page.pack(fill="both", expand=True)
+        self.transient(tk_master)
+        self.grab_set()

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# mgmt_sessions.py — 会话与工作区管理对话框(SessionDialog)。
+# mgmt_sessions.py — 会话与工作区管理(SessionPage 页面 + SessionDialog 兼容包装)。
 # 只读 dsh_data.read_workspace()/list_sessions(); 写 workspace.json 前先 .bak 备份。
 # 删除分组用 shutil.rmtree, 必须二次确认; 本模块不执行任何子进程命令。
 
@@ -75,35 +75,25 @@ def _write_workspace_archived(session_ids):
     os.replace(tmp, p)
 
 
-class SessionDialog(tk.Toplevel):
-    # 会话与工作区管理: 工作区统计 + 会话分组列表 + 会话详情 + 归档/恢复/删除分组。
-    # master 兼容 Dashboard 实例或 Tk 根窗口(hasattr(master, "root") 判断)。
+class SessionPage(ttk.Frame):
+    # 会话与工作区管理页面: 挂载到容器 Frame, app 为 Dashboard 实例(可 None)。
+    # 页面不设窗口标题/transient/grab_set, 也不自行 destroy; 生命周期由容器管理。
 
-    def __init__(self, master):
-        # 兼容两种 master: Dashboard(有 .root) 或裸 Tk 根窗口
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("会话与工作区管理")
-        self.geometry("720x520")
-        self.minsize(640, 440)
-        self.configure(padx=12, pady=10)
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self._app = app
+        # master 兼容: 无 Dashboard(裸 Tk 根窗口)时日志转发静默
+        self._master = app
         self._group_map = {}
         self._archived = set()
         self._sel_group = None
         self._last_op_msg = None
         self._build()
-        self.transient(tk_master)
-        self.grab_set()
         self._refresh()
 
     # ── UI 构建 ──────────────────────────────
     def _build(self):
-        # 根网格: 第 0 行内容区(可伸缩), 第 1 行状态栏
+        # 根网格: 第 0 行内容区(可伸缩), 第 1 行状态栏; 高度随容器自适应
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
         wrap = ttk.Frame(self)
@@ -158,7 +148,7 @@ class SessionDialog(tk.Toplevel):
         dsd.pack(side="right", fill="y")
         self._detail_tree.tag_configure("archived", foreground="#888")
 
-        # ── 操作按钮 ──
+        # ── 操作按钮(关闭按钮由 Dialog 包装层提供, 页面随容器销毁) ──
         btns = ttk.Frame(wrap)
         btns.pack(fill="x", pady=(0, 4))
         self._btn_refresh = ttk.Button(btns, text="刷新", command=self._refresh)
@@ -167,7 +157,6 @@ class SessionDialog(tk.Toplevel):
         self._btn_archive.pack(side="left", padx=4)
         self._btn_delete = ttk.Button(btns, text="删除分组", command=self._delete_group)
         self._btn_delete.pack(side="left", padx=4)
-        ttk.Button(btns, text="关闭", command=self.destroy).pack(side="right", padx=4)
 
         # ── 底部状态栏 ──
         self._status_lbl = ttk.Label(self, text="就绪", anchor="w", font=F_SMALL, relief="sunken")
@@ -197,6 +186,13 @@ class SessionDialog(tk.Toplevel):
 
     def _apply_data(self, ws, groups, err):
         # 主线程回调: 用最新数据重绘工作区统计与分组树
+        try:
+            self._apply_data_do(ws, groups, err)
+        except tk.TclError:
+            pass  # 页面已随容器销毁(导航切换/对话框关闭), 丢弃重绘
+
+    def _apply_data_do(self, ws, groups, err):
+        # 重绘主体, 只在 widget 存活时执行
         self._btn_refresh.configure(state="normal")
         self._btn_archive.configure(state="normal")
         self._btn_delete.configure(state="normal")
@@ -335,6 +331,13 @@ class SessionDialog(tk.Toplevel):
     # ── 公共回调 ──────────────────────────────
     def _after_write(self, msg, err=None):
         # 写操作收尾: 失败置红提示并恢复按钮; 成功提示后自动刷新
+        try:
+            self._after_write_do(msg, err)
+        except tk.TclError:
+            pass  # 页面已随容器销毁, 丢弃收尾
+
+    def _after_write_do(self, msg, err=None):
+        # 收尾主体, 只在 widget 存活时执行
         self._btn_refresh.configure(state="normal")
         self._btn_archive.configure(state="normal")
         self._btn_delete.configure(state="normal")
@@ -360,3 +363,29 @@ class SessionDialog(tk.Toplevel):
             m.log("[会话管理] " + msg, tag)
         except Exception:
             pass  # 日志转发失败不影响对话框本身
+
+
+class SessionDialog(tk.Toplevel):
+    # 兼容包装: 主程序菜单仍以独立窗口打开, 实际 UI 是内嵌的 SessionPage。
+    # master 兼容 Dashboard 实例或 Tk 根窗口(hasattr(master, "root") 判断)。
+
+    def __init__(self, master):
+        # 兼容两种 master: Dashboard(有 .root) 或裸 Tk 根窗口
+        if hasattr(master, "root"):
+            tk_master = master.root
+            app = master
+        else:
+            tk_master = master
+            app = None
+        super().__init__(tk_master)
+        self.title("会话与工作区管理")
+        self.geometry("720x520")
+        self.minsize(640, 440)
+        self.configure(padx=12, pady=10)
+        self._master = app  # 兼容旧代码访问
+        self._page = SessionPage(self, app)
+        self._page.pack(fill="both", expand=True)
+        # 关闭按钮由包装层提供(页面内不负责销毁)
+        ttk.Button(self, text="关闭", command=self.destroy).pack(anchor="e", padx=12, pady=(0, 10))
+        self.transient(tk_master)
+        self.grab_set()
