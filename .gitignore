@@ -28,3 +28,6 @@ dsh使用指南.txt
 
 # 调研用的第三方仓库副本(不入库)
 _research/
+
+# 配置备份(含真实IP, 不入库)
+config.json.bak

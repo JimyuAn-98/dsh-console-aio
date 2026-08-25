@@ -205,3 +205,15 @@
 
 ### 安全原则
 - 只读优先; 远程写操作确认 + 日志; 部署信息只存 gitignored 的 config.json
+---
+
+## 9. 已知问题（Bug 清单）
+
+- **[BUG-001] 插件停用/启用不生效（2026-08-25 用户实测）**
+  - 现象: 停用 dshmarket 后, 刷新 dsh web 页面和重启 dsh web 都不生效。
+  - 状态: 已确认待修(v0.4 收尾后处理), 原因初步定位: entry id 不匹配。
+  - 分析: 插件列表显示的是 bundle 名(npm 包名, 如 dshmarket), 但 cordis loader entry 的 id 是插件自身声明的 id
+    (dsh-market 官方示例: - id: dsh-market, name: dshmarket, config: ... 说明 id != 包名)。
+    我们写入 patch 的是 bundle 名(匹配不上真实 entry), 导致 disabled 不生效。
+  - 修复方向: 用 dsh --profile X --dump-config 获取组合后的真实 entry id 列表, 建立 bundle名->entry id 映射;
+    停用/启用写入正确的 id。或读取插件 package.json 中声明的 id。
