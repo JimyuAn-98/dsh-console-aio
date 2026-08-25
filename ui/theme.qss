@@ -1,0 +1,100 @@
+* {
+    font-family: "Microsoft YaHei UI";
+    font-size: 13px;
+    color: #e6e6e6;
+}
+QMainWindow, QWidget#central, QWidget#body { background: #1e1e2e; }
+
+/* 顶部栏 */
+QFrame#topbar { background: #252535; border-bottom: 1px solid #33334a; }
+QLabel#titleLbl { font-size: 17px; font-weight: bold; color: #ffffff; }
+QLabel#verLbl { color: #9a9ab0; font-size: 12px; }
+QFrame#vsep { background: #3d3d5c; border: none; width: 1px; }
+QComboBox#deploy {
+    background: #2f2f45; border: 1px solid #3d3d5c; border-radius: 6px;
+    padding: 4px 10px; min-width: 130px; color: #e6e6e6;
+}
+QComboBox#deploy::drop-down { border: none; width: 22px; }
+QComboBox#deploy QAbstractItemView {
+    background: #2f2f45; border: 1px solid #3d3d5c; selection-background-color: #4f6ef7;
+    selection-color: #ffffff; color: #e6e6e6; outline: 0; padding: 4px;
+}
+
+QPushButton {
+    background: #2f2f45; border: 1px solid #3d3d5c; border-radius: 6px;
+    padding: 5px 14px; color: #e6e6e6;
+}
+QPushButton:hover { background: #3a3a58; border-color: #5858a0; }
+QPushButton:pressed { background: #26263a; }
+QPushButton:disabled { color: #6a6a80; background: #2a2a3c; }
+QPushButton#primary { background: #4f6ef7; border-color: #4f6ef7; color: #fff; font-weight: bold; }
+QPushButton#primary:hover { background: #6179ff; }
+
+/* 左导航 */
+QListWidget#nav {
+    background: #252535; border: none; border-right: 1px solid #33334a;
+    outline: 0; padding-top: 6px;
+}
+QListWidget#nav::item { padding: 9px 16px; border-left: 3px solid transparent; color: #b8b8cf; }
+QListWidget#nav::item:hover { background: #2e2e44; color: #fff; }
+QListWidget#nav::item:selected {
+    background: #2f3353; color: #ffffff; border-left: 3px solid #4f6ef7; font-weight: bold;
+}
+
+/* 右状态栏 */
+QFrame#rightBar { background: #252535; border-left: 1px solid #33334a; }
+QLabel#rightTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; font-weight: bold; }
+QLabel#monDot { font-size: 15px; }
+QLabel#monName { color: #e6e6e6; font-size: 12px; }
+QLabel#monNote { color: #9a9ab0; font-size: 11px; }
+QLabel#monVal { color: #e6e6e6; font-size: 12px; font-weight: bold; }
+
+/* 页面卡片 */
+QFrame#card {
+    background: #252535; border: 1px solid #33334a; border-radius: 10px;
+}
+QLabel#cardTitle { font-size: 15px; font-weight: bold; color: #ffffff; }
+QLabel#cardHint { color: #9a9ab0; font-size: 12px; }
+QFrame#pageHostBg { background: #1e1e2e; }
+
+/* 日志区 */
+QFrame#logWrap { background: #1e1e2e; border-top: 1px solid #33334a; }
+QLabel#logTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; }
+QTextEdit#log {
+    background: #16161f; border: 1px solid #2c2c40; border-radius: 8px;
+    padding: 6px; font-family: Consolas; font-size: 12px; color: #e6e6e6;
+    selection-background-color: #4f6ef7;
+}
+
+/* 底部状态栏 */
+QLabel#statusBar {
+    background: #252535; border-top: 1px solid #33334a;
+    padding: 5px 12px; color: #9a9ab0; font-size: 12px;
+}
+
+/* 全局滚动条(修掉白色拖拽条) */
+QScrollBar:vertical {
+    background: #1a1a28; width: 12px; margin: 0; border: none;
+}
+QScrollBar::handle:vertical {
+    background: #3d3d5c; min-height: 30px; border-radius: 6px; margin: 2px;
+}
+QScrollBar::handle:vertical:hover { background: #4f5674; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; background: none; border: none; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+QScrollBar:horizontal {
+    background: #1a1a28; height: 12px; margin: 0; border: none;
+}
+QScrollBar::handle:horizontal {
+    background: #3d3d5c; min-width: 30px; border-radius: 6px; margin: 2px;
+}
+QScrollBar::handle:horizontal:hover { background: #4f5674; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; background: none; border: none; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+
+/* 工具提示/下拉菜单也覆盖掉系统色 */
+QToolTip { background: #2f2f45; color: #e6e6e6; border: 1px solid #4f5674; padding: 4px 8px; }
+QMenu { background: #2f2f45; border: 1px solid #3d3d5c; }
+QMenu::item { padding: 6px 22px; }
+QMenu::item:selected { background: #4f6ef7; }
+QScrollArea { border: none; }

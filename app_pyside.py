@@ -146,6 +146,23 @@ QScrollArea { border: none; }
 """
 
 
+
+
+def _load_theme():
+    # 优先读独立 ui/theme.qss(可用 QssStylesheetEditor 等编辑);
+    # 打包(exe)时读冻结目录; 缺失/读取失败回退内嵌 QSS(兜底)。
+    if getattr(sys, 'frozen', False):
+        base = getattr(sys, '_MEIPASS', BASE_DIR)
+    else:
+        base = BASE_DIR
+    for cand in (os.path.join(base, 'ui', 'theme.qss'),
+                 os.path.join(BASE_DIR, 'ui', 'theme.qss')):
+        try:
+            with open(cand, encoding='utf-8') as f:
+                return f.read()
+        except Exception:
+            continue
+    return QSS
 # ---------------- 线程安全日志桥: 后台线程 -> Qt 主线程 ----------------
 class LogBridge(QObject):
     _sig = Signal(str, str)          # (text, tag)
@@ -324,7 +341,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("dsh 控制台 · PySide6 v" + APP_VERSION)
         self.resize(1160, 800)
         self.setMinimumSize(960, 620)
-        self.setStyleSheet(QSS)
+        self.setStyleSheet(_load_theme())
 
         self._current_page_key = None
         self._deployments = []
