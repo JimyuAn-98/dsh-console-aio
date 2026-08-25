@@ -370,10 +370,29 @@ class RightBar(QFrame):
         self.layout().addLayout(row)
         self._cells[key] = (dot, val)
 
+    def set_state(self, key, ok, ms=-1):
+        # 实时更新单元格状态: 圆点与数值配色(绿=在线/红=不可达)。
+        # ms=None 表示只有 on/off 信息(如远程隧道), 显示 在线/不可达; ms>=0 显示延迟。
+        cell = self._cells.get(key)
+        if cell is None:
+            return
+        dot, val = cell
+        color = "#43d17f" if ok else "#e5574d"
+        dot.setStyleSheet("color:%s;" % color)
+        if ms is None:
+            val.setText("在线" if ok else "不可达")
+        elif ok and ms >= 0:
+            val.setText("%dms" % ms)
+        else:
+            val.setText("未就绪")
+        val.setStyleSheet("color:%s;" % color)
+
 
 
 # ---------------- 主窗口 ----------------
 class MainWindow(QMainWindow):
+    _monitorGot = Signal(object, object, object)   # (local_map, ssh_count, remote_state) 后台探测回主线程
+
     def __init__(self, smoke=False):
         super().__init__()
         self.smoke = smoke
@@ -387,6 +406,7 @@ class MainWindow(QMainWindow):
         self.bridge = LogBridge()
         self.DASH_REPO = DASH_REPO          # 供插件等页面取 dsh 仓库目录(cwd)
         self.APP_VERSION = APP_VERSION
+        self._start_monitor()               # 右侧健康监控(实时探测端口/隧道)
 
         central = QWidget(objectName="central")
         self.setCentralWidget(central)
@@ -601,6 +621,53 @@ class MainWindow(QMainWindow):
             return False
         return True
 
+    # ---- 右侧健康监控(实时探测本机端口/公网隧道, 后台线程 + Signal 回主线程) ----
+    def _start_monitor(self):
+        self._monitor_busy = False
+        self._monitorGot.connect(self._apply_monitor)
+        self._monitor_timer = QTimer(self)
+        self._monitor_timer.timeout.connect(self._monitor_tick)
+        self._monitor_timer.start(3000)
+        if not self.smoke:
+            self._monitor_tick()   # 启动即探一次
+
+    def _monitor_tick(self):
+        if self._monitor_busy:
+            return
+        self._monitor_busy = True
+
+        def worker():
+            try:
+                local = {}
+                for port, _, _ in CONFIG.get("local_ports", []):
+                    local[port] = _probe("127.0.0.1", port)
+                if SSH_SERVER:
+                    local["__ssh__"] = _probe(SSH_SERVER, 22)
+                ssh_count = _ssh_proc_count()
+                remote = _probe_remote_tunnels()
+                self._monitorGot.emit(local, ssh_count, remote)
+            finally:
+                self._monitor_busy = False
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_monitor(self, local, ssh_count, remote):
+        # 主线程 UI 更新(无 IO): 右侧栏单元格配色 + 底部状态栏汇总
+        for port, (ok, ms) in (local or {}).items():
+            if port == "__ssh__":
+                continue
+            self.right.set_state("L%d" % port, ok, ms)
+        if remote is not None:
+            for port, ok in remote.items():
+                self.right.set_state("R%d" % port, ok, None)
+        local_ok = [p for p, (ok, _) in (local or {}).items() if p != "__ssh__" and ok]
+        local_total = len([1 for p, _, _ in CONFIG.get("local_ports", [])])
+        ssh_ok = (local or {}).get("__ssh__", (False, -1))[0]
+        ssh_txt = "公网服务器 在线" if ssh_ok else "公网服务器 不可达"
+        sc = ssh_count if isinstance(ssh_count, int) and ssh_count >= 0 else "?"
+        self._set_status("本机端口 %d/%d · %s · ssh.exe %s"
+                         % (len(local_ok), local_total, ssh_txt, sc))
+
 
 # ---------------- 入口 ----------------
 def main():
@@ -628,6 +695,53 @@ REVERSE_PORT = CONFIG.get("reverse_port") or 8091
 FORWARD_PORTS = CONFIG.get("forward_ports") or [8090, 8022, 8091]
 TCP_TIMEOUT  = CONFIG.get("tcp_timeout") or 0.8
 UPDATE_TIMEOUT = CONFIG.get("update_timeout") or 1800
+
+
+# ---------------- 健康监控(后台线程探测, 不阻塞主线程) ----------------
+def _probe(host, port):
+    # TCP 连通测试(本机回环或公网): 返回 (ok, 延迟ms)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(TCP_TIMEOUT)
+        t0 = time.time()
+        s.connect((host, port))
+        s.close()
+        return True, int((time.time() - t0) * 1000)
+    except Exception:
+        return False, -1
+
+
+def _ssh_proc_count():
+    # 统计 ssh.exe 进程数(本机反向隧道进程), 失败返回 -1
+    try:
+        out = subprocess.run(
+            ["tasklist", "/NH", "/FI", "IMAGENAME eq ssh.exe"],
+            capture_output=True, text=True, errors="replace", timeout=8,
+            creationflags=subprocess.CREATE_NO_WINDOW).stdout
+        return sum(1 for ln in out.splitlines() if "ssh.exe" in ln)
+    except Exception:
+        return -1
+
+
+def _probe_remote_tunnels():
+    # SSH 直查公网服务器上反向隧道端口是否监听; 返回 {port: bool}, SSH 不可达返回 None
+    pts = [p for p, _, _ in CONFIG.get("remote_tunnels", [])]
+    if not pts:
+        return {}
+    ports = "|".join(str(p) for p in pts)
+    cmd = "ss -tln | grep -E ':(%s) '" % ports
+    try:
+        p = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+             "-o", "LogLevel=ERROR", "%s@%s" % (SSH_USER, SSH_SERVER), cmd],
+            capture_output=True, text=True, errors="replace", timeout=8,
+            creationflags=subprocess.CREATE_NO_WINDOW)
+        if p.returncode != 0:
+            return None
+        text = p.stdout or ""
+        return {pt: (":%d " % pt) in text or (":%d" % pt) in text for pt in pts}
+    except Exception:
+        return None
 
 
 def _build_tunnel_obj(app, cfg_item):
