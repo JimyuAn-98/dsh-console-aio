@@ -756,6 +756,78 @@ class Dashboard:
 
     # ── UI ────────────────────────────────
     def _build_ui(self):
+        # 优先用 pygubu 加载 ui/main.ui(用户可用 pygubu-designer 定制布局);
+        # 未安装 pygubu 或 .ui 缺失/出错时回退到代码构建。
+        self._ui_builder = None
+        try:
+            import pygubu
+            ui_path = os.path.join(BASE_DIR, "ui", "main.ui")
+            if os.path.isfile(ui_path):
+                builder = pygubu.Builder()
+                builder.add_from_file(ui_path)
+                builder.get_object("topbar", self.root)
+                self._ui_builder = builder
+        except Exception:
+            self._ui_builder = None
+        if self._ui_builder is not None:
+            self._build_ui_from_ui()
+        else:
+            self._build_ui_code()
+
+    def _build_ui_from_ui(self):
+        # 从 pygubu builder 拿组件并绑定(组件 id 见 ui/main.ui 注释)
+        b = self._ui_builder
+        self.page_host = b.get_object("page_host")
+        self.log_text = b.get_object("log_text")
+        self.status = b.get_object("status_bar")
+        self.nav_list = b.get_object("nav_list")
+        self.deploy_var = tk.StringVar(value="本机")
+        self.deploy_combo = b.get_object("deploy_combo")
+        self.deploy_combo.configure(textvariable=self.deploy_var)
+        b.get_object("refresh_btn").configure(command=self._force_refresh)
+        b.get_object("config_btn").configure(command=self._open_config)
+        b.get_object("install_btn").configure(command=self._open_install)
+        b.get_object("env_btn").configure(command=self._open_env)
+        self.deploy_combo.bind("<<ComboboxSelected>>", self._on_deploy_changed)
+        self.nav_list.bind("<<ListboxSelect>>", self._on_nav)
+        for _label, _key in NAV_ITEMS:
+            self.nav_list.insert("end", _label)
+        self.log_text.tag_configure("ok", foreground="#7ecb6a")
+        self.log_text.tag_configure("err", foreground=COLOR_RED)
+        self.log_text.tag_configure("warn", foreground=COLOR_WARN)
+        b.get_object("log_sb").configure(command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=b.get_object("log_sb").set)
+        b.get_object("ver_lbl").configure(text="  v" + APP_VERSION)
+        b.get_object("poll_lbl").configure(text=f"轮询 {POLL_SECONDS}s·{REMOTE_POLL_SECONDS}s")
+        # 右状态栏监控点(数量随配置, 代码生成)
+        self.mon_widgets = {}
+        right = b.get_object("right")
+        ttk.Label(right, text="本机端口", font=F_BOLD, foreground="#555").pack(anchor="w")
+        r1 = ttk.Frame(right)
+        r1.pack(fill="x", pady=(2, 8))
+        for port, label, note in LOCAL_PORTS:
+            self._add_mon_cell(r1, "L" + str(port), label, "端口 " + str(port), note)
+        ttk.Label(right, text="公网服务器 反向隧道", font=F_BOLD, foreground="#555").pack(anchor="w")
+        r2 = ttk.Frame(right)
+        r2.pack(fill="x", pady=(2, 4))
+        for port, label, note in REMOTE_TUNNELS:
+            self._add_mon_cell(r2, "R" + str(port), label, "端口 " + str(port), note)
+        f = ttk.Frame(r2)
+        f.pack(side="left", expand=True, fill="both", padx=4)
+        d = tk.Label(f, text="●", font=("Segoe UI", 12), fg=COLOR_OFF)
+        d.pack()
+        ttk.Label(f, text="公网服务器 SSH", font=F_BOLD).pack()
+        det = ttk.Label(f, text="--", font=F_SMALL, foreground="#888")
+        det.pack()
+        self.mon_widgets["公网服务器"] = (d, det)
+        # 部署列表 + 默认页
+        self._current_deploy = None
+        self._current_page_key = None
+        self._refresh_deploy_list()
+        self._show_page("overview")
+
+    def _build_ui_code(self):
+        # 代码构建(无 pygubu 时的回退): 与原布局一致
         pad = 10
         # ── 顶部栏: 标题 + 部署选择器 + 动作按钮 ──
         top = ttk.Frame(self.root)
