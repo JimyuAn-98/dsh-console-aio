@@ -495,6 +495,9 @@ class MainWindow(QMainWindow):
         elif key == "sessions":
             from pyside.pages_sessions import SessionPage
             page = SessionPage(self)
+        elif key == "profiles":
+            from pyside.pages_profiles import ProfilePage
+            page = ProfilePage(self)
         else:
             label = dict(NAV_ITEMS).get(key, key)
             page = PlaceholderPage(self, label)
@@ -538,6 +541,37 @@ class MainWindow(QMainWindow):
         if self.status is not None:
             self.status.setText(text)
 
+    def _stream_cmd(self, cmd, cwd=None, env=None):
+        # 流式运行命令, 逐行打进主日志; 返回 True/False。
+        # 仅供后台线程调用(loge 经 LogBridge 线程安全回主线程)。不可在主线程阻塞。
+        self.loge("  $ " + " ".join(cmd))
+        try:
+            p = subprocess.Popen(cmd, cwd=cwd, env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 encoding="utf-8", errors="replace", bufsize=1, text=True,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+        except FileNotFoundError:
+            self.loge("  找不到命令: " + str(cmd[0] if cmd else "?"), "err")
+            return False
+        deadline = time.time() + UPDATE_TIMEOUT
+        while True:
+            line = p.stdout.readline() if p.stdout else None
+            if line:
+                self.loge("    " + line.rstrip())
+                continue
+            if p.poll() is not None:
+                break
+            if time.time() > deadline:
+                p.kill()
+                self.loge("  [stream] 超时，已强制终止", "err")
+                return False
+            time.sleep(0.1)
+        rc = p.wait()
+        if rc != 0:
+            self.loge("  [stream] 命令失败 (exit %s)" % rc, "err")
+            return False
+        return True
+
 
 # ---------------- 入口 ----------------
 def main():
@@ -564,6 +598,7 @@ LAB_PORT     = CONFIG.get("lab_port") or 3090
 REVERSE_PORT = CONFIG.get("reverse_port") or 8091
 FORWARD_PORTS = CONFIG.get("forward_ports") or [8090, 8022, 8091]
 TCP_TIMEOUT  = CONFIG.get("tcp_timeout") or 0.8
+UPDATE_TIMEOUT = CONFIG.get("update_timeout") or 1800
 
 
 def _build_tunnel_obj(app, cfg_item):
