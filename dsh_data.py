@@ -681,4 +681,3 @@ def deployment_snapshot(remote):
     except Exception as e:
         snap["error"] = str(e)
     return snap
-
