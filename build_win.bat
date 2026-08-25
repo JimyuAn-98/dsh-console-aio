@@ -1,20 +1,23 @@
 @echo off
 rem ---- Build dsh-console-aio: onefile exe (PyInstaller) + setup.exe (Inno Setup) ----
-rem Prereq: pip install pyinstaller; Inno Setup 6 installed (ISCC in PATH or default dir)
+rem Prereq: pip install pyinstaller pyside6 ; Inno Setup 6 installed (ISCC in PATH or default dir)
+rem PySide6 的 Qt 库由 PyInstaller hooks 自动收集; 此处仅显式添加 QSS 主题资源。
 setlocal
 cd /d "%~dp0"
 
-echo [1/2] PyInstaller onefile build...
+echo [1/2] PyInstaller onefile build (PySide6)...
 python -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name dsh-console-aio ^
-  --hidden-import mgmt_sessions --hidden-import mgmt_agents --hidden-import mgmt_profiles ^
-  --hidden-import mgmt_plugins --hidden-import mgmt_taskboard --hidden-import mgmt_usage ^
-  --hidden-import mgmt_llm --hidden-import mgmt_theme --hidden-import mgmt_ops --hidden-import mgmt_version ^
+  --hidden-import dsh_data --hidden-import tunnel_mgr ^
+  --hidden-import pyside.dialogs ^
+  --hidden-import pyside.pages_sessions --hidden-import pyside.pages_agents ^
+  --hidden-import pyside.pages_profiles --hidden-import pyside.pages_plugins ^
+  --hidden-import pyside.pages_taskboard --hidden-import pyside.pages_usage ^
+  --hidden-import pyside.pages_llm --hidden-import pyside.pages_ops ^
+  --hidden-import pyside.pages_keys --hidden-import pyside.pages_version ^
+  --hidden-import pyside.pages_deployments ^
+  --add-data "ui/theme.qss;ui" ^
   --add-data "RELEASE_NOTES.md;." ^
-  --add-binary "%CONDA_PREFIX%\Library\bin\tcl86t.dll;." ^
-  --add-binary "%CONDA_PREFIX%\Library\bin\tk86t.dll;." ^
-  --add-data "%CONDA_PREFIX%\Library\lib\tcl8.6;tcl8.6" ^
-  --add-data "%CONDA_PREFIX%\Library\lib\tk8.6;tk8.6" ^
   dsh-console-aio.py
 if errorlevel 1 (
     echo [ERROR] PyInstaller build failed.

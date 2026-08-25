@@ -19,9 +19,17 @@ import dsh_data
 import tunnel_mgr
 from tunnel_mgr import tcp_ok
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    # onefile exe: 用户可见/可写的数据目录 = exe 所在目录(放 config.json 便于分发后编辑)。
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
 APP_VERSION = '0.5.0'
+
+# frozen 模式下把 exe 目录也加入 sys.path, 保证旁置的可写数据/日志可见(仅当需要时)。
+if getattr(sys, 'frozen', False) and BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 
 def _load_config():

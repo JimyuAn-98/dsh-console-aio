@@ -114,7 +114,7 @@
   - FAQ 内嵌
 
 ### 工程约束
-- 保持零依赖（tkinter）；YAML 解析用 PyYAML 会破坏零依赖 → 自己写最小 YAML 子集解析器，或仅在存在 PyYAML 时启用（回退只读）。
+- UI 已迁移到 PySide6（暗色主题 QSS）；打包用 PyInstaller（含 Qt 库）。不再要求零依赖。
 - 所有写操作前备份（cordis.yml / settings.yaml / config.json 复制 .bak）。
 - 敏感信息（IP/用户名/凭据）只在本机 ~/.dsh 与 gitignored 文件，不进仓库。
 - 每个阶段先出"只读展示"，确认后再加"写操作"。

@@ -9,13 +9,13 @@
 
 > 中文 | [English](#english)
 
-**SSH 隧道可视化管理器 + 服务健康监控**（Windows GUI）。把平时要敲命令行的 SSH 隧道启动/停止/常驻，和一整套服务的健康监控，打包成一个零依赖的图形界面。
+**SSH 隧道可视化管理器 + 服务健康监控**（Windows GUI）。把平时要敲命令行的 SSH 隧道启动/停止/常驻，和一整套服务的健康监控，打包成一个 PySide6 现代界面的图形工具。
 
 - 🚀 一键操作：本机 dsh 启停、三条 SSH 隧道（启动/常驻/停止）、dsh 一键更新、全新环境一键安装 dsh
 - 🖥️ 环境检查：独立窗口查看 git/node/npm/pnpm 版本与推荐基准，更新/卸载引导；安装目录支持系统文件夹选择
 - 📡 健康监控：本机端口 + SSH 直查远端反向隧道，两层监控一屏可见
 - ⚙️ 配置外置：IP / 用户名 / 仓库路径 / 端口 / 轮询间隔全部集中在 config.json
-- 🧩 零依赖：仅用 Python 标准库（tkinter），无需 pip 安装任何东西
+- 现代界面：PySide6 暗色主题（QSS 可自定义）+ 线程安全 + 可打包成 exe 分发给小白
 
 ![主界面（截图待补充：顶部工具栏 + 隧道卡片 + 健康监控 + 日志区）](docs/screenshots/main.png)
 
@@ -24,11 +24,12 @@
 ## 快速开始
 
 ### 方式一：安装包（推荐）
-下载 **dsh-console-aio-setup-0.3.0.exe**（GitHub Releases 或 dist/ 目录），双击安装即可使用（无需 Python 环境）。
+下载 **dsh-console-aio-setup-0.5.0.exe**（GitHub Releases 或 dist/ 目录），双击安装即可使用（无需 Python 环境）。
 安装后可创建桌面快捷方式；卸载走系统控制面板。
 
 ### 方式二：双击（源码）
 双击 **启动dsh控制台.bat** —— 它优先使用 conda base 的 pythonw 启动，找不到再回退 PATH。
+源码方式需已安装 PySide6（`pip install PySide6`）；打包版无需任何 Python 环境。
 
 ### 方式三：命令行
     python dsh-console-aio.py
@@ -216,7 +217,7 @@ A **visual SSH-tunnel manager + service health monitor + dsh ops console** for W
 - **Environment check window**: git/node/npm/pnpm versions vs. recommended baseline, with Update / Install / Uninstall actions (confirm-before-run)
 - Two-layer health monitor: local ports + remote reverse-tunnels queried via SSH
 - External config: IP / user / repo path / ports / poll intervals all in config.json
-- Zero dependencies: pure Python stdlib (tkinter)
+- Modern PySide6 UI: dark theme (editable QSS), thread-safe, packageable to a standalone exe
 
 ## Quick Start
 - Double-click 启动dsh控制台.bat (uses conda base pythonw first, falls back to PATH), or run:

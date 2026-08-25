@@ -1,6 +1,21 @@
+
 # Release Notes
 
+## v0.5.0 (未发布)
+
+### UI 迁移到 PySide6（现代暗色主题, 可打包 exe 分发）
+
+- **UI 框架从 tkinter 迁移到 PySide6**：现代暗色主题（QSS 独立 `ui/theme.qss`，可用 QssStylesheetEditor 编辑）、线程安全（后台线程 + Qt Signal 回主线程）、支持 PyInstaller 打包分发给小白
+- **全部 13 个导航页完成 PySide6 迁移**：总览/隧道/会话/Agent/Profile/插件/任务看板/模型用量/LLM 配置/备份运维/SSH 密钥/版本管理/部署管理；管理逻辑照搬原 `mgmt_*.py`，业务行为不变
+- **部署联动保留**：各管理页数据源随顶部部署选择器按 `DshRemote` 切换（本机 / 远程只读）
+- **右侧栏实时健康监控**：本机端口 / 公网服务器 / 反向隧道 / ssh 进程，后台每 3s 探测，绿(在线)/红(不可达)实时状态 + 底部状态栏汇总
+- **对话框迁移**：配置向导 `ConfigDialog` / 安装向导 `InstallDialog` / 环境检查 `EnvDialog` 迁为 PySide6 QDialog，后台执行子进程 + `safe_emit`
+- **整合**：PySide6 主框架成为正式 `dsh-console-aio.py`（文件名不变，内容替换）；旧 tkinter 主程序归档 `legacy/`
+- **打包适配**：`dsh-console-aio.spec` / `build_win.bat` 适配 PySide6（含 `ui/theme.qss` add-data），支持 PyInstaller onefile + Inno Setup 安装包
+- **安全红线**：SSH 私钥 / API key 等凭据绝不读写明文；部署管理页不加密码字段（`DshRemote` 固定 `BatchMode` 免密）
+
 ## v0.4.0 (未发布)
+
 
 ### 新增：多部署管理（dsh 控制台新方向）
 
