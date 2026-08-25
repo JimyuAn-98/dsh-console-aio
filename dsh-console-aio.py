@@ -246,6 +246,13 @@ class BasePage(QWidget):
         self.app = app
         self._build()
 
+    def safe_emit(self, sig, *args):
+        # 后台线程回 UI 的安全发射: 页面销毁后对已删 QObject emit 抛 RuntimeError, 此处吞掉。
+        try:
+            sig.emit(*args)
+        except RuntimeError:
+            pass
+
     def _build(self):
         pass
 
@@ -819,7 +826,10 @@ def _build_tunnel_obj(app, cfg_item):
 
 # ---------------- 隧道页(导航第 2 项) ----------------
 class TunnelsPage(BasePage):
+    _cardGot = Signal(str, bool)   # 后台隧道线程 -> 主线程更新卡片状态(线程安全)
+
     def _build(self):
+        self._cardGot.connect(self._apply_card)
         v = QVBoxLayout(self)
         v.setContentsMargins(20, 20, 20, 20)
         v.setSpacing(6)
@@ -881,6 +891,10 @@ class TunnelsPage(BasePage):
         d.setText("●" if on else "○")
         d.setStyleSheet("color:#7ecb6a; font-size:15px;" if on else "color:#999; font-size:15px;")
 
+    def _apply_card(self, key, on):
+        # 主线程槽: 由 _cardGot Signal 从后台隧道线程回主线程更新卡片(线程安全)。
+        self._set_card(key, on)
+
     # ---- 动作分派(后台线程执行, 经信号回 UI) ----
     def _on_action(self, item, mode):
         t = item["type"]
@@ -923,7 +937,7 @@ class TunnelsPage(BasePage):
                              creationflags=subprocess.CREATE_NO_WINDOW)
             self.app.loge("  已在后台启动, 等待 %d 端口就绪..." % DASH_PORT, "ok")
             self.app.set_status("已触发本机 dsh 启动 -> http://127.0.0.1:%d" % DASH_PORT)
-            self._set_card("dsh-web", True)
+            self.safe_emit(self._cardGot, "dsh-web", True)
         except FileNotFoundError:
             self.app.loge("  找不到 %s, 请确认 pnpm 在 PATH 或修改配置" % DASH_CMD[0], "err")
             self.app.set_status("启动失败: 找不到启动命令")
@@ -946,7 +960,7 @@ class TunnelsPage(BasePage):
             for ln in ((r.stdout or "").splitlines() or ["(无输出)"]):
                 self.app.loge("    " + ln, "ok" if r.returncode == 0 else "err")
             self.app.set_status("已停止本机 dsh web" if r.returncode == 0 else "停止本机 dsh 出错")
-            self._set_card("dsh-web", False)
+            self.safe_emit(self._cardGot, "dsh-web", False)
         except subprocess.TimeoutExpired:
             self.app.loge("  [停止] 超时(60s)", "err")
             self.app.set_status("停止本机 dsh 超时")
@@ -964,10 +978,10 @@ class TunnelsPage(BasePage):
         ok = t.start()
         if not ok:
             self.app.set_status("启动失败: %s" % key)
-            self._set_card(key, False)
+            self.safe_emit(self._cardGot, key, False)
             return
         self.app.set_status("%s 已启动 (Python)" % key)
-        self._set_card(key, True)
+        self.safe_emit(self._cardGot, key, True)
         if mode == "persist":
             self._start_persist(item, t)
 
@@ -987,6 +1001,18 @@ class TunnelsPage(BasePage):
                     self.app.loge("  [%s] 隧道断开, 尝试重连..." % key, "warn")
                     t.start()
                 stop_flag.wait(5)
+
+    def _stop_py_tunnel(self, item):
+        # 停止一条 Python 隧道: 取消常驻重连 + 停止隧道进程。
+        key = item["key"]
+        if hasattr(self, "_py_persist") and self._py_persist.get(key):
+            self._py_persist[key].set()
+            self._py_persist.pop(key, None)
+            self.app.loge("  [%s] 已取消常驻重连" % key, "warn")
+        t = _build_tunnel_obj(self.app, item)
+        n = t.stop()
+        self.app.set_status("%s 已停止 (Python)" % key if n else "%s 停止(无进程)" % key)
+        self.safe_emit(self._cardGot, key, False)
 
 
 if __name__ == "__main__":
