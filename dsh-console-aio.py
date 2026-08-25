@@ -800,7 +800,7 @@ class Dashboard:
         self.log_text.tag_configure("warn", foreground=COLOR_WARN)
         b.get_object("log_sb").configure(command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=b.get_object("log_sb").set)
-        b.get_object("title_lbl")   # 确保顶部栏所有 Label realize(否则 topbar 被压缩)
+        b.get_object("title_lbl").configure(font=("Segoe UI", 16, "bold"))   # 字体由代码设(.ui 不存 JSON font)
         b.get_object("ver_lbl").configure(text="  v" + APP_VERSION)
         b.get_object("deploy_lbl")
         b.get_object("poll_lbl").configure(text=f"轮询 {POLL_SECONDS}s·{REMOTE_POLL_SECONDS}s")

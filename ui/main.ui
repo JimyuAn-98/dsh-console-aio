@@ -13,7 +13,6 @@
     <child>
       <object class="ttk.Label" id="title_lbl">
         <property name="text">dsh 控制台</property>
-        <property name="font">{"family": "Segoe UI", "size": 16, "weight": "bold"}</property>
         <layout manager="pack"><property name="side">left</property></layout>
       </object>
     </child>
