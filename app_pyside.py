@@ -7,7 +7,7 @@ app_pyside.py - dsh-console-aio PySide6 主框架(UI 迁移候选)。
 运行:  C:/ProgramData/miniconda3/pythonw.exe app_pyside.py
 离屏验证:  QT_QPA_PLATFORM=offscreen python app_pyside.py --smoke
 """
-import os, sys, json, threading
+import os, sys, json, time, subprocess, socket, threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
@@ -16,6 +16,8 @@ from PySide6.QtCore import Qt, Signal, QObject, QTimer
 from PySide6.QtGui import QFont, QTextCursor, QColor
 
 import dsh_data
+import tunnel_mgr
+from tunnel_mgr import tcp_ok
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
@@ -30,6 +32,33 @@ def _load_config():
         return {}
 
 CONFIG = _load_config()
+
+# ---------------- 业务常量(从 config.json 派生) ----------------
+DASH_REPO  = CONFIG.get("dash_repo") or ""
+DASH_PORT  = CONFIG.get("dash_port") or 3080
+DASH_CMD   = list(CONFIG.get("dash_cmd") or ["pnpm.cmd", "dsh", "web"])
+POLL_SECONDS = CONFIG.get("poll_seconds") or 4
+
+BTN_TEXT = {"start": "启动", "restart": "重启", "persist": "常驻",
+           "stop": "停止", "run": "运行更新"}
+
+ITEMS = [
+    {"type": "dsh", "key": "dsh-web", "title": "本机 dsh", "port": DASH_PORT,
+     "actions": ["start", "restart", "stop"],
+     "desc": "启动/重启/停止本机 dsh GUI\n(后台 pnpm dsh web,\n访问 http://127.0.0.1:%d)" % DASH_PORT},
+    {"type": "py", "key": "dsh-tunnel", "port": 8090, "backend": "python",
+     "actions": ["start", "persist", "stop"],
+     "desc": "在家 -> 打通三个转发口\n8090->实验室GUI / 8022->SSH / 8091->本机GUI"},
+    {"type": "py", "key": "connect-lab-dsh", "port": 3090, "backend": "python",
+     "actions": ["start", "persist", "stop"],
+     "desc": "实验室局域网 -> 直连实验室 dsh GUI (本机 3090)"},
+    {"type": "py", "key": "dsh-tunnel-reverse", "port": 0, "backend": "python",
+     "actions": ["start", "persist", "stop"],
+     "desc": "本机 dsh -> 公网反向隧道\n公网:8091 -> 本机 3080"},
+    {"type": "py", "key": "update-dsh", "port": -1, "backend": "python",
+     "actions": ["run"],
+     "desc": "运行一次完整更新:\ngit 拉取->依赖->构建->重启"},
+]
 
 NAV_ITEMS = [
     ('总览', 'overview'), ('隧道', 'tunnels'), ('会话与工作区', 'sessions'),
@@ -166,14 +195,24 @@ def _load_theme():
 # ---------------- 线程安全日志桥: 后台线程 -> Qt 主线程 ----------------
 class LogBridge(QObject):
     _sig = Signal(str, str)          # (text, tag)
+    _status = Signal(str)            # 状态栏文本(跨线程安全)
     def __init__(self):
         super().__init__()
         self._view = None
+        self._status_cb = None
         self._sig.connect(self._append)
+        self._status.connect(self._apply_status)
     def attach(self, view):
         self._view = view
+    def on_status(self, cb):
+        self._status_cb = cb
     def emit(self, text, tag=""):
         self._sig.emit(text, tag)
+    def emit_status(self, text):
+        self._status.emit(text)
+    def _apply_status(self, text):
+        if self._status_cb is not None:
+            self._status_cb(text)
     def _append(self, text, tag):
         if self._view is None:
             return
@@ -359,6 +398,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_statusbar())
 
         self.bridge.attach(self.log_view)
+        self.bridge.on_status(self._set_status)
         self._refresh_deploy_list()
         self._show_page("overview")
         if not smoke:
@@ -450,6 +490,8 @@ class MainWindow(QMainWindow):
             w.deleteLater()
         if key == "overview":
             page = OverviewPage(self)
+        elif key == "tunnels":
+            page = TunnelsPage(self)
         else:
             label = dict(NAV_ITEMS).get(key, key)
             page = PlaceholderPage(self, label)
@@ -483,7 +525,15 @@ class MainWindow(QMainWindow):
     # ---- 日志/状态 ----
     def loge(self, text, tag=""):
         self.bridge.emit(text, tag)
-        self.status.setText(text)
+        self._set_status(text)
+
+    def set_status(self, text):
+        # 跨线程安全(经 LogBridge status 信号回到主线程)
+        self.bridge.emit_status(text)
+
+    def _set_status(self, text):
+        if self.status is not None:
+            self.status.setText(text)
 
 
 # ---------------- 入口 ----------------
@@ -502,3 +552,209 @@ def main():
 if __name__ == "__main__":
     sys.exit(main())
 
+
+
+# ---------------- 隧道配置常量(从 config.json 派生) ----------------
+SSH_SERVER   = CONFIG.get("ssh_server") or ""
+SSH_USER     = CONFIG.get("ssh_user") or ""
+LAB_SERVER   = CONFIG.get("lab_server") or ""
+LAB_USER     = CONFIG.get("lab_user") or ""
+LAB_PORT     = CONFIG.get("lab_port") or 3090
+REVERSE_PORT = CONFIG.get("reverse_port") or 8091
+FORWARD_PORTS = CONFIG.get("forward_ports") or [8090, 8022, 8091]
+TCP_TIMEOUT  = CONFIG.get("tcp_timeout") or 0.8
+
+
+def _build_tunnel_obj(app, cfg_item):
+    # 依据 config 构造一条 tunnel_mgr.Tunnel
+    key = cfg_item["key"]
+    if key == "dsh-tunnel":
+        forwards = [(p, "127.0.0.1", p) for p in FORWARD_PORTS]
+        host, user, mode = SSH_SERVER, SSH_USER, "forward"
+        watch = FORWARD_PORTS[0] if FORWARD_PORTS else None
+    elif key == "connect-lab-dsh":
+        forwards = [(LAB_PORT, "127.0.0.1", LAB_PORT)]
+        host, user, mode = LAB_SERVER, LAB_USER, "forward"
+        watch = LAB_PORT
+    elif key == "dsh-tunnel-reverse":
+        forwards = [(REVERSE_PORT, "127.0.0.1", DASH_PORT)]
+        host, user, mode = SSH_SERVER, SSH_USER, "reverse"
+        watch = None
+    else:
+        raise ValueError("unknown tunnel: " + key)
+    t = tunnel_mgr.Tunnel(BASE_DIR, key, host, user,
+                          mode=mode, forwards=forwards, watch_port=watch)
+    t.set_logger(lambda msg, tag="": app.loge("  " + msg, tag))
+    return t
+
+
+# ---------------- 隧道页(导航第 2 项) ----------------
+class TunnelsPage(BasePage):
+    def _build(self):
+        v = QVBoxLayout(self)
+        v.setContentsMargins(20, 20, 20, 20)
+        v.setSpacing(6)
+        title = QLabel("隧道 / dsh 服务操控", objectName="cardTitle")
+        v.addWidget(title)
+
+        self._cards = {}
+        grid = QVBoxLayout()
+        grid.setSpacing(10)
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        for i, item in enumerate(ITEMS):
+            card = self._make_card(item)
+            row.addWidget(card, 1)
+            if (i + 1) % 2 == 0:
+                grid.addLayout(row)
+                row = QHBoxLayout(); row.setSpacing(10)
+        if row.count():
+            row.addStretch(1)
+            grid.addLayout(row)
+        v.addLayout(grid)
+        v.addStretch(1)
+
+    def _make_card(self, item):
+        card = QFrame(objectName="card")
+        lv = QVBoxLayout(card)
+        lv.setContentsMargins(16, 14, 16, 14)
+        lv.setSpacing(8)
+
+        head = QHBoxLayout()
+        title = QLabel(item.get("title") or item["key"], objectName="cardTitle")
+        dot = QLabel("○", objectName="monDot")
+        dot.setStyleSheet("color:#999; font-size:15px;")
+        head.addWidget(title)
+        head.addStretch(1)
+        head.addWidget(dot)
+        lv.addLayout(head)
+
+        desc = QLabel(item["desc"], objectName="cardHint")
+        desc.setWordWrap(True)
+        lv.addWidget(desc)
+
+        btns = QHBoxLayout()
+        for act in item["actions"]:
+            b = QPushButton(BTN_TEXT[act])
+            b.clicked.connect(lambda _=False, it=item, a=act: self._on_action(it, a))
+            btns.addWidget(b)
+        btns.addStretch(1)
+        lv.addLayout(btns)
+
+        self._cards[item["key"]] = (dot, item)
+        return card
+
+    def _set_card(self, key, on, label=None):
+        dot = self._cards.get(key)
+        if dot is None:
+            return
+        d, item = dot
+        d.setText("●" if on else "○")
+        d.setStyleSheet("color:#7ecb6a; font-size:15px;" if on else "color:#999; font-size:15px;")
+
+    # ---- 动作分派(后台线程执行, 经信号回 UI) ----
+    def _on_action(self, item, mode):
+        t = item["type"]
+        key = item["key"]
+        if t == "dsh":
+            self.app.set_status("正在 %s 本机 dsh ..." % mode)
+            threading.Thread(target=self._run_dsh, args=(mode,), daemon=True).start()
+            return
+        if key == "update-dsh":
+            self.app.set_status("正在运行更新(构建较久, 请耐心)...")
+            threading.Thread(target=self._run_update, daemon=True).start()
+            return
+        # python 隧道
+        self.app.loge("[%s] 模式: %s (Python)" % (key, mode), "warn")
+        self.app.set_status("正在执行 %s -> %s (Python) ..." % (mode, key))
+        threading.Thread(target=self._run_python_tunnel, args=(item, mode), daemon=True).start()
+
+    # ---- 本机 dsh ----
+    def _run_dsh(self, mode):
+        if mode in ("start", "restart"):
+            self._dsh_start()
+        if mode in ("stop", "restart"):
+            self._dsh_stop()
+            if mode == "restart":
+                self.app.loge("  停止完成, 重新启动...", "warn")
+                self._dsh_start()
+
+    def _dsh_start(self):
+        if not os.path.isdir(DASH_REPO):
+            self.app.loge("  仓库不存在: %s" % DASH_REPO, "err")
+            self.app.set_status("启动失败: 仓库目录不存在")
+            return
+        self.app.loge("  $ cd %s && %s" % (DASH_REPO, " ".join(DASH_CMD)))
+        try:
+            logdir = os.path.join(os.environ.get("TEMP", "."), "dsh-dash")
+            os.makedirs(logdir, exist_ok=True)
+            out = open(os.path.join(logdir, "dsh-web.out.log"), "ab")
+            err = open(os.path.join(logdir, "dsh-web.err.log"), "ab")
+            subprocess.Popen(DASH_CMD, cwd=DASH_REPO, stdout=out, stderr=err,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+            self.app.loge("  已在后台启动, 等待 %d 端口就绪..." % DASH_PORT, "ok")
+            self.app.set_status("已触发本机 dsh 启动 -> http://127.0.0.1:%d" % DASH_PORT)
+            self._set_card("dsh-web", True)
+        except FileNotFoundError:
+            self.app.loge("  找不到 %s, 请确认 pnpm 在 PATH 或修改配置" % DASH_CMD[0], "err")
+            self.app.set_status("启动失败: 找不到启动命令")
+        except Exception as e:
+            self.app.loge("  异常: %s" % e, "err")
+            self.app.set_status("启动出错: %s" % e)
+
+    def _dsh_stop(self):
+        ps = ("$n=0\n"
+              "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" -ErrorAction SilentlyContinue |\n"
+              "  Where-Object { $_.CommandLine -match 'dsh' -and $_.CommandLine -match 'web' } |\n"
+              "  ForEach-Object { Write-Output ('stop node ' + $_.ProcessId); taskkill /PID $_.ProcessId /T /F | Out-Null; $n++ }\n"
+              "if($n -eq 0){ Write-Output 'no dsh web process' }\n")
+        self.app.loge("  $ stopping dsh web (node, 匹配 dsh+web)...")
+        try:
+            r = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy",
+                                "Bypass", "-Command", ps],
+                               capture_output=True, text=True, errors="replace",
+                               timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+            for ln in ((r.stdout or "").splitlines() or ["(无输出)"]):
+                self.app.loge("    " + ln, "ok" if r.returncode == 0 else "err")
+            self.app.set_status("已停止本机 dsh web" if r.returncode == 0 else "停止本机 dsh 出错")
+            self._set_card("dsh-web", False)
+        except subprocess.TimeoutExpired:
+            self.app.loge("  [停止] 超时(60s)", "err")
+            self.app.set_status("停止本机 dsh 超时")
+        except Exception as e:
+            self.app.loge("  异常: %s" % e, "err")
+            self.app.set_status("停止出错: %s" % e)
+
+    # ---- python 隧道 ----
+    def _run_python_tunnel(self, item, mode):
+        key = item["key"]
+        if mode == "stop":
+            self._stop_py_tunnel(item)
+            return
+        t = _build_tunnel_obj(self.app, item)
+        ok = t.start()
+        if not ok:
+            self.app.set_status("启动失败: %s" % key)
+            self._set_card(key, False)
+            return
+        self.app.set_status("%s 已启动 (Python)" % key)
+        self._set_card(key, True)
+        if mode == "persist":
+            self._start_persist(item, t)
+
+    def _start_persist(self, item, t):
+        key = item["key"]
+        stop_flag = threading.Event()
+        if not hasattr(self, "_py_persist"):
+            self._py_persist = {}
+        old = self._py_persist.get(key)
+        if old:
+            old.set()
+        self._py_persist[key] = stop_flag
+
+        def loop():
+            while not stop_flag.is_set():
+                if not t.is_running():
+                    self.app.loge("  [%s] 隧道断开, 尝试重连..." % key, "warn")
+                    t.start()
+                stop_f
