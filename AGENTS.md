@@ -32,6 +32,8 @@ _open_mgmt() 动态加载。新增管理窗口 = 新文件 + 在 _build_ui 的�
     python dsh-console-aio.py                                # 运行 GUI
     git diff --cached --check                                   # 提交前检查（文件尾换行等）
     git push origin HEAD                                        # 推送（分支 main）
+build_win.bat                                                # 一键打包: PyInstaller onefile exe + Inno Setup 安装包(distsetup.exe)
+installer.iss                                                # Inno Setup 安装脚本(版本号在 #define MyAppVersion)
 
 冒烟测试约定（只在本机无头环境做）：
 - GUI 测试用 timeout -k 3 N python 包裹，防止 600s 挂起（真实 SSH 到不可达主机是挂起主因，测试勿触发）。

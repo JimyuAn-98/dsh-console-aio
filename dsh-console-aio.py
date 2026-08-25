@@ -19,6 +19,14 @@ dsh-console-aio — dsh SSH 隧道管理 + 本机 dsh 启停 + 健康监控
 
 import os
 import re
+import sys
+
+if getattr(sys, "frozen", False):
+    # 打包(exe)环境: 显式指定 tcl/tk 库目录(conda 布局下 PyInstaller 不会自动收集)
+    _meip = getattr(sys, "_MEIPASS", "")
+    if _meip:
+        os.environ.setdefault("TCL_LIBRARY", os.path.join(_meip, "tcl8.6"))
+        os.environ.setdefault("TK_LIBRARY", os.path.join(_meip, "tk8.6"))
 import json
 import time
 import socket
@@ -693,6 +701,25 @@ class Dashboard:
         self.remote_state = None   # {port: bool}, None=SSH不可达
         self._build_ui()
         self._start_monitor()
+        self.root.after(800, self._maybe_first_run)   # 首次启动引导(未配置时)
+
+    # ── 首次启动引导 ──────────────────────────
+    def _maybe_first_run(self):
+        # 未配置(ssh_server 为空或占位符)时, 引导用户打开配置向导; 可跳过
+        try:
+            ssh_server = str(CONFIG.get("ssh_server") or "")
+            unconfigured = (not ssh_server) or ssh_server.startswith("YOUR_")
+            if not unconfigured:
+                return
+            ok = messagebox.askyesno(
+                "欢迎使用 dsh-console-aio",
+                "检测到尚未完成基础配置（服务器地址等）。\n\n"
+                "是否现在打开【配置向导】？\n（也可以跳过，之后随时点顶部【配置】按钮）",
+                parent=self.root)
+            if ok:
+                self._open_config()
+        except Exception:
+            pass   # 引导失败不影响主界面
 
     # ── UI ────────────────────────────────
     def _build_ui(self):

@@ -16,10 +16,14 @@
 
 ## 快速开始
 
-### 方式一：双击（推荐）
+### 方式一：安装包（推荐）
+下载 **dsh-console-aio-setup-0.3.0.exe**（GitHub Releases 或 dist/ 目录），双击安装即可使用（无需 Python 环境）。
+安装后可创建桌面快捷方式；卸载走系统控制面板。
+
+### 方式二：双击（源码）
 双击 **启动dsh控制台.bat** —— 它优先使用 conda base 的 pythonw 启动，找不到再回退 PATH。
 
-### 方式二：命令行
+### 方式三：命令行
     python dsh-console-aio.py
 
 > 💡 需要本机安装 Python 3（建议 Miniconda base，路径可改 启动dsh控制台.bat 顶部的 PYW）。

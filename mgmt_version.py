@@ -42,6 +42,20 @@ def _fetch(url, timeout=15):
         return r.read().decode("utf-8", errors="replace")
 
 
+def _base_dir():
+    # 程序所在目录: 打包(exe)后为 exe 目录, 源码模式为脚本目录
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _resource_dir():
+    # 打包资源目录: onefile 下资源在 _MEIPASS(临时解压), 源码模式为脚本目录
+    if getattr(sys, "frozen", False):
+        return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 class VersionDialog(tk.Toplevel):
     # master 兼容 Dashboard / Tk root; version = 当前 APP_VERSION
 
@@ -99,7 +113,7 @@ class VersionDialog(tk.Toplevel):
 
     def _load_local_log(self):
         # 本地 RELEASE_NOTES.md 展示(离线可用)
-        base = os.path.dirname(os.path.abspath(__file__))
+        base = _resource_dir()
         p = os.path.join(base, "RELEASE_NOTES.md")
         try:
             with io.open(p, encoding="utf-8", errors="replace") as fh:
@@ -149,6 +163,15 @@ class VersionDialog(tk.Toplevel):
     def _update(self):
         if not self._latest:
             return
+        if getattr(sys, "frozen", False):
+            # 打包(exe)版: 更新 = 下载并运行新安装包(MSI/exe, 天然支持升级安装)
+            ok = messagebox.askyesno(
+                "检查到新版本 v" + self._latest,
+                "当前为安装版。\n将打开 GitHub Releases 页面下载新安装包，\n下载后运行安装器即可完成升级(配置与数据保留)。\n\n是否打开下载页？",
+                parent=self)
+            if ok:
+                self._open_releases()
+            return
         ok = messagebox.askyesno(
             "一键更新",
             "将执行：\n1. 下载 v" + self._latest + " 更新包(GitHub)\n"
@@ -163,7 +186,7 @@ class VersionDialog(tk.Toplevel):
 
     def _do_update(self):
         # 下载 zip -> 解压 -> 备份 -> 替换 -> 重启
-        base = os.path.dirname(os.path.abspath(__file__))
+        base = _base_dir()
         tmp = os.path.join(os.environ.get("TEMP", "."), "dsh-aio-update")
         try:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -210,19 +233,29 @@ class VersionDialog(tk.Toplevel):
         messagebox.showerror("更新失败", "更新未完成，程序未改动。\n错误: " + err, parent=self)
 
     def _restart(self):
-        # 用当前解释器重启主程序; 先关掉当前窗口
-        base = os.path.dirname(os.path.abspath(__file__))
-        main = os.path.join(base, "dsh-console-aio.py")
+        # 重启程序: 打包(exe)后直接重启 exe; 源码模式用解释器重启脚本
+        base = _base_dir()
         try:
             subprocess = __import__("subprocess")
-            subprocess.Popen([sys.executable, main], cwd=base,
-                             creationflags=subprocess.CREATE_NO_WINDOW)
+            if getattr(sys, "frozen", False):
+                subprocess.Popen([sys.executable], cwd=base,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                main = os.path.join(base, "dsh-console-aio.py")
+                subprocess.Popen([sys.executable, main], cwd=base,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
         except Exception:
             pass
         try:
             self.destroy()
         except tk.TclError:
             pass
+
+    def _open_releases(self):
+        try:
+            os.startfile("https://github.com/JimyuAn-98/dsh-console-aio/releases")
+        except Exception as e:
+            messagebox.showerror("无法打开", str(e), parent=self)
 
     def _open_github(self):
         try:
