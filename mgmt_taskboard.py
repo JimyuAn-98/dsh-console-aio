@@ -40,6 +40,12 @@ class TaskboardPage(ttk.Frame):
         super().__init__(parent)
         self._app = app
         self._master = app   # 兼容旧逻辑(本页未用, 保持与其它页面一致)
+        # 部署联动: 当前部署(host 非空)构造 DshRemote, 读操作走远程; None=本机
+        remote = None
+        _dep = getattr(app, "_current_deploy", None)
+        if _dep and _dep.get("host"):
+            remote = dsh_data.DshRemote(_dep)
+        self._remote = remote
         self._build()
         self._refresh()
 
@@ -85,7 +91,7 @@ class TaskboardPage(ttk.Frame):
     def _refresh(self):
         # 读取 task-board(两个小 json, 本地读取足够快, 无需后台线程)
         try:
-            data = dsh_data.read_taskboard()
+            data = dsh_data.read_taskboard(remote=self._remote)
         except Exception as e:
             messagebox.showerror("读取失败", "任务看板读取失败:\n" + str(e), parent=self)
             return

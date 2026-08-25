@@ -44,6 +44,12 @@ class UsagePage(ttk.Frame):
         super().__init__(parent)
         self._app = app
         self._master = app   # 兼容旧逻辑(本页未用, 保持与其它页面一致)
+        # 部署联动: 当前部署(host 非空)构造 DshRemote, 读操作走远程; None=本机
+        remote = None
+        _dep = getattr(app, "_current_deploy", None)
+        if _dep and _dep.get("host"):
+            remote = dsh_data.DshRemote(_dep)
+        self._remote = remote
         self._stats = None      # 最近一次 usage_stats() 结果(供价格修改后重算费用)
         self._busy = False
         self._build()
@@ -103,7 +109,7 @@ class UsagePage(ttk.Frame):
 
         def worker():
             try:
-                res = dsh_data.usage_stats()
+                res = dsh_data.usage_stats(remote=self._remote)
             except Exception as e:
                 res = {"ok": False, "error": str(e)}
             try:

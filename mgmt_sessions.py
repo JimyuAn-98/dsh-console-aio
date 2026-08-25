@@ -84,6 +84,12 @@ class SessionPage(ttk.Frame):
         self._app = app
         # master 兼容: 无 Dashboard(裸 Tk 根窗口)时日志转发静默
         self._master = app
+        # 部署联动: 当前部署(host 非空)构造 DshRemote, 读操作走远程; None=本机
+        remote = None
+        _dep = getattr(app, "_current_deploy", None)
+        if _dep and _dep.get("host"):
+            remote = dsh_data.DshRemote(_dep)
+        self._remote = remote
         self._group_map = {}
         self._archived = set()
         self._sel_group = None
@@ -173,8 +179,8 @@ class SessionPage(ttk.Frame):
         def worker():
             err = None
             try:
-                ws = dsh_data.read_workspace()
-                groups = dsh_data.list_sessions()
+                ws = dsh_data.read_workspace(remote=self._remote)
+                groups = dsh_data.list_sessions(remote=self._remote)
             except Exception as e:
                 ws, groups, err = {}, [], str(e)
             try:

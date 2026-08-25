@@ -6,7 +6,11 @@
 
 - 架构：dsh_data.py 新增 DshRemote 抽象（本机直接文件系统 / 远程 SSH 只读命令 + 文件拉取），部署清单存 config.json 的 deployments（gitignored）
 - 部署管理窗口（mgmt_deployments.py）：部署 CRUD、连接测试、只读状态总览（dsh 版本 / 会话数 / 大小 / 插件数 / profile 数 / agent 预设数 / 在线离线）
-- 安全：远程默认只读，ssh BatchMode + 超时；后续版本提供远程写操作
+- **页面部署联动**：8 个管理页（会话/Agent/Profile/插件/看板/用量/LLM/主题）数据源随顶部部署选择器切换（DshRemote），远程不可达时优雅提示
+- **总览部署状态卡片**：总览页汇总所有部署快照（版本/会话/插件/在线离线）
+- **SSH 密钥管理**（mgmt_keys）：安全红线——私钥内容绝不读取/展示/复制，只显示文件名/时间/指纹（ssh-keygen -lf）；公钥可查看复制；生成 ed25519 密钥
+- 移除顶部"dsh 管理"菜单（全页面化后左导航即入口）
+- 安全：远程默认只读，ssh BatchMode + 超时；写操作留待阶段 B
 
 ## v0.3.0 (未发布)
 

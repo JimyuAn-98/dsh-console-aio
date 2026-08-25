@@ -40,6 +40,12 @@ class ProfilePage(ttk.Frame):
         self._app = app
         # master 兼容: 无 Dashboard(裸 Tk 根窗口)时相关转发静默
         self._master = app
+        # 部署联动: 当前部署(host 非空)构造 DshRemote, 读操作走远程; None=本机
+        remote = None
+        _dep = getattr(app, "_current_deploy", None)
+        if _dep and _dep.get("host"):
+            remote = dsh_data.DshRemote(_dep)
+        self._remote = remote
         if dash_cmd is None:
             dash_cmd = _load_dash_cmd()
         self._is_web_current = "web" in dash_cmd
@@ -81,7 +87,12 @@ class ProfilePage(ttk.Frame):
 
     def _refresh(self):
         self._tree.delete(*self._tree.get_children())
-        for p in dsh_data.list_profiles():
+        try:
+            profiles = dsh_data.list_profiles(remote=self._remote)
+        except Exception as e:
+            messagebox.showerror("读取失败", "Profile 列表读取失败：%s" % e, parent=self)
+            return
+        for p in profiles:
             cur = "✓" if (self._is_web_current and p["name"] == "web") else ""
             self._tree.insert("", "end", iid=p["name"], values=(
                 p["name"],

@@ -42,6 +42,12 @@ class PluginPage(ttk.Frame):
         super().__init__(parent)
         self._app = app
         self._master = app   # 兼容旧逻辑: _log/_run_stream 读取 self._master
+        # 部署联动: 当前部署(host 非空)构造 DshRemote, 读操作走远程; None=本机
+        remote = None
+        _dep = getattr(app, "_current_deploy", None)
+        if _dep and _dep.get("host"):
+            remote = dsh_data.DshRemote(_dep)
+        self._remote = remote
         self._profiles = []
         self._entries = []      # [(tree_iid, entry_dict)], 与 Treeview 行一一对应
         self._tree = None
@@ -116,8 +122,13 @@ class PluginPage(ttk.Frame):
     # ── Profile / 列表 ────────────────────────────────
     def _load_profiles(self):
         # 只列有 cordis.yml 或 cordis.patch.yml 的 profile
-        self._profiles = [p for p in dsh_data.list_profiles()
-                          if p.get("cordis") or p.get("patch")]
+        try:
+            profiles = dsh_data.list_profiles(remote=self._remote)
+        except Exception as e:
+            self._tree.delete(*self._tree.get_children())
+            self._set_status("Profile 列表读取失败: %s" % e, "#c33")
+            return
+        self._profiles = [p for p in profiles if p.get("cordis") or p.get("patch")]
         names = [p["name"] for p in self._profiles]
         self._profile_cb.configure(values=names)
         if names:
@@ -133,7 +144,12 @@ class PluginPage(ttk.Frame):
     def _merge_entries(self, profile):
         # 汇总插件列表: 基线 = read_profile_package(profile) 的 bundles 字段(已装插件),
         # 版本取 dependencies; cordis.patch.yml 叠加 disabled 标记 / insert 新增。
-        pkg = dsh_data.read_profile_package(profile)
+        try:
+            pkg = dsh_data.read_profile_package(profile, remote=self._remote)
+            patch_rows = dsh_data.read_cordis_patch(profile, remote=self._remote) or []
+        except Exception as e:
+            self._set_status("插件数据读取失败: %s" % e, "#c33")
+            return []
         deps = pkg.get("dependencies") or {}
         out = []
         index = {}
@@ -144,7 +160,7 @@ class PluginPage(ttk.Frame):
                    "version": deps.get(name, ""), "_src": "bundle"}
             out.append(row)
             index.setdefault(name, row)
-        for e in dsh_data.read_cordis_patch(profile) or []:
+        for e in patch_rows:
             if not isinstance(e, dict):
                 continue
             if isinstance(e.get("insert"), list):
@@ -366,7 +382,11 @@ class PluginPage(ttk.Frame):
         # 读 patch → 增/改 disabled 标记 → dsh_data.write_cordis_patch(内部先 .bak 备份)。
         # 停用: 无同名行则追加 `- id: X` + `disabled: true`; 有则原地置 True。
         # 启用: 移除该行的 disabled 字段; 若只剩 id 则整行删除, 保持 patch 干净。
-        patch = dsh_data.read_cordis_patch(profile) or []
+        try:
+            patch = dsh_data.read_cordis_patch(profile, remote=self._remote) or []
+        except Exception as e:
+            messagebox.showerror("读取失败", "读取 cordis.patch.yml 失败：%s" % e, parent=self)
+            return
         new_rows = []
         touched = False
         for row in patch:

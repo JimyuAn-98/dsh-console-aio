@@ -97,6 +97,12 @@ class AgentPage(ttk.Frame):
         self._app = app
         # master 兼容: 无 Dashboard(裸 Tk 根窗口)时相关转发静默
         self._master = app
+        # 部署联动: 当前部署(host 非空)构造 DshRemote, 读操作走远程; None=本机
+        remote = None
+        _dep = getattr(app, "_current_deploy", None)
+        if _dep and _dep.get("host"):
+            remote = dsh_data.DshRemote(_dep)
+        self._remote = remote
         self._presets = []
         self._build()
         self._refresh()
@@ -149,7 +155,15 @@ class AgentPage(ttk.Frame):
         ttk.Button(btns, text="刷新", command=self._refresh).pack(side="left", padx=4)
 
     def _refresh(self):
-        self._presets = dsh_data.list_agent_presets()
+        try:
+            presets = dsh_data.list_agent_presets(remote=self._remote)
+        except Exception as e:
+            messagebox.showerror("读取失败", "Agent 模式列表读取失败：%s" % e, parent=self)
+            self._presets = []
+            self._tree.delete(*self._tree.get_children())
+            self._set_detail("请在左侧选择一个模式")
+            return
+        self._presets = presets
         self._tree.delete(*self._tree.get_children())
         for p in self._presets:
             self._tree.insert("", "end", iid=p["name"],

@@ -27,13 +27,19 @@ class LlmPage(ttk.Frame):
     def __init__(self, parent, app):
         super().__init__(parent, padding=(15, 12))
         self._app = app
+        # 部署联动: 当前部署(host 非空)构造 DshRemote, 读操作走远程; None=本机
+        remote = None
+        _dep = getattr(app, "_current_deploy", None)
+        if _dep and _dep.get("host"):
+            remote = dsh_data.DshRemote(_dep)
+        self._remote = remote
         self._settings = self._load_settings()
         self._build()
 
     def _load_settings(self):
         # 读取 settings.yaml; 文件缺失或损坏时按空 dict 处理, 不让页面白屏
         try:
-            s = dsh_data.read_settings()
+            s = dsh_data.read_settings(remote=self._remote)
         except Exception:
             s = {}
         return s if isinstance(s, dict) else {}
