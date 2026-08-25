@@ -343,6 +343,39 @@ def plugin_cmd(profile, *args):
     # 注意: dsh 需经 pnpm 调用(pnpm.cmd dsh ...), 且在 DASH_REPO 目录下执行
     return ["pnpm.cmd", "dsh", "plugin", "--profile", profile] + list(args)
 
+
+def load_entry_id_map(profile, dash_repo=None, remote=None):
+    # 解析 dsh --profile X --dump-config 输出, 建立 name(包名)->entry id 映射。
+    # 停用/启用必须用真实 entry id(如 dshmarket 的 id 是 dsh-market), 不能用 bundle 名。
+    import subprocess as _sp
+    _r = remote if remote is not None else DshRemote(None)
+    cmd = ["pnpm.cmd", "dsh", "--profile", profile, "--dump-config"]
+    try:
+        if _r.is_remote:
+            out = _r.exec("cd " + (dash_repo or "~") + " && pnpm dsh --profile " + profile + " --dump-config")
+        else:
+            r = _sp.run(cmd, capture_output=True, text=True, errors="replace",
+                        timeout=60, creationflags=_sp.CREATE_NO_WINDOW,
+                        cwd=dash_repo or os.getcwd())
+            out = r.stdout or ""
+    except Exception:
+        return {}
+    mapping = {}
+    cur_id = None
+    for line in out.splitlines():
+        s = line.strip()
+        if s.startswith("- id:"):
+            cur_id = s.split(":", 1)[1].strip()
+        elif s.startswith("name:") and cur_id:
+            nm = s.split(":", 1)[1].strip().strip("'\"")
+            mapping[nm] = cur_id
+            mapping[cur_id] = cur_id   # entry id 也映射到自身
+            cur_id = None
+        elif s.startswith("id:") and cur_id is None:
+            cur_id = s.split(":", 1)[1].strip()
+    return mapping
+
+
 def read_profile_package(profile, remote=None):
     # 读 profile/package.json: 返回 {dependencies: {...}, bundles: [...]}
     _r = remote if remote is not None else DshRemote(None)

@@ -50,6 +50,7 @@ class PluginPage(ttk.Frame):
         self._remote = remote
         self._profiles = []
         self._entries = []      # [(tree_iid, entry_dict)], 与 Treeview 行一一对应
+        self._id_map = {}      # name(包名)->真实 entry id(来自 dsh --dump-config)
         self._tree = None
         self._status_lbl = None
         self._disable_btn = None
@@ -200,6 +201,20 @@ class PluginPage(ttk.Frame):
         if not profile:
             return
         self._tree.delete(*self._tree.get_children())
+        # 构建 name->真实 entry id 映射(dump-config 较慢, 后台线程; 停用/启用用真实 id)
+        self._id_map = {}
+        dash_repo = getattr(self._app, "DASH_REPO", None) if self._app else None
+        if not self._remote:
+            def _load_map():
+                try:
+                    m = dsh_data.load_entry_id_map(profile, dash_repo)
+                except Exception:
+                    m = {}
+                try:
+                    self.after(0, lambda: setattr(self, "_id_map", m))
+                except tk.TclError:
+                    pass
+            threading.Thread(target=_load_map, daemon=True).start()
         self._entries = []
         self._tree.tag_configure("disabled", foreground="#c33")
         for i, e in enumerate(self._merge_entries(profile)):
@@ -384,6 +399,8 @@ class PluginPage(ttk.Frame):
         # 读 patch → 增/改 disabled 标记 → dsh_data.write_cordis_patch(内部先 .bak 备份)。
         # 停用: 无同名行则追加 `- id: X` + `disabled: true`; 有则原地置 True。
         # 启用: 移除该行的 disabled 字段; 若只剩 id 则整行删除, 保持 patch 干净。
+        # 关键: 必须用真实 entry id(dump-config 映射), 不能用 bundle 名(如 dshmarket->dsh-market)
+        eid = self._id_map.get(eid, eid)
         try:
             patch = dsh_data.read_cordis_patch(profile, remote=self._remote) or []
         except Exception as e:

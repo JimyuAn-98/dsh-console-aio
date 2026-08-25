@@ -137,6 +137,7 @@ REVERSE_PORT = CONFIG["reverse_port"]
 # 左导航页面注册: (显示名, key); PAGE_MODULES: key -> (模块, Page类)
 NAV_ITEMS = [
     ("总览", "overview"),
+    ("隧道", "tunnels"),
     ("会话与工作区", "sessions"),
     ("Agent 模式", "agents"),
     ("Profile 管理", "profiles"),
@@ -144,7 +145,6 @@ NAV_ITEMS = [
     ("任务看板", "taskboard"),
     ("模型用量", "usage"),
     ("LLM 配置", "llm"),
-    ("主题外观", "theme"),
     ("备份与运维", "ops"),
     ("SSH 密钥", "keys"),
     ("关于与更新", "version"),
@@ -158,7 +158,6 @@ PAGE_MODULES = {
     "taskboard": ("mgmt_taskboard", "TaskboardPage"),
     "usage": ("mgmt_usage", "UsagePage"),
     "llm": ("mgmt_llm", "LlmPage"),
-    "theme": ("mgmt_theme", "ThemePage"),
     "ops": ("mgmt_ops", "OpsPage"),
     "keys": ("mgmt_keys", "KeysPage"),
     "version": ("mgmt_version", "VersionPage"),
@@ -866,6 +865,9 @@ class Dashboard:
         if key == "overview":
             self._build_overview_page(self.page_host)
             return
+        if key == "tunnels":
+            self._build_tunnels_page(self.page_host)
+            return
         mod_name, cls_name = PAGE_MODULES.get(key, (None, None))
         if not mod_name:
             self.log("未知页面: " + str(key), "err")
@@ -882,13 +884,8 @@ class Dashboard:
             self.log("打开页面 " + str(key) + " 失败: " + str(e), "err")
 
     def _build_overview_page(self, parent):
-        # 总览页: 隧道操控卡片 + 部署状态总览(健康状态在右侧栏)
-        cards = ttk.LabelFrame(parent, text="操控", padding=8)
-        cards.pack(fill="x", pady=(0, 6))
-        self.cards = {}
-        for i, cfg_item in enumerate(ITEMS):
-            cards.columnconfigure(i, weight=1)
-            self.cards[cfg_item["key"]] = self._build_card(cards, cfg_item, i)
+        # 总览页: 部署状态总览(隧道操控见"隧道"页; 健康状态在右侧栏)
+        ttk.Label(parent, text="部署总览", font=F_BOLD).pack(anchor="w", pady=(0, 4))
         # 部署状态总览卡片
         depf = ttk.LabelFrame(parent, text="部署状态", padding=8)
         depf.pack(fill="x", pady=(0, 6))
@@ -896,6 +893,17 @@ class Dashboard:
         self.dep_status_lbl.pack(anchor="w")
         ttk.Button(depf, text="刷新部署状态", command=self._refresh_dep_status).pack(anchor="e")
         self._refresh_dep_status()
+        ttk.Label(parent, text="隧道/健康状态见右侧状态栏；更多管理功能见左侧导航。",
+                  font=F_SMALL, foreground="#888").pack(anchor="w")
+
+    def _build_tunnels_page(self, parent):
+        # 隧道页: 隧道操控卡片(健康状态在右侧栏)
+        cards = ttk.LabelFrame(parent, text="操控", padding=8)
+        cards.pack(fill="x", pady=(0, 6))
+        self.cards = {}
+        for i, cfg_item in enumerate(ITEMS):
+            cards.columnconfigure(i, weight=1)
+            self.cards[cfg_item["key"]] = self._build_card(cards, cfg_item, i)
         ttk.Label(parent, text="隧道/健康状态见右侧状态栏；更多管理功能见左侧导航。",
                   font=F_SMALL, foreground="#888").pack(anchor="w")
 
