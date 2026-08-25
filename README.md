@@ -10,6 +10,8 @@
 - ⚙️ 配置外置：IP / 用户名 / 仓库路径 / 端口 / 轮询间隔全部集中在 config.json
 - 🧩 零依赖：仅用 Python 标准库（tkinter），无需 pip 安装任何东西
 
+![主界面（截图待补充：顶部工具栏 + 隧道卡片 + 健康监控 + 日志区）](docs/screenshots/main.png)
+
 ---
 
 ## 快速开始
@@ -54,6 +56,12 @@
 
 适合在没有 dsh 的新机器 / 新用户上，从零一键搭好本机 dsh。
 
+![安装 dsh 向导（截图待补充：仓库地址 + 目标目录 + 环境预检）](docs/screenshots/install-dialog.png)
+
+顶部 **【环境】** 打开环境检查窗口，可查看/更新/安装/卸载 git、node、npm、pnpm：
+
+![环境检查（截图待补充：版本 + 推荐基准 + 更新/安装/卸载按钮）](docs/screenshots/env-check.png)
+
 ---
 
 ## 配置（config.json）
@@ -87,6 +95,8 @@
 | *_timeout | 探测与更新超时 | ... |
 
 > 真实 IP / 用户名 / 仓库路径只保存在本地 config.json（已 gitignore），请勿把它们写进 README 或任何被提交的文件。
+
+![配置向导（截图待补充：分组表单 + 场景模板）](docs/screenshots/config-wizard.png)
 
 ---
 
@@ -126,6 +136,34 @@
 
 ---
 
+## dsh 管理（会话 / 插件 / 用量 / 配置）
+
+顶部 **【dsh 管理】** 菜单集中了面向 dsh 数据域的 9 个管理窗口：
+
+![dsh 管理菜单（截图待补充：菜单展开显示 9 个管理项）](docs/screenshots/mgmt-menu.png)
+
+| 窗口 | 功能 |
+|------|------|
+| 会话与工作区 | 按工作目录浏览会话、归档/恢复/删除（二次确认） |
+| Agent 模式 | 浏览 agent 预设与说明 |
+| Profile 管理 | 列出 / 复制 / 删除 profile |
+| 插件管理 | 已装 bundle 列表、`dsh plugin` 官方命令安装/卸载、patch 层停用/启用 |
+| 任务看板 | ledger + scheduler 只读展示 |
+| 模型用量 | 解压 session 聚合 token（按模型/天）+ 价格估算 |
+| LLM 配置 | 默认模型切换、自定义 provider 浏览（密钥只提示环境变量名） |
+| 主题外观 | settings.yaml UI 开关切换 |
+| 备份与运维 | ~/.dsh 一键备份（排除凭据）、日志、凭据存在性提示 |
+
+![会话与工作区（截图待补充）](docs/screenshots/sessions.png)
+
+![插件管理（截图待补充：profile 下拉 + 插件表 + 安装输入框）](docs/screenshots/plugins.png)
+
+![模型用量统计（截图待补充：按模型/按天 token 表 + 费用）](docs/screenshots/usage.png)
+
+![LLM 配置（截图待补充：默认模型下拉 + provider 表）](docs/screenshots/llm.png)
+
+---
+
 ## Roadmap（dsh 控制台进化路线）
 - [x] 配置外置到 config.json（IP/用户/端口/轮询）
 - [x] 全部卡片 Python 化（tunnel_mgr.py + 纯 Python 更新）
@@ -157,6 +195,8 @@ MIT © 2025 dsh-tools
 
 A **visual SSH-tunnel manager + service health monitor + dsh ops console** for Windows. It wraps the command-line chores of starting/stopping SSH tunnels, monitoring services, and installing/updating dsh into one zero-dependency GUI.
 
+![Main window (screenshot pending: top bar + tunnel cards + health monitor + log)](docs/screenshots/main.png)
+
 ## Features
 - One-click control: local dsh GUI start/stop, three SSH tunnels (start/persist/stop), one-click dsh update
 - **One-click dsh install**: repo URL (default official deepseek-harness) + target dir → env pre-check → clone → pnpm install → build → auto-write config
@@ -180,6 +220,8 @@ Click the **Install dsh** button on the top bar: enter the git repo URL (default
 
 The target directory can also be picked via the native Windows folder dialog (**Browse…**).
 
+![Install dsh dialog (screenshot pending: repo URL + target dir + env pre-check)](docs/screenshots/install-dialog.png)
+
 ## Environment check
 Click **Environment** on the top bar: a standalone window lists git / node / npm / pnpm with the current version, a recommended baseline (based on the author's dev machine), and an OK/missing status. Each tool row has three buttons:
 - **Update** — runs the official updater (e.g. `git update-git-for-windows`, `npm install -g npm@latest`, `pnpm self-update`)
@@ -187,12 +229,39 @@ Click **Environment** on the top bar: a standalone window lists git / node / npm
 - **Uninstall** — CLI uninstall for npm/pnpm (`npm uninstall -g …`); system Apps & features page for git/node
 Every action shows what it will run and asks for confirmation first; output streams into the main log area.
 
+![Environment check (screenshot pending: versions + baseline + update/install/uninstall)](docs/screenshots/env-check.png)
+
 ## Configuration
 All tunables live in config.json (also editable via the **Config** button; save takes effect after restart). See the Chinese section above for the field table.
 
 ## How it works
 - Reverse tunnels (实验室dsh->公网服务器, local->公网服务器) listen on 公网服务器's loopback (127.0.0.1 only, safe by default).
 - The local-ports row shows local listeners; the 公网服务器 tunnel row SSH-queries the real listener status on 公网服务器 — that's the true "is my tunnel configured" signal.
+
+## dsh management (sessions / plugins / usage / config)
+The **dsh management** menu on the top bar opens 9 management windows over the dsh data domains (`~/.dsh`):
+
+![dsh management menu (screenshot pending: expanded menu)](docs/screenshots/mgmt-menu.png)
+
+| Window | What it does |
+|--------|-------------|
+| Sessions & workspace | browse sessions by working dir, archive/restore/delete (double confirm) |
+| Agent presets | browse agent presets & docs |
+| Profiles | list / copy / delete profiles |
+| Plugins | installed bundle list, install/uninstall via the official `dsh plugin` command, enable/disable via patch layer |
+| Task board | ledger + scheduler read-only |
+| Model usage | decompress sessions, aggregate tokens (by model/day) + cost estimate |
+| LLM config | switch default model, browse custom providers (API keys only hinted by env-var name) |
+| Theme & appearance | toggle settings.yaml UI switches |
+| Backup & ops | one-click ~/.dsh backup (credentials excluded), logs, credential hints |
+
+![Sessions & workspace (screenshot pending)](docs/screenshots/sessions.png)
+
+![Plugins (screenshot pending: profile dropdown + plugin table + install box)](docs/screenshots/plugins.png)
+
+![Model usage (screenshot pending: per-model/per-day token tables + cost)](docs/screenshots/usage.png)
+
+![LLM config (screenshot pending: default model dropdown + provider table)](docs/screenshots/llm.png)
 
 ## Security
 - Relay ports bind loopback only by default; do not expose the unauthenticated GUI to public internet (remote-code-execution risk) unless you explicitly accept it.
