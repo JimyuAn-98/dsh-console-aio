@@ -498,6 +498,12 @@ class MainWindow(QMainWindow):
         elif key == "profiles":
             from pyside.pages_profiles import ProfilePage
             page = ProfilePage(self)
+        elif key == "keys":
+            from pyside.pages_keys import KeysPage
+            page = KeysPage(self)
+        elif key == "taskboard":
+            from pyside.pages_taskboard import TaskboardPage
+            page = TaskboardPage(self)
         else:
             label = dict(NAV_ITEMS).get(key, key)
             page = PlaceholderPage(self, label)

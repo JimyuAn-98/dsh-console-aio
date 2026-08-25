@@ -31,7 +31,7 @@ def ssh_dir():
 
 def _key_fingerprint(path):
     # 指纹: ssh-keygen -lf 输出(公钥指纹, 不泄露私钥); 失败返回 None。
-    # 吞掉一切异常: 任何平台差异/ssh-keygen 缺失都只导致指纹显示为占位符。
+    # 吞掉一切异常: 平台差异/ssh-keygen 缺失都只导致指纹显示为占位符。
     try:
         r = subprocess.run(["ssh-keygen", "-lf", path], capture_output=True,
                            text=True, errors="replace", timeout=10,
@@ -87,9 +87,9 @@ def _fmt_time(ts):
 
 class KeysPage(BasePage):
     # SSH 密钥管理: BasePage 范式, app 为 MainWindow。
-    _data = Signal(object, str)              # (keys, err) 列表刷新结果
-    _pub_loaded = Signal(str, str, str, str) # (name, pub, err, action) 公钥读取结果
-    _gen_done = Signal(str, str)             # (msg, err) 生成结果
+    _data = Signal(object, str)               # (keys, err) 列表刷新结果
+    _pub_loaded = Signal(str, str, str, str)  # (name, pub, err, action) 公钥读取结果
+    _gen_done = Signal(str, str)              # (msg, err) 生成结果
 
     def __init__(self, app, parent=None):
         self._keys = []
@@ -251,7 +251,7 @@ class KeysPage(BasePage):
             return  # 结果对应的选择已切换, 丢弃过期数据
         self._cur_pub = pub
         self._pub_text.setPlainText(pub or "(无 .pub 文件)")
-        self._btn_copy.setEnabled((not k["is_pub"] is False) and bool(pub))
+        self._btn_copy.setEnabled(bool(k["is_pub"]) and bool(pub))
         if err:
             self._set_status("读取公钥失败: " + err)
             return
@@ -266,13 +266,9 @@ class KeysPage(BasePage):
             return
         if QMessageBox.question(
                 self, "查看公钥",
-                "公钥(.pub)为公开信息, 可安全查看。
-
-"
-                "注意: 公钥本身不敏感, 但请勿将私钥(id_* 无后缀文件)内容发给任何人。
-
-"
-                "是否查看 " + k["name"] + ".pub ?") != QMessageBox.Yes:
+                '公钥(.pub)为公开信息, 可安全查看。\n\n'
+                '注意: 公钥本身不敏感, 但请勿将私钥(id_* 无后缀文件)内容发给任何人。\n\n'
+                '是否查看 ' + k["name"] + '.pub ?') != QMessageBox.Yes:
             return
         self._load_pub(k["name"], action="view")
 
@@ -285,12 +281,8 @@ class KeysPage(BasePage):
             return
         if QMessageBox.question(
                 self, "复制公钥",
-                "将把公钥内容复制到剪贴板(用于 ssh-copy-id 等)。
-
-"
-                "注意: 只复制 .pub 公钥(公开信息); 请勿复制私钥内容。
-
-是否继续？") != QMessageBox.Yes:
+                '将把公钥内容复制到剪贴板(用于 ssh-copy-id 等)。\n\n'
+                '注意: 只复制 .pub 公钥(公开信息); 请勿复制私钥内容。\n\n是否继续？') != QMessageBox.Yes:
             return
         self._load_pub(k["name"], action="copy")
 
@@ -311,8 +303,8 @@ class KeysPage(BasePage):
         path = os.path.join(ssh_dir(), name)
         if QMessageBox.question(
                 self, "生成新密钥",
-                "将执行: ssh-keygen -t ed25519 -f %s -N \"\"\n\n"
-                "注意: -N \"\" 表示无口令保护。如需口令保护, 请在终端手动生成。\n是否继续？" % path) != QMessageBox.Yes:
+                '将执行: ssh-keygen -t ed25519 -f %s -N ""\n\n'
+                '注意: -N "" 表示无口令保护。如需口令保护, 请在终端手动生成。\n是否继续？' % path) != QMessageBox.Yes:
             return
         self._set_btns(False)
 
@@ -325,7 +317,10 @@ class KeysPage(BasePage):
                                     "-C", "dsh-console-aio"], capture_output=True,
                                    text=True, errors="replace", timeout=30,
                                    creationflags=subprocess.CREATE_NO_WINDOW)
-                msg = "已生成: %s (ed25519)" % name if r.returncode == 0                     else "生成失败: " + (r.stderr or "").strip()
+                if r.returncode == 0:
+                    msg = "已生成: %s (ed25519)" % name
+                else:
+                    msg = "生成失败: " + (r.stderr or "").strip()
             except Exception as e:
                 err = str(e)
             self._gen_done.emit(msg, err)
@@ -349,8 +344,8 @@ class KeysPage(BasePage):
     def _open_dir(self):
         if QMessageBox.question(
                 self, "打开 .ssh 目录",
-                "将打开本机 ~/.ssh 目录(含私钥文件)。\n\n"
-                "注意: 目录内有私钥, 请勿将其内容泄露或上传。\n\n是否打开？") != QMessageBox.Yes:
+                '将打开本机 ~/.ssh 目录(含私钥文件)。\n\n'
+                '注意: 目录内有私钥, 请勿将其内容泄露或上传。\n\n是否打开？') != QMessageBox.Yes:
             return
         try:
             os.makedirs(ssh_dir(), exist_ok=True)
