@@ -268,6 +268,14 @@ The **dsh management** menu on the top bar opens 9 management windows over the d
 
 ![LLM config (screenshot pending: default model dropdown + provider table)](docs/screenshots/llm.png)
 
+## Auto release (GitHub Actions)
+Pushing a `v*` tag triggers the CI workflow: PyInstaller onefile exe → Inno Setup installer → upload both to a GitHub Release.
+
+    git tag v0.3.1
+    git push origin v0.3.1
+
+(Update `APP_VERSION` in code, `version.json` and `installer.iss` default version before tagging.)
+
 ## Security
 - Relay ports bind loopback only by default; do not expose the unauthenticated GUI to public internet (remote-code-execution risk) unless you explicitly accept it.
 
