@@ -777,6 +777,9 @@ class Dashboard:
     def _build_ui_from_ui(self):
         # 从 pygubu builder 拿组件并绑定(组件 id 见 ui/main.ui 注释)
         b = self._ui_builder
+        # 先 realize 全部顶层容器(它们各自 pack 到 root; 不 realize 则容器没布局, 页面错乱)
+        for _top in ("topbar", "body", "logf", "status_bar"):
+            b.get_object(_top, self.root)
         self.page_host = b.get_object("page_host")
         self.log_text = b.get_object("log_text")
         self.status = b.get_object("status_bar")
@@ -797,7 +800,9 @@ class Dashboard:
         self.log_text.tag_configure("warn", foreground=COLOR_WARN)
         b.get_object("log_sb").configure(command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=b.get_object("log_sb").set)
+        b.get_object("title_lbl")   # 确保顶部栏所有 Label realize(否则 topbar 被压缩)
         b.get_object("ver_lbl").configure(text="  v" + APP_VERSION)
+        b.get_object("deploy_lbl")
         b.get_object("poll_lbl").configure(text=f"轮询 {POLL_SECONDS}s·{REMOTE_POLL_SECONDS}s")
         # 右状态栏监控点(数量随配置, 代码生成)
         self.mon_widgets = {}

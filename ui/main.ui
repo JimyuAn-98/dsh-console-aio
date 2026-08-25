@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <!-- dsh-console-aio 主框架布局(pygubu-designer 可编辑)
-     固定组件 id(代码依赖, 请勿改名): topbar / title_lbl / deploy_combo / body /
-     nav_list / center / page_host / right / logf / log_text / status_bar -->
+     固定组件 id(代码依赖, 请勿改名): topbar / title_lbl / ver_lbl / deploy_combo /
+     body / nav_list / center / page_host / right / logf / log_text / status_bar -->
 <interface version="1.5">
   <object class="ttk.Frame" id="topbar">
     <layout manager="pack">
@@ -10,68 +10,64 @@
       <property name="padx">10</property>
       <property name="pady">10</property>
     </layout>
-    <object class="ttk.Label" id="title_lbl">
-      <property name="text">dsh 控制台</property>
-      <property name="font">{"family": "Segoe UI", "size": 16, "weight": "bold"}</property>
-      <layout manager="pack">
-        <property name="side">left</property>
-      </layout>
-    </object>
-    <object class="ttk.Label" id="ver_lbl">
-      <property name="text">v0.4</property>
-      <property name="foreground">#888</property>
-      <layout manager="pack">
-        <property name="side">left</property>
-      </layout>
-    </object>
-    <object class="ttk.Label" id="deploy_lbl">
-      <property name="text">   部署:</property>
-      <layout manager="pack">
-        <property name="side">left</property>
-      </layout>
-    </object>
-    <object class="ttk.Combobox" id="deploy_combo">
-      <property name="state">readonly</property>
-      <property name="width">14</property>
-      <layout manager="pack">
-        <property name="side">left</property>
-        <property name="padx">2</property>
-      </layout>
-    </object>
-    <object class="ttk.Label" id="poll_lbl">
-      <property name="text">轮询</property>
-      <property name="foreground">#666</property>
-      <layout manager="pack">
-        <property name="side">left</property>
-      </layout>
-    </object>
-    <object class="ttk.Button" id="refresh_btn">
-      <property name="text">立即刷新</property>
-      <layout manager="pack">
-        <property name="side">right</property>
-      </layout>
-    </object>
-    <object class="ttk.Button" id="config_btn">
-      <property name="text">配置</property>
-      <layout manager="pack">
-        <property name="side">right</property>
-        <property name="padx">0</property>
-      </layout>
-    </object>
-    <object class="ttk.Button" id="install_btn">
-      <property name="text">安装 dsh</property>
-      <layout manager="pack">
-        <property name="side">right</property>
-        <property name="padx">0</property>
-      </layout>
-    </object>
-    <object class="ttk.Button" id="env_btn">
-      <property name="text">环境</property>
-      <layout manager="pack">
-        <property name="side">right</property>
-        <property name="padx">0</property>
-      </layout>
-    </object>
+    <child>
+      <object class="ttk.Label" id="title_lbl">
+        <property name="text">dsh 控制台</property>
+        <property name="font">{"family": "Segoe UI", "size": 16, "weight": "bold"}</property>
+        <layout manager="pack"><property name="side">left</property></layout>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Label" id="ver_lbl">
+        <property name="text">v0.4</property>
+        <property name="foreground">#888888</property>
+        <layout manager="pack"><property name="side">left</property></layout>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Label" id="deploy_lbl">
+        <property name="text">   部署:</property>
+        <layout manager="pack"><property name="side">left</property></layout>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Combobox" id="deploy_combo">
+        <property name="state">readonly</property>
+        <property name="width">14</property>
+        <layout manager="pack"><property name="side">left</property><property name="padx">2</property></layout>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Label" id="poll_lbl">
+        <property name="text">轮询</property>
+        <property name="foreground">#666666</property>
+        <layout manager="pack"><property name="side">left</property></layout>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Button" id="refresh_btn">
+        <property name="text">立即刷新</property>
+        <layout manager="pack"><property name="side">right</property></layout>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Button" id="config_btn">
+        <property name="text">配置</property>
+        <layout manager="pack"><property name="side">right</property><property name="padx">0</property></layout>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Button" id="install_btn">
+        <property name="text">安装 dsh</property>
+        <layout manager="pack"><property name="side">right</property><property name="padx">0</property></layout>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Button" id="env_btn">
+        <property name="text">环境</property>
+        <layout manager="pack"><property name="side">right</property><property name="padx">0</property></layout>
+      </object>
+    </child>
   </object>
 
   <object class="ttk.Frame" id="body">
@@ -82,78 +78,64 @@
       <property name="padx">10</property>
       <property name="pady">4</property>
     </layout>
-    <object class="tk.Listbox" id="nav_list">
-      <property name="width">13</property>
-      <property name="activestyle">none</property>
-      <property name="relief">flat</property>
-      <property name="highlightthickness">1</property>
-      <layout manager="pack">
-        <property name="side">left</property>
-        <property name="fill">y</property>
-      </layout>
-    </object>
-    <object class="ttk.Frame" id="center">
-      <layout manager="pack">
-        <property name="side">left</property>
-        <property name="fill">both</property>
-        <property name="expand">true</property>
-        <property name="padx">6</property>
-      </layout>
-      <object class="ttk.Frame" id="page_host">
-        <layout manager="pack">
-          <property name="fill">both</property>
-          <property name="expand">true</property>
-        </layout>
+    <child>
+      <object class="tk.Listbox" id="nav_list">
+        <property name="width">13</property>
+        <property name="activestyle">none</property>
+        <property name="relief">flat</property>
+        <property name="highlightthickness">1</property>
+        <layout manager="pack"><property name="side">left</property><property name="fill">y</property></layout>
       </object>
-    </object>
-    <object class="ttk.Labelframe" id="right">
-      <property name="text">状态</property>
-      <property name="padding">6</property>
-      <layout manager="pack">
-        <property name="side">left</property>
-        <property name="fill">y</property>
-        <property name="padx">6</property>
-      </layout>
-    </object>
+    </child>
+    <child>
+      <object class="ttk.Frame" id="center">
+        <layout manager="pack"><property name="side">left</property><property name="fill">both</property><property name="expand">true</property><property name="padx">6</property></layout>
+        <child>
+          <object class="ttk.Frame" id="page_host">
+            <layout manager="pack"><property name="fill">both</property><property name="expand">true</property></layout>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Labelframe" id="right">
+        <property name="text">状态</property>
+        <property name="padding">6</property>
+        <layout manager="pack"><property name="side">left</property><property name="fill">y</property><property name="padx">6</property></layout>
+      </object>
+    </child>
   </object>
 
   <object class="ttk.Labelframe" id="logf">
     <property name="text">控制台输出</property>
     <property name="padding">4</property>
     <layout manager="pack">
-      <property name="side">top</property>
-      <property name="fill">both</property>
-      <property name="expand">true</property>
+      <property name="side">bottom</property>
+      <property name="fill">x</property>
       <property name="padx">10</property>
       <property name="pady">4</property>
     </layout>
-    <object class="tk.Text" id="log_text">
-      <property name="height">7</property>
-      <property name="wrap">word</property>
-      <property name="state">disabled</property>
-      <property name="background">#1e1e1e</property>
-      <property name="foreground">#e6e6e6</property>
-      <layout manager="pack">
-        <property name="side">left</property>
-        <property name="fill">both</property>
-        <property name="expand">true</property>
-      </layout>
-    </object>
-    <object class="ttk.Scrollbar" id="log_sb">
-      <layout manager="pack">
-        <property name="side">right</property>
-        <property name="fill">y</property>
-      </layout>
-    </object>
+    <child>
+      <object class="tk.Text" id="log_text">
+        <property name="height">7</property>
+        <property name="wrap">word</property>
+        <property name="state">disabled</property>
+        <property name="background">#1e1e1e</property>
+        <property name="foreground">#e6e6e6</property>
+        <layout manager="pack"><property name="side">left</property><property name="fill">both</property><property name="expand">true</property></layout>
+      </object>
+    </child>
+    <child>
+      <object class="ttk.Scrollbar" id="log_sb">
+        <layout manager="pack"><property name="side">right</property><property name="fill">y</property></layout>
+      </object>
+    </child>
   </object>
 
   <object class="ttk.Label" id="status_bar">
     <property name="text">就绪</property>
     <property name="anchor">w</property>
     <property name="relief">sunken</property>
-    <layout manager="pack">
-      <property name="side">bottom</property>
-      <property name="fill">x</property>
-    </layout>
+    <layout manager="pack"><property name="side">bottom</property><property name="fill">x</property></layout>
   </object>
 </interface>
