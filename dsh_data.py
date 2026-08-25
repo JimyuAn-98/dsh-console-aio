@@ -339,8 +339,9 @@ def write_cordis_patch(profile, entries):
     return write_yaml(p, entries)
 
 def plugin_cmd(profile, *args):
-    # 组装 dsh plugin --profile X ... 命令(由 UI 层经 _stream_cmd 执行)
-    return ["dsh", "plugin", "--profile", profile] + list(args)
+    # 组装 dsh plugin 命令(由 UI 层经 _stream_cmd 在 dsh 仓库目录执行)
+    # 注意: dsh 需经 pnpm 调用(pnpm.cmd dsh ...), 且在 DASH_REPO 目录下执行
+    return ["pnpm.cmd", "dsh", "plugin", "--profile", profile] + list(args)
 
 def read_profile_package(profile, remote=None):
     # 读 profile/package.json: 返回 {dependencies: {...}, bundles: [...]}
@@ -441,26 +442,52 @@ def usage_stats(remote=None):
                                     u = ck["usage"]
                                     i = int(u.get("inputTokens") or 0)
                                     o = int(u.get("outputTokens") or 0)
+                                    cr = int(u.get("cacheReadTokens") or 0)   # 缓存命中 tokens
                                     m = cur_model or "unknown"
-                                    mm = models.setdefault(m, {"provider": cur_provider, "input": 0, "output": 0, "calls": 0})
+                                    mm = models.setdefault(m, {"provider": cur_provider, "input": 0, "output": 0, "cache": 0, "calls": 0})
                                     mm["input"] += i
                                     mm["output"] += o
+                                    mm["cache"] += cr
                                     mm["calls"] += 1
                                     ts = obj.get("time") or 0
                                     date = datetime.datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d") if ts else "?"
-                                    dd = days.setdefault(date, {"input": 0, "output": 0})
+                                    dd = days.setdefault(date, {"input": 0, "output": 0, "cache": 0})
                                     dd["input"] += i
                                     dd["output"] += o
+                                    dd["cache"] += cr
             except (OSError, ValueError):
                 continue
     return {"ok": True, "models": models, "days": days, "sessions": nsessions}
 
-# 内置估算单价(元/百万 token), UI 可编辑覆盖
+# 内置官方单价(元/百万 token), UI 可编辑覆盖。
+# 结构: {"in_cached": [空闲, 高峰], "in_miss": [空闲, 高峰], "out": [空闲, 高峰]}
+# 高峰时段: 北京时间周一至五 9:00-12:00, 14:00-18:00; 其余为空闲。
 DEFAULT_PRICES = {
-    "deepseek-v4-flash": {"input": 2.0, "output": 8.0},
-    "deepseek-chat": {"input": 2.0, "output": 8.0},
-    "deepseek-reasoner": {"input": 4.0, "output": 16.0},
+    "deepseek-v4-flash":        {"in_cached": [0.05, 0.10], "in_miss": [1.5, 3.0], "out": [4.5, 9.0]},
+    "deepseek-v4-pro":          {"in_cached": [0.15, 0.30], "in_miss": [4.5, 9.0], "out": [13.5, 27.0]},
+    "deepseek-v4-flash-vision": {"in_cached": [0.05, 0.10], "in_miss": [1.5, 3.0], "out": [4.5, 9.0]},
 }
+
+def is_peak_hour(now=None):
+    # 高峰时段: 北京时间周一至五 9:00-12:00, 14:00-18:00
+    now = now or datetime.datetime.now()
+    if now.weekday() >= 5:
+        return False
+    h = now.hour
+    return (9 <= h < 12) or (14 <= h < 18)
+
+
+def estimate_cost(model, input_tokens, output_tokens, cache_tokens, prices=None):
+    # 估算费用(元): 按缓存命中/未命中 + 高峰/空闲区分
+    p = (prices or DEFAULT_PRICES).get(model)
+    if not p:
+        return None
+    peak = 1 if is_peak_hour() else 0
+    miss = max(0, input_tokens - (cache_tokens or 0))
+    return (miss / 1000000.0 * p["in_miss"][peak]
+            + (cache_tokens or 0) / 1000000.0 * p["in_cached"][peak]
+            + output_tokens / 1000000.0 * p["out"][peak])
+
 
 # ── 备份 ──────────────────────────────────────────────
 def backup_dsh_home(out_zip):

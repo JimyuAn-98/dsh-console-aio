@@ -37,6 +37,8 @@ def _set_path(data, path, value):
 
 class ThemePage(ttk.Frame):
     # 开关项: (settings.yaml 键路径, 界面名, 说明)
+    # 注意: 以下设置项均来自**已安装的插件**(dsh-better-sidebar / skin-background / pet),
+    # dsh-web 本体未暴露主题设置项(主题样式由 ui-theme 包内置, 无用户可配置项)。
     ITEMS = [
         (("skin-background", "enabled"), "皮肤背景", "web 界面使用皮肤背景"),
         (("dsh-better-sidebar", "openByDefault"), "侧边栏默认展开", "打开 dsh web 时侧边栏默认展开"),
@@ -70,6 +72,9 @@ class ThemePage(ttk.Frame):
         wrap.pack(fill="both", expand=True)
         ttk.Label(wrap, text="UI 配置开关（settings.yaml）",
                   font=F_BOLD).pack(anchor="w", pady=(0, 6))
+        ttk.Label(wrap, text="说明: 以下设置项来自已安装的插件(dsh-better-sidebar / skin-background / pet);\n"
+                             "dsh-web 本体暂无主题设置项(样式由 ui-theme 包内置)。",
+                  font=F_SMALL, foreground="#888", justify="left").pack(anchor="w", pady=(0, 6))
         table = ttk.Frame(wrap)
         table.pack(fill="x")
         ttk.Label(table, text="配置项", font=F_BOLD).grid(row=0, column=0, sticky="w", padx=2, pady=2)

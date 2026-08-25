@@ -310,7 +310,9 @@ class PluginPage(ttk.Frame):
                 return
             try:
                 m.log("[插件] " + desc + " 开始: " + " ".join(cmd), "warn")
-                ok = m._stream_cmd(cmd)
+                # dsh plugin 命令必须在 dsh 仓库目录执行(pnpm dsh ...)
+                cwd = getattr(m, "DASH_REPO", None)
+                ok = m._stream_cmd(cmd, cwd=cwd)
             except Exception as ex:
                 ok = False
                 try:

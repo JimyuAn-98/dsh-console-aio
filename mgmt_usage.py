@@ -18,6 +18,7 @@ MODEL_COLS = (
     ("model", "模型"),
     ("provider", "Provider"),
     ("input", "输入 tokens"),
+    ("cache", "缓存命中"),
     ("output", "输出 tokens"),
     ("calls", "调用次数"),
     ("cost", "估算费用"),
@@ -25,6 +26,7 @@ MODEL_COLS = (
 DAY_COLS = (
     ("date", "日期"),
     ("input", "输入 tokens"),
+    ("cache", "缓存命中"),
     ("output", "输出 tokens"),
 )
 
@@ -144,17 +146,18 @@ class UsagePage(ttk.Frame):
         self._fill_days(res.get("days") or {})
 
     def _fill_models(self, models):
-        # 模型表: 每行 model/provider/input/output/calls/估算费用
+        # 模型表: 每行 model/provider/input/cache/output/calls/估算费用(按官方定价, 区分缓存与时段)
         for name in sorted(models):
             m = models[name]
             if not isinstance(m, dict):
                 m = {}
             inp = int(m.get("input") or 0)
+            cache = int(m.get("cache") or 0)
             out = int(m.get("output") or 0)
             provider = m.get("provider") or "（无数据）"
             self._mtree.insert("", "end", values=(
-                name, provider, _num(inp), _num(out), _num(m.get("calls")),
-                self._cost_text(name, inp, out),
+                name, provider, _num(inp), _num(cache), _num(out), _num(m.get("calls")),
+                self._cost_text(name, inp, out, cache),
             ))
 
     def _fill_days(self, days):
@@ -164,28 +167,13 @@ class UsagePage(ttk.Frame):
             if not isinstance(d, dict):
                 d = {}
             self._dtree.insert("", "end", values=(
-                date, _num(d.get("input")), _num(d.get("output")),
+                date, _num(d.get("input")), _num(d.get("cache")), _num(d.get("output")),
             ))
 
-    def _price_for(self, model):
-        # 返回 (输入单价, 输出单价) 或 None(未定价)
-        p = dsh_data.DEFAULT_PRICES.get(model)
-        if not isinstance(p, dict):
-            return None
-        pi = p.get("input")
-        po = p.get("output")
-        if pi is None or po is None:
-            return None
-        try:
-            return (float(pi), float(po))
-        except (TypeError, ValueError):
-            return None
-
-    def _cost_text(self, model, inp, out):
-        p = self._price_for(model)
-        if p is None:
+    def _cost_text(self, model, inp, out, cache=0):
+        cost = dsh_data.estimate_cost(model, inp, out, cache)
+        if cost is None:
             return "未定价"
-        cost = inp / 1e6 * p[0] + out / 1e6 * p[1]
         return "%.2f 元" % cost
 
     def _refresh_costs(self):
@@ -211,14 +199,15 @@ class UsagePage(ttk.Frame):
 
 
 class PriceDialog(tk.Toplevel):
-    # 简单价格编辑对话框: 修改 dsh_data.DEFAULT_PRICES(仅内存, 不写文件)
+    # 价格编辑对话框: 修改 dsh_data.DEFAULT_PRICES(仅内存, 不写文件)。
+    # 结构: {in_cached/in_miss/out: [空闲, 高峰]}, 元/百万 token。
 
     def __init__(self, master, models):
         self._master = master
         super().__init__(master)
         self.title("编辑价格表")
         self.configure(padx=12, pady=10)
-        self.geometry("480x320")
+        self.geometry("760x360")
         self._rows = []
         self._build(models)
         self.transient(master)
@@ -227,24 +216,41 @@ class PriceDialog(tk.Toplevel):
     def _build(self, models):
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True)
-        ttk.Label(wrap, text="估算单价(元/百万 token), 仅本次运行生效",
+        ttk.Label(wrap, text="官方单价(元/百万 token), 仅本次运行生效; 高峰=周一至五 9-12/14-18 时",
                   font=F_BOLD).pack(anchor="w", pady=(0, 6))
         head = ttk.Frame(wrap)
         head.pack(fill="x", pady=(0, 2))
-        for j, t in enumerate(("模型", "输入单价", "输出单价")):
-            ttk.Label(head, text=t, font=F_BOLD, width=16, anchor="w").grid(row=0, column=j, padx=2)
+        for j, t in enumerate(("模型", "输入缓存命中", "输入未命中", "输出", "空闲/高峰")):
+            w = 18 if j == 0 else 22
+            ttk.Label(head, text=t, font=F_BOLD, width=w, anchor="w").grid(row=0, column=j, padx=2)
         table = ttk.Frame(wrap)
         table.pack(fill="both", expand=True)
         for i, name in enumerate(models):
             p = dsh_data.DEFAULT_PRICES.get(name)
-            iv = tk.StringVar(value=str(p.get("input")) if isinstance(p, dict) and p.get("input") is not None else "")
-            ov = tk.StringVar(value=str(p.get("output")) if isinstance(p, dict) and p.get("output") is not None else "")
+            p = p if isinstance(p, dict) else {}
+            def gv(k, d):
+                v = p.get(k)
+                return str(v) if v is not None else str(d)
+            ic1 = tk.StringVar(value=gv("in_cached", [0.05, 0.10])[0])
+            ic2 = tk.StringVar(value=gv("in_cached", [0.05, 0.10])[1])
+            im1 = tk.StringVar(value=gv("in_miss", [1.5, 3.0])[0])
+            im2 = tk.StringVar(value=gv("in_miss", [1.5, 3.0])[1])
+            o1 = tk.StringVar(value=gv("out", [4.5, 9.0])[0])
+            o2 = tk.StringVar(value=gv("out", [4.5, 9.0])[1])
             name_v = tk.StringVar(value=name)
-            ttk.Entry(table, textvariable=name_v, width=16).grid(row=i, column=0, padx=2, pady=2, sticky="ew")
-            ttk.Entry(table, textvariable=iv, width=16).grid(row=i, column=1, padx=2, pady=2, sticky="ew")
-            ttk.Entry(table, textvariable=ov, width=16).grid(row=i, column=2, padx=2, pady=2, sticky="ew")
-            self._rows.append((name_v, iv, ov))
-        ttk.Label(wrap, text="价格留空表示沿用原值; 模型名留空则跳过该行。",
+            ttk.Entry(table, textvariable=name_v, width=18).grid(row=i, column=0, padx=2, pady=2, sticky="ew")
+            frame1 = ttk.Frame(table); frame1.grid(row=i, column=1, padx=2, pady=2, sticky="ew")
+            ttk.Entry(frame1, textvariable=ic1, width=9).pack(side="left")
+            ttk.Entry(frame1, textvariable=ic2, width=9).pack(side="left", padx=(2, 0))
+            frame2 = ttk.Frame(table); frame2.grid(row=i, column=2, padx=2, pady=2, sticky="ew")
+            ttk.Entry(frame2, textvariable=im1, width=9).pack(side="left")
+            ttk.Entry(frame2, textvariable=im2, width=9).pack(side="left", padx=(2, 0))
+            frame3 = ttk.Frame(table); frame3.grid(row=i, column=3, padx=2, pady=2, sticky="ew")
+            ttk.Entry(frame3, textvariable=o1, width=9).pack(side="left")
+            ttk.Entry(frame3, textvariable=o2, width=9).pack(side="left", padx=(2, 0))
+            ttk.Label(table, text="← 空闲 | 高峰 →", font=F_SMALL, foreground="#888").grid(row=i, column=4, padx=4)
+            self._rows.append((name_v, ic1, ic2, im1, im2, o1, o2))
+        ttk.Label(wrap, text="每列两个输入框: 左=空闲时段价, 右=高峰时段价。留空沿用原值。",
                   font=F_SMALL, foreground="#888").pack(anchor="w", pady=(8, 0))
         btns = ttk.Frame(wrap)
         btns.pack(fill="x", pady=(10, 0))
@@ -252,21 +258,23 @@ class PriceDialog(tk.Toplevel):
         ttk.Button(btns, text="取消", command=self.destroy).pack(side="left", padx=4)
 
     def _save(self):
-        # 逐行解析; 任一价格非法则整体不保存
         updates = {}
-        for name_v, iv, ov in self._rows:
+        for row in self._rows:
+            name_v = row[0]
             name = name_v.get().strip()
             if not name:
                 continue
             old = dsh_data.DEFAULT_PRICES.get(name)
             old = old if isinstance(old, dict) else {}
             try:
-                inp = float(iv.get().strip()) if iv.get().strip() else float(old.get("input") or 0)
-                out = float(ov.get().strip()) if ov.get().strip() else float(old.get("output") or 0)
+                def f(v, d):
+                    return float(v.get().strip()) if v.get().strip() else float(d)
+                nv = [f(row[1], 0.05), f(row[2], 0.10), f(row[3], 1.5), f(row[4], 3.0),
+                      f(row[5], 4.5), f(row[6], 9.0)]
             except ValueError:
                 messagebox.showerror("输入错误", "单价必须是数字(如 2.0)。", parent=self)
                 return
-            updates[name] = {"input": inp, "output": out}
+            updates[name] = {"in_cached": [nv[0], nv[1]], "in_miss": [nv[2], nv[3]], "out": [nv[4], nv[5]]}
         for name, p in updates.items():
             dsh_data.DEFAULT_PRICES[name] = p
         self.destroy()

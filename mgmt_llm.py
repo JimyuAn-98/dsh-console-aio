@@ -17,8 +17,9 @@ F_SMALL = ("Segoe UI", 9)
 
 # 内置官方 provider 不在 settings.yaml 里, 模型 id 与数据层单价表保持一致
 BUILTIN_PROVIDER = "deepseek-official"
-BUILTIN_MODELS = list(dsh_data.DEFAULT_PRICES.keys())
-REASONING_LEVELS = ["min", "medium", "max"]
+# 官方模型名(与定价表对齐); 自定义 provider 模型会动态合并进下拉
+BUILTIN_MODELS = ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"]
+REASONING_LEVELS = ["off", "min", "medium", "max"]
 
 
 class LlmPage(ttk.Frame):
@@ -88,16 +89,18 @@ class LlmPage(ttk.Frame):
 
         prov = ttk.LabelFrame(wrap, text="自定义 Providers（只读）", padding=8)
         prov.pack(fill="both", expand=True)
-        cols = ("name", "api", "models", "keyenv")
+        cols = ("name", "api", "baseurl", "models", "keyenv")
         self._tree = ttk.Treeview(prov, columns=cols, show="headings", height=7)
-        self._tree.heading("name", text="name")
+        self._tree.heading("name", text="provider")
         self._tree.heading("api", text="api")
-        self._tree.heading("models", text="models 数量")
+        self._tree.heading("baseurl", text="baseURL")
+        self._tree.heading("models", text="模型名称")
         self._tree.heading("keyenv", text="apiKeyEnv（环境变量）")
         self._tree.column("name", width=110, anchor="w")
-        self._tree.column("api", width=150, anchor="w")
-        self._tree.column("models", width=80, anchor="center")
-        self._tree.column("keyenv", width=230, anchor="w")
+        self._tree.column("api", width=120, anchor="w")
+        self._tree.column("baseurl", width=220, anchor="w")
+        self._tree.column("models", width=200, anchor="w")
+        self._tree.column("keyenv", width=200, anchor="w")
         sb = ttk.Scrollbar(prov, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=sb.set)
         self._tree.pack(side="left", fill="both", expand=True)
@@ -168,21 +171,29 @@ class LlmPage(ttk.Frame):
         self._apply_models(self._model_var.get())
 
     def _fill_providers(self):
-        # 刷新只读 providers 表格; apiKeyEnv 只显示环境变量名与是否已设置
+        # 刷新只读 providers 表格: 补全 baseURL/模型名称列表; apiKeyEnv 只显示环境变量名与是否已设置
         for i in self._tree.get_children():
             self._tree.delete(i)
         for name, p in self._providers_map().items():
             if not isinstance(p, dict):
                 continue
             api = str(p.get("api") or "")
+            base = str(p.get("baseURL") or "")
             mlist = p.get("models")
-            n = len(mlist) if isinstance(mlist, list) else 0
+            mnames = []
+            if isinstance(mlist, list):
+                for m in mlist:
+                    if isinstance(m, dict):
+                        mnames.append(str(m.get("name") or m.get("id") or ""))
+                    else:
+                        mnames.append(str(m))
+            models_txt = ", ".join(x for x in mnames if x) or "-"
             env = str(p.get("apiKeyEnv") or "")
             if env:
                 env_txt = env + ("（已设置）" if os.environ.get(env) else "（未设置）")
             else:
                 env_txt = ""
-            self._tree.insert("", "end", values=(name, api, n, env_txt))
+            self._tree.insert("", "end", values=(name, api, base, models_txt, env_txt))
 
     def _on_save(self):
         provider = self._provider_var.get()

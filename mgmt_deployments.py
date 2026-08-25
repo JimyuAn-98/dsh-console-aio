@@ -72,7 +72,7 @@ class _AddDeployDialog(tk.Toplevel):
         form.columnconfigure(1, weight=1)
         btns = ttk.Frame(self)
         btns.pack(fill="x", pady=(12, 0))
-        ttk.Button(btns, text="确认", command=self._confirm).pack(side="right", padx=(6, 0))
+        ttk.Button(btns, text="保存", command=self._confirm).pack(side="right", padx=(6, 0))
         ttk.Button(btns, text="取消", command=self.destroy).pack(side="right")
         self.bind("<Return>", lambda _e: self._confirm())
         self.bind("<Escape>", lambda _e: self.destroy())

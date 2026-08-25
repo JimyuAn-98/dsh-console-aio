@@ -167,8 +167,8 @@ PAGE_MODULES = {
 
 ITEMS = [
     {"type": "dsh",    "key": "dsh-web", "title": "本机 dsh", "port": DASH_PORT,
-     "actions": ["start", "stop"],
-     "desc": "启动/停止本机 dsh GUI\n(后台 pnpm dsh web,\n访问 http://127.0.0.1:%d)" % DASH_PORT},
+     "actions": ["start", "restart", "stop"],
+     "desc": "启动/重启/停止本机 dsh GUI\n(后台 pnpm dsh web,\n访问 http://127.0.0.1:%d)" % DASH_PORT},
     {"type": "py", "key": "dsh-tunnel", "port": 8090,
      "backend": "python", "actions": ["start", "persist", "stop"],
      "desc": "在家 → 打通 公网服务器 三个转发口\n8090→实验室dshGUI / 8022→实验室dshSSH / 8091→本机GUI"},
@@ -195,7 +195,7 @@ COLOR_RED = "#e07a7a"
 COLOR_WARN = "#e5c07b"
 ACCENT = "#1f6feb"
 
-BTN_TEXT = {"start": "启动", "persist": "常驻", "stop": "停止", "run": "运行更新"}
+BTN_TEXT = {"start": "启动", "restart": "重启", "persist": "常驻", "stop": "停止", "run": "运行更新"}
 
 
 def script_path(cfg):
@@ -411,12 +411,13 @@ class ConfigDialog(tk.Toplevel):
             cfg["ssh_server"] = self._vars["ssh_server"].get().strip() or "YOUR_PUBLIC_IP"
             cfg["ssh_user"] = self._vars["ssh_user"].get().strip() or "tunnel"
             cfg["dash_repo"] = self._vars["dash_repo"].get().strip()
-            cfg["dash_port"] = int(self._vars["dash_port"].get())
+            cfg["dash_port"] = int(self._vars["dash_port"].get().strip())
             cfg["dash_cmd"] = self._vars["dash_cmd"].get().strip().split()
-            cfg["forward_ports"] = [int(x.strip()) for x in
-                                    self._vars["forward_ports"].get().split(",") if x.strip()]
-            cfg["poll_seconds"] = int(self._vars["poll_seconds"].get())
-            cfg["remote_poll_seconds"] = int(self._vars["remote_poll_seconds"].get())
+            # forward_ports 支持 "8090,8022,8091" 或 "[8090, 8022, 8091]" 两种写法
+            _fp_raw = self._vars["forward_ports"].get().strip().strip("[]").replace(" ", "")
+            cfg["forward_ports"] = [int(x) for x in _fp_raw.split(",") if x]
+            cfg["poll_seconds"] = int(self._vars["poll_seconds"].get().strip())
+            cfg["remote_poll_seconds"] = int(self._vars["remote_poll_seconds"].get().strip())
             cfg["lab_server"] = self._vars["lab_server"].get().strip()
             cfg["lab_user"] = self._vars["lab_user"].get().strip()
             lp = self._vars["lab_port"].get().strip()
@@ -731,6 +732,7 @@ class Dashboard:
 
         self.monitor_stop = threading.Event()
         self.remote_state = None   # {port: bool}, None=SSH不可达
+        self.DASH_REPO = DASH_REPO   # 供插件管理等页面取 dsh 仓库目录(cwd)
         self._build_ui()
         self._start_monitor()
         self.root.after(800, self._maybe_first_run)   # 首次启动引导(未配置时)
@@ -1042,6 +1044,10 @@ class Dashboard:
     # ── 本机 dsh ───────────────────────────
     def _run_dsh(self, mode):
         if mode == "start":
+            self._dsh_start()
+        elif mode == "restart":
+            self._dsh_stop()
+            self.log("  停止完成, 重新启动…", "warn")
             self._dsh_start()
         elif mode == "stop":
             self._dsh_stop()

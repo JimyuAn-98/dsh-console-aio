@@ -182,6 +182,12 @@ class KeysPage(ttk.Frame):
         k = self._selected()
         if k is None:
             return
+        ok = messagebox.askyesno(
+            "查看公钥",
+            "公钥(.pub)为公开信息, 可安全查看。\n\n注意: 公钥本身不敏感, 但请勿将私钥(id_* 无后缀文件)内容发给任何人。\n\n是否查看 " + k["name"] + ".pub ?",
+            parent=self)
+        if not ok:
+            return
         pub = read_pubkey(k["name"]) or "(无 .pub 文件)"
         messagebox.showinfo("公钥 " + k["name"], pub, parent=self)
 
@@ -189,15 +195,27 @@ class KeysPage(ttk.Frame):
         k = self._selected()
         if k is None:
             return
+        ok = messagebox.askyesno(
+            "复制公钥",
+            "将把公钥内容复制到剪贴板(用于 ssh-copy-id 等)。\n\n注意: 只复制 .pub 公钥(公开信息); 请勿复制私钥内容。\n\n是否继续？",
+            parent=self)
+        if not ok:
+            return
         pub = read_pubkey(k["name"])
         if not pub:
-            messagebox.showwarning("无公钥", "未找到 %s.pub", parent=self)
+            messagebox.showwarning("无公钥", "未找到 " + k["name"] + ".pub", parent=self)
             return
         self.clipboard_clear()
         self.clipboard_append(pub)
         self._set_status("公钥已复制到剪贴板", "#3c3")
 
     def _open_dir(self):
+        ok = messagebox.askyesno(
+            "打开 .ssh 目录",
+            "将打开本机 ~/.ssh 目录(含私钥文件)。\n\n注意: 目录内有私钥, 请勿将其内容泄露或上传。\n\n是否打开？",
+            parent=self)
+        if not ok:
+            return
         try:
             os.makedirs(ssh_dir(), exist_ok=True)
             os.startfile(ssh_dir())

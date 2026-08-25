@@ -52,6 +52,10 @@ class TaskboardPage(ttk.Frame):
     def _build(self):
         # 页面自身即容器; pack 填充, 高度自适应(不写死)
         ttk.Label(self, text="任务看板", font=F_BOLD).pack(anchor="w", pady=(0, 6))
+        ttk.Label(self, text="这是 dsh 的定时任务/调度系统数据(~/.dsh/task-board/): ledger 为任务账本,"
+                             "scheduler 为定时调度器(时区/最近心跳), recentRequests 为最近请求。\n"
+                             "只有创建过定时任务(dsh web 或 CLI)才有内容; 当前为空属正常。",
+                  font=F_SMALL, foreground="#888", justify="left").pack(anchor="w", pady=(0, 6))
 
         # 调度器信息(单行三格: 时区 / 最近心跳 / ledgerId)
         info = ttk.Frame(self)
