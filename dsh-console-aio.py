@@ -1,222 +1,760 @@
 # -*- coding: utf-8 -*-
 """
-dsh-console-aio — dsh SSH 隧道管理 + 本机 dsh 启停 + 健康监控
-                      （纯 Windows 原生 GUI）
-唯一入口: 双击运行 或  python dsh-console-aio.py
+dsh-console-aio.py - dsh SSH 隧道管理 + 本机 dsh 启停 + 健康监控 (PySide6)。
+现代暗色主题 + 顶部部署栏 + 左导航 + 页面宿主 + 右状态栏(实时健康监控) + 底部日志 + 状态栏。
+复用数据层 dsh_data.py / tunnel_mgr.py 与 config.json；管理页在 pyside/pages_*.py，对话框在 pyside/dialogs.py。
 
-功能:
-  · 本机 dsh 卡片: 一键 启动 / 停止 本机 dsh web（pnpm dsh web）
-  · 隧道卡片: 一键 启动 / 常驻 / 停止 各隧道脚本
-    （dsh-tunnel / connect-lab-dsh / dsh-tunnel-reverse）
-  · 更新卡片: 一键 运行 update-dsh（拉取→构建→重启, 实时滚动日志）
-  · 健康监控(两行):
-      本机端口行 — 探测本机监听的端口
-      公网服务器 隧道行  — SSH 直查 公网服务器 上反向隧道端口是否在监听
-  · 配置: IP/用户名/仓库路径/端口/轮询间隔等全部集中在 config.json,
-          或点界面右上角"配置"按钮编辑。
-仅依赖 Python 标准库 (tkinter), 无需 pip 安装任何东西。
+运行(双击 exe 或):  C:/ProgramData/miniconda3/pythonw.exe dsh-console-aio.py
+离屏验证:  QT_QPA_PLATFORM=offscreen python dsh-console-aio.py --smoke
 """
+import os, sys, json, time, subprocess, socket, threading
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
+    QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
+    QComboBox, QFrame, QScrollArea, QSizePolicy, QAbstractItemView)
+from PySide6.QtCore import Qt, Signal, QObject, QTimer
+from PySide6.QtGui import QFont, QTextCursor, QColor
 
-import os
-import re
-import sys
-
-if getattr(sys, "frozen", False):
-    # 打包(exe)环境: 显式指定 tcl/tk 库目录(conda 布局下 PyInstaller 不会自动收集)
-    _meip = getattr(sys, "_MEIPASS", "")
-    if _meip:
-        os.environ.setdefault("TCL_LIBRARY", os.path.join(_meip, "tcl8.6"))
-        os.environ.setdefault("TK_LIBRARY", os.path.join(_meip, "tk8.6"))
-import json
-import time
-import socket
-import threading
-import importlib
-import subprocess
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-
+import dsh_data
 import tunnel_mgr
-import dsh_data  # 纯 Python 隧道管理器
+from tunnel_mgr import tcp_ok
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-APP_VERSION = "0.3.0"   # 与 RELEASE_NOTES.md 对齐; 更新检查用
-
-# ─────────────────────────────────────────
-#  默认配置（当 config.json 缺失/字段缺失时使用）
-#  仅包含通用/无敏感信息的值: 真实 IP/用户名/路径只存在用户本地的 config.json
-# ─────────────────────────────────────────
-DEFAULTS = {
-    "ssh_server": "YOUR_PUBLIC_IP",   # 请填公网中转服务器 IP/域名
-    "ssh_user": "YOUR_USER",           # 请填中转服务器用户名
-    "dash_repo": "",                   # 本机 dsh 仓库路径(留空则提示在配置向导填写)
-    "dash_port": 3080,
-    "dash_cmd": ["pnpm.cmd", "dsh", "web"],
-    "poll_seconds": 4,
-    "remote_poll_seconds": 20,
-    "tcp_timeout": 0.8,
-    "ssh_timeout": 10,
-    "update_timeout": 1800,
-    # 实验室直连(可选, 未配置时置空)
-    "lab_server": "",
-    "lab_user": "",
-    "lab_port": 3090,
-    # 本机反向隧道: 中继端口 -> 本机 dsh
-    "reverse_port": 8091,
-    "local_ports": [
-        [3080, "本机dsh", "GUI"],
-        [8090, "本地8090", "正向隧道"],
-        [8022, "本地8022", "正向隧道"],
-        [8091, "本地8091", "正向隧道"],
-        [3090, "本地3090", "实验室直连"],
-    ],
-    "remote_tunnels": [
-        [8090, "中继:8090", "远端监听"],
-        [8022, "中继:8022", "远端监听"],
-        [8091, "中继:8091", "远端监听"],
-    ],
-    # 正向隧道在中继侧使用的端口
-    "forward_ports": [8090, 8022, 8091],
-}
+CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
+APP_VERSION = '0.5.0'
 
 
-def load_config():
-    """读取 config.json 并合并默认值。返回配置 dict。"""
-    cfg = dict(DEFAULTS)
+def _load_config():
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            for k, v in data.items():
-                if k in DEFAULTS:
-                    cfg[k] = v
-    except FileNotFoundError:
-        pass
-    except (json.JSONDecodeError, OSError):
-        pass
-    return cfg
+        with open(CONFIG_PATH, encoding='utf-8') as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
 
+CONFIG = _load_config()
 
-def save_config(cfg):
-    """把配置写回 config.json。返回 True 成功 / False 失败。"""
-    try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-        return True
-    except OSError:
-        return False
+# ---------------- 业务常量(从 config.json 派生) ----------------
+DASH_REPO  = CONFIG.get("dash_repo") or ""
+DASH_PORT  = CONFIG.get("dash_port") or 3080
+DASH_CMD   = list(CONFIG.get("dash_cmd") or ["pnpm.cmd", "dsh", "web"])
+POLL_SECONDS = CONFIG.get("poll_seconds") or 4
 
-
-# 读入配置 → 模块级常量（运行期修改需重建/重启后读取）
-CONFIG = load_config()
-
-SSH_SERVER   = CONFIG["ssh_server"]
-SSH_USER     = CONFIG["ssh_user"]
-DASH_REPO    = CONFIG["dash_repo"]
-DASH_PORT    = CONFIG["dash_port"]
-DASH_CMD     = list(CONFIG["dash_cmd"])
-POLL_SECONDS = CONFIG["poll_seconds"]
-REMOTE_POLL_SECONDS = CONFIG["remote_poll_seconds"]
-TCP_TIMEOUT  = CONFIG["tcp_timeout"]
-SSH_TIMEOUT  = CONFIG["ssh_timeout"]
-UPDATE_TIMEOUT = CONFIG["update_timeout"]
-LOCAL_PORTS  = [tuple(x[:3]) for x in CONFIG["local_ports"]]
-REMOTE_TUNNELS = [tuple(x[:3]) for x in CONFIG["remote_tunnels"]]
-FORWARD_PORTS = list(CONFIG["forward_ports"])
-LAB_SERVER   = CONFIG["lab_server"]
-LAB_USER     = CONFIG["lab_user"]
-LAB_PORT     = CONFIG["lab_port"]
-REVERSE_PORT = CONFIG["reverse_port"]
-
-# 各操控项（order 决定卡片排列顺序）
-# actions 决定该卡片显示的按钮:
-#   start / persist / stop   (隧道脚本, 支持 -Persist / -Stop)
-#   start / stop             (本机 dsh, 本地服务)
-#   run                      (update-dsh: 一次完整更新, 无启停语义)
-# 左导航页面注册: (显示名, key); PAGE_MODULES: key -> (模块, Page类)
-NAV_ITEMS = [
-    ("总览", "overview"),
-    ("隧道", "tunnels"),
-    ("会话与工作区", "sessions"),
-    ("Agent 模式", "agents"),
-    ("Profile 管理", "profiles"),
-    ("插件管理", "plugins"),
-    ("任务看板", "taskboard"),
-    ("模型用量", "usage"),
-    ("LLM 配置", "llm"),
-    ("备份与运维", "ops"),
-    ("SSH 密钥", "keys"),
-    ("关于与更新", "version"),
-    ("部署管理", "deployments"),
-]
-PAGE_MODULES = {
-    "sessions": ("mgmt_sessions", "SessionPage"),
-    "agents": ("mgmt_agents", "AgentPage"),
-    "profiles": ("mgmt_profiles", "ProfilePage"),
-    "plugins": ("mgmt_plugins", "PluginPage"),
-    "taskboard": ("mgmt_taskboard", "TaskboardPage"),
-    "usage": ("mgmt_usage", "UsagePage"),
-    "llm": ("mgmt_llm", "LlmPage"),
-    "ops": ("mgmt_ops", "OpsPage"),
-    "keys": ("mgmt_keys", "KeysPage"),
-    "version": ("mgmt_version", "VersionPage"),
-    "deployments": ("mgmt_deployments", "DeploymentPage"),
-}
+BTN_TEXT = {"start": "启动", "restart": "重启", "persist": "常驻",
+           "stop": "停止", "run": "运行更新"}
 
 ITEMS = [
-    {"type": "dsh",    "key": "dsh-web", "title": "本机 dsh", "port": DASH_PORT,
+    {"type": "dsh", "key": "dsh-web", "title": "本机 dsh", "port": DASH_PORT,
      "actions": ["start", "restart", "stop"],
      "desc": "启动/重启/停止本机 dsh GUI\n(后台 pnpm dsh web,\n访问 http://127.0.0.1:%d)" % DASH_PORT},
-    {"type": "py", "key": "dsh-tunnel", "port": 8090,
-     "backend": "python", "actions": ["start", "persist", "stop"],
-     "desc": "在家 → 打通 公网服务器 三个转发口\n8090→实验室dshGUI / 8022→实验室dshSSH / 8091→本机GUI"},
-    {"type": "py", "key": "connect-lab-dsh", "port": LAB_PORT,
-     "backend": "python", "actions": ["start", "persist", "stop"],
-     "desc": "实验室局域网 → 直连 实验室dsh dsh GUI (本机 3090)"},
-    {"type": "py", "key": "dsh-tunnel-reverse", "port": 0,
-     "backend": "python", "actions": ["start", "persist", "stop"],
-     "desc": "本机 dsh → 公网服务器 反向隧道\n公网服务器:8091 → 本机 3080"},
-    {"type": "py", "key": "update-dsh", "port": -1,
-     "backend": "python", "actions": ["run"],
-     "desc": "运行一次完整更新:\ngit 拉取→依赖→构建→重启,\n期间 GUI 短暂断连"},
+    {"type": "py", "key": "dsh-tunnel", "port": 8090, "backend": "python",
+     "actions": ["start", "persist", "stop"],
+     "desc": "在家 -> 打通三个转发口\n8090->实验室GUI / 8022->SSH / 8091->本机GUI"},
+    {"type": "py", "key": "connect-lab-dsh", "port": 3090, "backend": "python",
+     "actions": ["start", "persist", "stop"],
+     "desc": "实验室局域网 -> 直连实验室 dsh GUI (本机 3090)"},
+    {"type": "py", "key": "dsh-tunnel-reverse", "port": 0, "backend": "python",
+     "actions": ["start", "persist", "stop"],
+     "desc": "本机 dsh -> 公网反向隧道\n公网:8091 -> 本机 3080"},
+    {"type": "py", "key": "update-dsh", "port": -1, "backend": "python",
+     "actions": ["run"],
+     "desc": "运行一次完整更新:\ngit 拉取->依赖->构建->重启"},
 ]
 
-LOG_RING = 4000
-LOG_TAIL = 1500
-
-F_BOLD = ("Segoe UI", 10, "bold")
-F_SMALL = ("Segoe UI", 9)
-F_MONO = ("Consolas", 9)
-COLOR_ON = "#2e8b57"
-COLOR_OFF = "#999"
-COLOR_RED = "#e07a7a"
-COLOR_WARN = "#e5c07b"
-ACCENT = "#1f6feb"
-
-BTN_TEXT = {"start": "启动", "restart": "重启", "persist": "常驻", "stop": "停止", "run": "运行更新"}
+NAV_ITEMS = [
+    ('总览', 'overview'), ('隧道', 'tunnels'), ('会话与工作区', 'sessions'),
+    ('Agent 模式', 'agents'), ('Profile 管理', 'profiles'), ('插件管理', 'plugins'),
+    ('任务看板', 'taskboard'), ('模型用量', 'usage'), ('LLM 配置', 'llm'),
+    ('备份与运维', 'ops'), ('SSH 密钥', 'keys'), ('关于与更新', 'version'),
+    ('部署管理', 'deployments'),
+]
 
 
-def script_path(cfg):
-    return os.path.join(BASE_DIR, cfg["file"])
+
+# ---------------- 现代暗色 QSS 主题(全控件覆盖, 无系统白色残留) ----------------
+QSS = """
+* {
+    font-family: "Microsoft YaHei UI";
+    font-size: 13px;
+    color: #e6e6e6;
+}
+QMainWindow, QWidget#central, QWidget#body { background: #1e1e2e; }
+
+/* 顶部栏 */
+QFrame#topbar { background: #252535; border-bottom: 1px solid #33334a; }
+QLabel#titleLbl { font-size: 17px; font-weight: bold; color: #ffffff; }
+QLabel#verLbl { color: #9a9ab0; font-size: 12px; }
+QFrame#vsep { background: #3d3d5c; border: none; width: 1px; }
+QComboBox#deploy {
+    background: #2f2f45; border: 1px solid #3d3d5c; border-radius: 6px;
+    padding: 4px 10px; min-width: 130px; color: #e6e6e6;
+}
+QComboBox#deploy::drop-down { border: none; width: 22px; }
+QComboBox#deploy QAbstractItemView {
+    background: #2f2f45; border: 1px solid #3d3d5c; selection-background-color: #4f6ef7;
+    selection-color: #ffffff; color: #e6e6e6; outline: 0; padding: 4px;
+}
+
+QPushButton {
+    background: #2f2f45; border: 1px solid #3d3d5c; border-radius: 6px;
+    padding: 5px 14px; color: #e6e6e6;
+}
+QPushButton:hover { background: #3a3a58; border-color: #5858a0; }
+QPushButton:pressed { background: #26263a; }
+QPushButton:disabled { color: #6a6a80; background: #2a2a3c; }
+QPushButton#primary { background: #4f6ef7; border-color: #4f6ef7; color: #fff; font-weight: bold; }
+QPushButton#primary:hover { background: #6179ff; }
+
+/* 左导航 */
+QListWidget#nav {
+    background: #252535; border: none; border-right: 1px solid #33334a;
+    outline: 0; padding-top: 6px;
+}
+QListWidget#nav::item { padding: 9px 16px; border-left: 3px solid transparent; color: #b8b8cf; }
+QListWidget#nav::item:hover { background: #2e2e44; color: #fff; }
+QListWidget#nav::item:selected {
+    background: #2f3353; color: #ffffff; border-left: 3px solid #4f6ef7; font-weight: bold;
+}
+
+/* 右状态栏 */
+QFrame#rightBar { background: #252535; border-left: 1px solid #33334a; }
+QLabel#rightTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; font-weight: bold; }
+QLabel#monDot { font-size: 15px; }
+QLabel#monName { color: #e6e6e6; font-size: 12px; }
+QLabel#monNote { color: #9a9ab0; font-size: 11px; }
+QLabel#monVal { color: #e6e6e6; font-size: 12px; font-weight: bold; }
+
+/* 页面卡片 */
+QFrame#card {
+    background: #252535; border: 1px solid #33334a; border-radius: 10px;
+}
+QLabel#cardTitle { font-size: 15px; font-weight: bold; color: #ffffff; }
+QLabel#cardHint { color: #9a9ab0; font-size: 12px; }
+QFrame#pageHostBg { background: #1e1e2e; }
+
+/* 日志区 */
+QFrame#logWrap { background: #1e1e2e; border-top: 1px solid #33334a; }
+QLabel#logTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; }
+QTextEdit#log {
+    background: #16161f; border: 1px solid #2c2c40; border-radius: 8px;
+    padding: 6px; font-family: Consolas; font-size: 12px; color: #e6e6e6;
+    selection-background-color: #4f6ef7;
+}
+
+/* 底部状态栏 */
+QLabel#statusBar {
+    background: #252535; border-top: 1px solid #33334a;
+    padding: 5px 12px; color: #9a9ab0; font-size: 12px;
+}
+
+/* 全局滚动条(修掉白色拖拽条) */
+QScrollBar:vertical {
+    background: #1a1a28; width: 12px; margin: 0; border: none;
+}
+QScrollBar::handle:vertical {
+    background: #3d3d5c; min-height: 30px; border-radius: 6px; margin: 2px;
+}
+QScrollBar::handle:vertical:hover { background: #4f5674; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; background: none; border: none; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+QScrollBar:horizontal {
+    background: #1a1a28; height: 12px; margin: 0; border: none;
+}
+QScrollBar::handle:horizontal {
+    background: #3d3d5c; min-width: 30px; border-radius: 6px; margin: 2px;
+}
+QScrollBar::handle:horizontal:hover { background: #4f5674; }
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; background: none; border: none; }
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
+
+/* 工具提示/下拉菜单也覆盖掉系统色 */
+QToolTip { background: #2f2f45; color: #e6e6e6; border: 1px solid #4f5674; padding: 4px 8px; }
+QMenu { background: #2f2f45; border: 1px solid #3d3d5c; }
+QMenu::item { padding: 6px 22px; }
+QMenu::item:selected { background: #4f6ef7; }
+QScrollArea { border: none; }
+"""
 
 
-def tcp_ok(host, port, timeout=TCP_TIMEOUT):
-    """TCP 连接测试: 返回 (ok, 延迟ms)"""
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(timeout)
-    t0 = time.time()
+
+
+def _load_theme():
+    # 优先读独立 ui/theme.qss(可用 QssStylesheetEditor 等编辑);
+    # 打包(exe)时读冻结目录; 缺失/读取失败回退内嵌 QSS(兜底)。
+    if getattr(sys, 'frozen', False):
+        base = getattr(sys, '_MEIPASS', BASE_DIR)
+    else:
+        base = BASE_DIR
+    for cand in (os.path.join(base, 'ui', 'theme.qss'),
+                 os.path.join(BASE_DIR, 'ui', 'theme.qss')):
+        try:
+            with open(cand, encoding='utf-8') as f:
+                return f.read()
+        except Exception:
+            continue
+    return QSS
+# ---------------- 线程安全日志桥: 后台线程 -> Qt 主线程 ----------------
+class LogBridge(QObject):
+    _sig = Signal(str, str)          # (text, tag)
+    _status = Signal(str)            # 状态栏文本(跨线程安全)
+    def __init__(self):
+        super().__init__()
+        self._view = None
+        self._status_cb = None
+        self._sig.connect(self._append)
+        self._status.connect(self._apply_status)
+    def attach(self, view):
+        self._view = view
+    def on_status(self, cb):
+        self._status_cb = cb
+    def emit(self, text, tag=""):
+        self._sig.emit(text, tag)
+    def emit_status(self, text):
+        self._status.emit(text)
+    def _apply_status(self, text):
+        if self._status_cb is not None:
+            self._status_cb(text)
+    def _append(self, text, tag):
+        if self._view is None:
+            return
+        color = "#e6e6e6"
+        if tag == "err":
+            color = "#e07a7a"
+        elif tag == "warn":
+            color = "#e5c07b"
+        elif tag == "ok":
+            color = "#7ecb6a"
+        self._view.setTextColor(QColor(color))
+        self._view.append(text)
+        self._view.setTextColor(QColor("#e6e6e6"))
+        self._view.moveCursor(QTextCursor.End)
+
+
+
+# ---------------- 页面基类 ----------------
+class BasePage(QWidget):
+    # 页面基类: 子类实现 _build()。通过 self.app 访问主窗口(日志/部署等)。
+    def __init__(self, app, parent=None):
+        super().__init__(parent)
+        self.app = app
+        self._build()
+
+    def _build(self):
+        pass
+
+
+# ---------------- 总览页(验证数据联通 + 部署状态) ----------------
+class OverviewPage(BasePage):
+    def _build(self):
+        v = QVBoxLayout(self)
+        v.setContentsMargins(20, 20, 20, 20)
+        v.setSpacing(14)
+
+        title = QLabel("部署总览", objectName="cardTitle")
+        v.addWidget(title)
+
+        card = QFrame(objectName="card")
+        cv = QVBoxLayout(card)
+        cv.setContentsMargins(18, 16, 18, 16)
+        cv.setSpacing(10)
+
+        hint = QLabel("以下为各部署(本机 + 远程)的实时状态快照", objectName="cardHint")
+        self.dep_status = QLabel("加载中…", objectName="monVal")
+        self.dep_status.setWordWrap(True)
+        refresh = QPushButton("刷新部署状态", objectName="primary")
+
+        cv.addWidget(hint)
+        cv.addWidget(self.dep_status)
+        cv.addWidget(refresh, 0, Qt.AlignRight)
+        v.addWidget(card)
+        v.addStretch(1)
+
+        refresh.clicked.connect(self.refresh)
+        self.refresh()
+
+    def refresh(self):
+        # --smoke 模式: 不触发真实 SSH, 用占位演示
+        cfg = CONFIG
+        ssh = str(cfg.get("ssh_server") or "")
+        unconfigured = (not ssh) or ssh.startswith("YOUR_")
+        if self.app.smoke or unconfigured:
+            self.dep_status.setText("(演示/未配置) 配置服务器地址后可查看真实部署状态")
+            return
+        self.dep_status.setText("读取中…")
+        depls = [{"name": "本机", "host": ""}] + dsh_data.load_deployments()
+
+        def worker():
+            rows = []
+            for d in depls:
+                try:
+                    snap = dsh_data.deployment_snapshot(dsh_data.DshRemote(d if d.get("host") else None))
+                except Exception as e:
+                    snap = {"ok": False, "error": str(e), "name": d.get("name")}
+                rows.append(snap)
+            # 跨线程回主线程: 用信号桥
+            self.app.bridge.emit(self._fmt(rows), "ok")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _fmt(self, rows):
+        parts = []
+        for s in rows:
+            name = s.get("name") or "?"
+            if not s.get("ok"):
+                parts.append(name + ": 离线")
+                continue
+            parts.append("%s v%s · 会话%d · 插件%d" % (
+                name, s.get("version") or "?", s.get("sessions") or 0, s.get("plugins") or 0))
+        return "   |  ".join(parts)
+
+
+# ---------------- 占位页(尚未迁移的 mgmt 页面) ----------------
+class PlaceholderPage(BasePage):
+    def __init__(self, app, name, parent=None):
+        self._name = name
+        super().__init__(app, parent)
+    def _build(self):
+        v = QVBoxLayout(self)
+        v.setContentsMargins(20, 20, 20, 20)
+        card = QFrame(objectName="card")
+        cv = QVBoxLayout(card)
+        cv.setContentsMargins(20, 20, 20, 20)
+        cv.setSpacing(8)
+        t = QLabel(self._name, objectName="cardTitle")
+        d = QLabel("该页面(mgmt_*.py)尚未迁移到 PySide6，仍是占位。", objectName="cardHint")
+        d.setWordWrap(True)
+        cv.addWidget(t)
+        cv.addWidget(d)
+        cv.addStretch(1)
+        v.addWidget(card)
+        v.addStretch(1)
+
+
+# ---------------- 右状态栏(监控点) ----------------
+class RightBar(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("rightBar")
+        self.setFixedWidth(240)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(12, 12, 12, 12)
+        v.setSpacing(8)
+
+        self._add_section("本机端口")
+        self._cells = {}
+        for port, label, note in CONFIG.get("local_ports", []):
+            self._add_cell("L" + str(port), label, note, port)
+        v.addSpacing(6)
+        self._add_section("公网服务器 反向隧道")
+        for port, label, note in CONFIG.get("remote_tunnels", []):
+            self._add_cell("R" + str(port), label, note, port)
+        v.addStretch(1)
+
+    def _add_section(self, text):
+        lbl = QLabel(text, objectName="rightTitle")
+        self.layout().addWidget(lbl)
+
+    def _add_cell(self, key, name, note, port):
+        row = QHBoxLayout()
+        dot = QLabel("●", objectName="monDot")
+        dot.setStyleSheet("color:#999;")
+        nm = QLabel(name, objectName="monName")
+        detail = QLabel("%s" % note, objectName="monNote")
+        val = QLabel("--", objectName="monVal")
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        col.addWidget(nm)
+        col.addWidget(detail)
+        row.addWidget(dot)
+        row.addLayout(col, 1)
+        row.addWidget(val, 0, Qt.AlignRight)
+        self.layout().addLayout(row)
+        self._cells[key] = (dot, val)
+
+    def set_state(self, key, ok, ms=-1):
+        # 实时更新单元格状态: 圆点与数值配色(绿=在线/红=不可达)。
+        # ms=None 表示只有 on/off 信息(如远程隧道), 显示 在线/不可达; ms>=0 显示延迟。
+        cell = self._cells.get(key)
+        if cell is None:
+            return
+        dot, val = cell
+        color = "#43d17f" if ok else "#e5574d"
+        dot.setStyleSheet("color:%s;" % color)
+        if ms is None:
+            val.setText("在线" if ok else "不可达")
+        elif ok and ms >= 0:
+            val.setText("%dms" % ms)
+        else:
+            val.setText("未就绪")
+        val.setStyleSheet("color:%s;" % color)
+
+
+
+# ---------------- 主窗口 ----------------
+class MainWindow(QMainWindow):
+    _monitorGot = Signal(object, object, object)   # (local_map, ssh_count, remote_state) 后台探测回主线程
+
+    def __init__(self, smoke=False):
+        super().__init__()
+        self.smoke = smoke
+        self.setWindowTitle("dsh 控制台 · PySide6 v" + APP_VERSION)
+        self.resize(1160, 800)
+        self.setMinimumSize(960, 620)
+        self.setStyleSheet(_load_theme())
+
+        self._current_page_key = None
+        self._deployments = []
+        self.bridge = LogBridge()
+        self.DASH_REPO = DASH_REPO          # 供插件等页面取 dsh 仓库目录(cwd)
+        self.APP_VERSION = APP_VERSION
+        self._start_monitor()               # 右侧健康监控(实时探测端口/隧道)
+
+        central = QWidget(objectName="central")
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        root.addWidget(self._build_topbar())
+        root.addWidget(self._build_body(), 1)
+        root.addWidget(self._build_log())
+        root.addWidget(self._build_statusbar())
+
+        self.bridge.attach(self.log_view)
+        self.bridge.on_status(self._set_status)
+        self._refresh_deploy_list()
+        self._show_page("overview")
+        if not smoke:
+            self.loge("PySide6 主框架已启动(v" + APP_VERSION + ")", "ok")
+
+    # ---- 顶部栏 ----
+    def _build_topbar(self):
+        bar = QFrame(objectName="topbar")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setSpacing(10)
+
+        title = QLabel("dsh 控制台", objectName="titleLbl")
+        ver = QLabel("  v" + APP_VERSION, objectName="verLbl")
+        sep = QFrame(objectName="vsep"); sep.setFixedWidth(1)
+        dlab = QLabel("部署:")
+        self.deploy = QComboBox(objectName="deploy")
+        self.deploy.currentIndexChanged.connect(self._on_deploy_changed)
+        poll = QLabel(" 轮询 4s·20s", objectName="verLbl")
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        refresh = QPushButton("立即刷新")
+        refresh.clicked.connect(self._force_refresh)
+        config = QPushButton("配置")
+        config.clicked.connect(self._open_config)
+        env = QPushButton("环境")
+        env.clicked.connect(self._open_env)
+        install = QPushButton("安装")
+        install.clicked.connect(self._open_install)
+
+        for w in (title, ver, sep, dlab, self.deploy, poll):
+            lay.addWidget(w)
+        lay.addWidget(spacer)
+        lay.addWidget(config)
+        lay.addWidget(env)
+        lay.addWidget(install)
+        lay.addWidget(refresh)
+        return bar
+
+    # ---- 顶栏对话框入口(配置向导/环境检查/安装向导) ----
+    def _open_config(self):
+        global CONFIG
+        import copy
+        from pyside.dialogs import ConfigDialog
+        dlg = ConfigDialog(copy.deepcopy(CONFIG), parent=self, app=self)
+        dlg.exec()
+        if not getattr(dlg, "result", None):
+            return
+        try:
+            dsh_data.backup_file(CONFIG_PATH)
+            with open(CONFIG_PATH, encoding='utf-8') as f:
+                cfg = json.load(f) or {}
+        except Exception:
+            cfg = {}
+        cfg.update(dlg.result)
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        CONFIG = cfg
+        self.loge("配置已保存", "ok")
+        self._refresh_deploy_list()
+        self.set_status("配置已保存（隧道/端口等参数完整生效需重启）")
+
+    def _open_env(self):
+        from pyside.dialogs import EnvDialog
+        EnvDialog(self).exec()
+
+    def _open_install(self):
+        from pyside.dialogs import InstallDialog
+        dlg = InstallDialog(self)
+        dlg.exec()
+        if getattr(dlg, "result", None):
+            self._refresh_deploy_list()
+            self.set_status("安装完成，dash_repo 已更新")
+
+    # ---- 主体: 左导航 + 页面宿主 ----
+    def _build_body(self):
+        body = QWidget(objectName="body")
+        lay = QHBoxLayout(body)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        self.nav = QListWidget(objectName="nav")
+        self.nav.setFixedWidth(172)
+        self.nav.setSelectionMode(QAbstractItemView.SingleSelection)
+        for label, _ in NAV_ITEMS:
+            self.nav.addItem(QListWidgetItem(label))
+        self.nav.setCurrentRow(0)
+        self.nav.currentRowChanged.connect(self._on_nav)
+
+        self.stack = QStackedWidget(objectName="pageHostBg")
+
+        lay.addWidget(self.nav)
+        lay.addWidget(self.stack, 1)
+        lay.addWidget(self._build_right())
+        return body
+
+    def _build_right(self):
+        self.right = RightBar()
+        return self.right
+
+    # ---- 日志区 ----
+    def _build_log(self):
+        wrap = QFrame(objectName="logWrap")
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(16, 8, 16, 8)
+        v.setSpacing(4)
+        t = QLabel("控制台输出", objectName="logTitle")
+        self.log_view = QTextEdit(objectName="log")
+        self.log_view.setReadOnly(True)
+        self.log_view.setFixedHeight(140)
+        v.addWidget(t)
+        v.addWidget(self.log_view)
+        return wrap
+
+    def _build_statusbar(self):
+        self.status = QLabel("就绪", objectName="statusBar")
+        return self.status
+
+    # ---- 页面切换 ----
+    def _on_nav(self, row):
+        if 0 <= row < len(NAV_ITEMS):
+            self._show_page(NAV_ITEMS[row][1])
+
+    def _show_page(self, key):
+        self._current_page_key = key
+        while self.stack.count():
+            w = self.stack.widget(0)
+            self.stack.removeWidget(w)
+            w.deleteLater()
+        if key == "overview":
+            page = OverviewPage(self)
+        elif key == "tunnels":
+            page = TunnelsPage(self)
+        elif key == "sessions":
+            from pyside.pages_sessions import SessionPage
+            page = SessionPage(self)
+        elif key == "profiles":
+            from pyside.pages_profiles import ProfilePage
+            page = ProfilePage(self)
+        elif key == "keys":
+            from pyside.pages_keys import KeysPage
+            page = KeysPage(self)
+        elif key == "taskboard":
+            from pyside.pages_taskboard import TaskboardPage
+            page = TaskboardPage(self)
+        elif key == "agents":
+            from pyside.pages_agents import AgentPage
+            page = AgentPage(self)
+        elif key == "plugins":
+            from pyside.pages_plugins import PluginPage
+            page = PluginPage(self)
+        elif key == "usage":
+            from pyside.pages_usage import UsagePage
+            page = UsagePage(self)
+        elif key == "llm":
+            from pyside.pages_llm import LlmPage
+            page = LlmPage(self)
+        elif key == "ops":
+            from pyside.pages_ops import OpsPage
+            page = OpsPage(self)
+        elif key == "version":
+            from pyside.pages_version import VersionPage
+            page = VersionPage(self)
+        elif key == "deployments":
+            from pyside.pages_deployments import DeploymentPage
+            page = DeploymentPage(self)
+        else:
+            label = dict(NAV_ITEMS).get(key, key)
+            page = PlaceholderPage(self, label)
+        self.stack.addWidget(page)
+
+    def _refresh_deploy_list(self):
+        self._deployments = [{"name": "本机", "host": ""}] + dsh_data.load_deployments()
+        names = [d.get("name") or "?" for d in self._deployments]
+        self.deploy.blockSignals(True)
+        self.deploy.clear()
+        self.deploy.addItems(names)
+        self.deploy.setCurrentIndex(0)
+        self.deploy.blockSignals(False)
+        self._current_deploy = None
+
+    def _on_deploy_changed(self, idx):
+        if idx < 0:
+            return
+        dep = self._deployments[idx]
+        self._current_deploy = dep if dep.get("host") else None
+        self.loge("切换部署: " + (dep.get("name") or "?"), "warn")
+        if self._current_page_key:
+            self._show_page(self._current_page_key)
+
+    def _force_refresh(self):
+        page = self.stack.currentWidget()
+        if isinstance(page, OverviewPage):
+            page.refresh()
+        self.loge("已请求刷新", "ok")
+
+    # ---- 日志/状态 ----
+    def loge(self, text, tag=""):
+        self.bridge.emit(text, tag)
+        self._set_status(text)
+
+    def set_status(self, text):
+        # 跨线程安全(经 LogBridge status 信号回到主线程)
+        self.bridge.emit_status(text)
+
+    def _set_status(self, text):
+        if self.status is not None:
+            self.status.setText(text)
+
+    def _stream_cmd(self, cmd, cwd=None, env=None):
+        # 流式运行命令, 逐行打进主日志; 返回 True/False。
+        # 仅供后台线程调用(loge 经 LogBridge 线程安全回主线程)。不可在主线程阻塞。
+        self.loge("  $ " + " ".join(cmd))
+        try:
+            p = subprocess.Popen(cmd, cwd=cwd, env=env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 encoding="utf-8", errors="replace", bufsize=1, text=True,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+        except FileNotFoundError:
+            self.loge("  找不到命令: " + str(cmd[0] if cmd else "?"), "err")
+            return False
+        deadline = time.time() + UPDATE_TIMEOUT
+        while True:
+            line = p.stdout.readline() if p.stdout else None
+            if line:
+                self.loge("    " + line.rstrip())
+                continue
+            if p.poll() is not None:
+                break
+            if time.time() > deadline:
+                p.kill()
+                self.loge("  [stream] 超时，已强制终止", "err")
+                return False
+            time.sleep(0.1)
+        rc = p.wait()
+        if rc != 0:
+            self.loge("  [stream] 命令失败 (exit %s)" % rc, "err")
+            return False
+        return True
+
+    # ---- 右侧健康监控(实时探测本机端口/公网隧道, 后台线程 + Signal 回主线程) ----
+    def _start_monitor(self):
+        self._monitor_busy = False
+        self._monitorGot.connect(self._apply_monitor)
+        self._monitor_timer = QTimer(self)
+        self._monitor_timer.timeout.connect(self._monitor_tick)
+        self._monitor_timer.start(3000)
+        if not self.smoke:
+            self._monitor_tick()   # 启动即探一次
+
+    def _monitor_tick(self):
+        if self._monitor_busy:
+            return
+        self._monitor_busy = True
+
+        def worker():
+            try:
+                local = {}
+                for port, _, _ in CONFIG.get("local_ports", []):
+                    local[port] = _probe("127.0.0.1", port)
+                if SSH_SERVER:
+                    local["__ssh__"] = _probe(SSH_SERVER, 22)
+                ssh_count = _ssh_proc_count()
+                remote = _probe_remote_tunnels()
+                self._monitorGot.emit(local, ssh_count, remote)
+            finally:
+                self._monitor_busy = False
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_monitor(self, local, ssh_count, remote):
+        # 主线程 UI 更新(无 IO): 右侧栏单元格配色 + 底部状态栏汇总
+        for port, (ok, ms) in (local or {}).items():
+            if port == "__ssh__":
+                continue
+            self.right.set_state("L%d" % port, ok, ms)
+        if remote is not None:
+            for port, ok in remote.items():
+                self.right.set_state("R%d" % port, ok, None)
+        local_ok = [p for p, (ok, _) in (local or {}).items() if p != "__ssh__" and ok]
+        local_total = len([1 for p, _, _ in CONFIG.get("local_ports", [])])
+        ssh_ok = (local or {}).get("__ssh__", (False, -1))[0]
+        ssh_txt = "公网服务器 在线" if ssh_ok else "公网服务器 不可达"
+        sc = ssh_count if isinstance(ssh_count, int) and ssh_count >= 0 else "?"
+        self._set_status("本机端口 %d/%d · %s · ssh.exe %s"
+                         % (len(local_ok), local_total, ssh_txt, sc))
+
+
+# ---------------- 入口 ----------------
+def main():
+    app = QApplication(sys.argv)
+    smoke = "--smoke" in sys.argv
+    w = MainWindow(smoke=smoke)
+    if smoke:
+        # 离屏冒烟: 构造即返回, 不进入事件循环
+        print("SMOKE_OK pages=", w.stack.count(), "deploys=", len(w._deployments))
+        return 0
+    w.show()
+    return app.exec()
+
+
+
+
+
+# ---------------- 隧道配置常量(从 config.json 派生) ----------------
+SSH_SERVER   = CONFIG.get("ssh_server") or ""
+SSH_USER     = CONFIG.get("ssh_user") or ""
+LAB_SERVER   = CONFIG.get("lab_server") or ""
+LAB_USER     = CONFIG.get("lab_user") or ""
+LAB_PORT     = CONFIG.get("lab_port") or 3090
+REVERSE_PORT = CONFIG.get("reverse_port") or 8091
+FORWARD_PORTS = CONFIG.get("forward_ports") or [8090, 8022, 8091]
+TCP_TIMEOUT  = CONFIG.get("tcp_timeout") or 0.8
+UPDATE_TIMEOUT = CONFIG.get("update_timeout") or 1800
+
+
+# ---------------- 健康监控(后台线程探测, 不阻塞主线程) ----------------
+def _probe(host, port):
+    # TCP 连通测试(本机回环或公网): 返回 (ok, 延迟ms)
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(TCP_TIMEOUT)
+        t0 = time.time()
         s.connect((host, port))
+        s.close()
         return True, int((time.time() - t0) * 1000)
     except Exception:
         return False, -1
-    finally:
-        s.close()
 
 
-def ssh_proc_count():
-    """统计 ssh.exe 进程数, 用于反向隧道卡片的兜底显示"""
+def _ssh_proc_count():
+    # 统计 ssh.exe 进程数(本机反向隧道进程), 失败返回 -1
     try:
         out = subprocess.run(
             ["tasklist", "/NH", "/FI", "IMAGENAME eq ssh.exe"],
@@ -227,1082 +765,209 @@ def ssh_proc_count():
         return -1
 
 
-def probe_remote_tunnels():
-    """
-    SSH 直查公网服务器上反向隧道端口是否在监听。
-    返回: {port: True/False}, 全部失败时返回 None 表示 SSH 不可达。
-    """
-    ports = "|".join(str(p[0]) for p in REMOTE_TUNNELS)
-    cmd = ("ss -tln | grep -E ':(%s) '" % ports)
+def _probe_remote_tunnels():
+    # SSH 直查公网服务器上反向隧道端口是否监听; 返回 {port: bool}, SSH 不可达返回 None
+    pts = [p for p, _, _ in CONFIG.get("remote_tunnels", [])]
+    if not pts:
+        return {}
+    ports = "|".join(str(p) for p in pts)
+    cmd = "ss -tln | grep -E ':(%s) '" % ports
     try:
         p = subprocess.run(
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-             "-o", "LogLevel=ERROR", f"{SSH_USER}@{SSH_SERVER}", cmd],
-            capture_output=True, text=True, errors="replace", timeout=SSH_TIMEOUT,
+             "-o", "LogLevel=ERROR", "%s@%s" % (SSH_USER, SSH_SERVER), cmd],
+            capture_output=True, text=True, errors="replace", timeout=8,
             creationflags=subprocess.CREATE_NO_WINDOW)
         if p.returncode != 0:
             return None
         text = p.stdout or ""
-        result = {}
-        for port, _, _ in REMOTE_TUNNELS:
-            result[port] = bool(re.search(r":%d\b" % port, text))
-        return result
+        return {pt: (":%d " % pt) in text or (":%d" % pt) in text for pt in pts}
     except Exception:
         return None
 
 
-class ConfigDialog(tk.Toplevel):
-    """配置向导: 分组 + 场景模板 + SSH 测试 + 完整隧道参数编辑。
-    保存后 self.result 持有用户改动字段(dict), 由上层合并写回 config.json。"""
+def _build_tunnel_obj(app, cfg_item):
+    # 依据 config 构造一条 tunnel_mgr.Tunnel
+    key = cfg_item["key"]
+    if key == "dsh-tunnel":
+        forwards = [(p, "127.0.0.1", p) for p in FORWARD_PORTS]
+        host, user, mode = SSH_SERVER, SSH_USER, "forward"
+        watch = FORWARD_PORTS[0] if FORWARD_PORTS else None
+    elif key == "connect-lab-dsh":
+        forwards = [(LAB_PORT, "127.0.0.1", LAB_PORT)]
+        host, user, mode = LAB_SERVER, LAB_USER, "forward"
+        watch = LAB_PORT
+    elif key == "dsh-tunnel-reverse":
+        forwards = [(REVERSE_PORT, "127.0.0.1", DASH_PORT)]
+        host, user, mode = SSH_SERVER, SSH_USER, "reverse"
+        watch = None
+    else:
+        raise ValueError("unknown tunnel: " + key)
+    t = tunnel_mgr.Tunnel(BASE_DIR, key, host, user,
+                          mode=mode, forwards=forwards, watch_port=watch)
+    t.set_logger(lambda msg, tag="": app.loge("  " + msg, tag))
+    return t
 
-    HELP = {
-        "ssh_server": "公网可达的中转服务器 IP/域名(需已配置免密 SSH 登录)",
-        "ssh_user": "中转服务器上用于建隧道的用户名(需已配置免密)",
-        "ssh_port": "SSH 连接端口(仅用于测试, 默认 22)",
-        "dash_repo": "本机 dsh 仓库绝对路径, 如 D:/Applications/deepseek-harness",
-        "dash_port": "本机 dsh GUI 端口(默认 3080)",
-        "dash_cmd": "启动命令(空格分隔): pnpm.cmd dsh web",
-        "forward_ports": "在家正向隧道本机端口, 逗号分隔: 8090,8022,8091",
-        "lab_server": "实验室服务器 IP(局域网直连用)",
-        "lab_user": "实验室服务器 SSH 用户名",
-        "lab_port": "实验室 dsh 本机映射端口(默认 3090)",
-        "reverse_port": "本机 dsh 暴露到中继的端口(公网服务器:端口 → 本机)",
-        "poll_seconds": "本机健康检查间隔(秒)",
-        "remote_poll_seconds": "SSH 直查中继监听状态的间隔(秒)",
-    }
 
-    TEMPLATES = {
-        "在家→中继隧道": {"ssh_server": "YOUR_PUBLIC_IP", "ssh_user": "YOUR_USER",
-                          "forward_ports": "8090,8022,8091", "reverse_port": "8091"},
-        "实验室→直连实验室dsh": {"lab_server": "YOUR_LAB_IP", "lab_user": "YOUR_USER",
-                           "lab_port": "3090"},
-        "本机→中继反向": {"reverse_port": "8091"},
-    }
-
-    LABELS = {
-        "ssh_server": "服务器 IP/域名", "ssh_user": "用户名", "ssh_port": "SSH 端口",
-        "dash_repo": "仓库路径", "dash_port": "端口", "dash_cmd": "启动命令",
-        "forward_ports": "在家正向端口", "lab_server": "实验室 IP",
-        "lab_user": "实验室用户", "lab_port": "实验室映射端口",
-        "reverse_port": "反向端口", "poll_seconds": "本机轮询(秒)",
-        "remote_poll_seconds": "远端轮询(秒)",
-    }
-
-    def __init__(self, master, cfg):
-        super().__init__(master)
-        self._master = master
-        self.title("隧道配置向导")
-        self.configure(padx=15, pady=10)
-        self.result = None
-        self._vars = {}
-        self._cfg = cfg
-        self._row = 0
-        self._build()
-
+# ---------------- 隧道页(导航第 2 项) ----------------
+class TunnelsPage(BasePage):
     def _build(self):
-        wrap = ttk.Frame(self)
-        wrap.pack(fill="both", expand=True)
-        tpl = ttk.LabelFrame(wrap, text="场景模板 (一键填充, 把占位符改成真实 IP/用户名)", padding=8)
-        tpl.pack(fill="x", pady=(0, 8))
-        for name in list(self.TEMPLATES) + ["自定义"]:
-            ttk.Button(tpl, text=name, command=lambda n=name: self._apply(n)).pack(side="left", padx=3, ipadx=2)
-        body = ttk.Frame(wrap)
-        body.pack(fill="both", expand=True)
-        self._body = body
-        self._sec("① 公网中转服务器")
-        self._field("ssh_server", None)
-        self._field("ssh_user", None)
-        self._field("ssh_port", "22")
-        self._test_btn = ttk.Button(body, text="测试 SSH 连接", command=self._test_ssh)
-        self._test_btn.grid(row=self._row, column=1, sticky="w", padx=(6, 0), pady=1)
-        self._test_lbl = ttk.Label(body, text="", font=F_SMALL, wraplength=340, justify="left")
-        self._test_lbl.grid(row=self._row, column=2, sticky="w", padx=6)
-        self._row += 1
-        self._sec("② 本机 dsh")
-        self._field("dash_repo", None)
-        self._field("dash_port", None)
-        self._field("dash_cmd", None)
-        self._sec("③ 隧道参数")
-        self._field("forward_ports", None)
-        self._field("lab_server", None)
-        self._field("lab_user", None)
-        self._field("lab_port", None)
-        self._field("reverse_port", None)
-        self._sec("④ 轮询与超时")
-        self._field("poll_seconds", None)
-        self._field("remote_poll_seconds", None)
-        btns = ttk.Frame(wrap)
-        btns.pack(fill="x", pady=(12, 0))
-        ttk.Button(btns, text="保存", command=self._on_save).pack(side="left", padx=4)
-        ttk.Button(btns, text="取消", command=self.destroy).pack(side="left", padx=4)
-        self.transient(self._master)
-        self.grab_set()
+        v = QVBoxLayout(self)
+        v.setContentsMargins(20, 20, 20, 20)
+        v.setSpacing(6)
+        title = QLabel("隧道 / dsh 服务操控", objectName="cardTitle")
+        v.addWidget(title)
 
-    def _sec(self, title):
-        ttk.Label(self._body, text=title, font=F_BOLD, foreground="#0af").grid(
-            row=self._row, column=0, columnspan=3, sticky="w", pady=(11, 3))
-        self._row += 1
+        self._cards = {}
+        grid = QVBoxLayout()
+        grid.setSpacing(10)
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        for i, item in enumerate(ITEMS):
+            card = self._make_card(item)
+            row.addWidget(card, 1)
+            if (i + 1) % 2 == 0:
+                grid.addLayout(row)
+                row = QHBoxLayout(); row.setSpacing(10)
+        if row.count():
+            row.addStretch(1)
+            grid.addLayout(row)
+        v.addLayout(grid)
+        v.addStretch(1)
 
-    def _field(self, key, placeholder):
-        body = self._body
-        ttk.Label(body, text=self.LABELS[key] + ":").grid(row=self._row, column=0, sticky="w", pady=1)
-        v = tk.StringVar()
-        default = self._cfg.get(key)
-        if key == "dash_cmd" and isinstance(default, list):
-            default = " ".join(default)
-        if placeholder and default in (None, ""):
-            default = placeholder
-        v.set(str(default if default is not None else ""))
-        ent = ttk.Entry(body, textvariable=v, width=38)
-        ent.grid(row=self._row, column=1, sticky="ew", padx=(6, 0), pady=1)
-        self._vars[key] = v
-        ttk.Label(body, text=self.HELP[key], font=F_SMALL, foreground="#888",
-                  wraplength=420, justify="left").grid(
-            row=self._row + 1, column=0, columnspan=3, sticky="w")
-        self._row += 2
+    def _make_card(self, item):
+        card = QFrame(objectName="card")
+        lv = QVBoxLayout(card)
+        lv.setContentsMargins(16, 14, 16, 14)
+        lv.setSpacing(8)
 
-    def _apply(self, name):
-        tpl = self.TEMPLATES.get(name)
-        if not tpl:
+        head = QHBoxLayout()
+        title = QLabel(item.get("title") or item["key"], objectName="cardTitle")
+        dot = QLabel("○", objectName="monDot")
+        dot.setStyleSheet("color:#999; font-size:15px;")
+        head.addWidget(title)
+        head.addStretch(1)
+        head.addWidget(dot)
+        lv.addLayout(head)
+
+        desc = QLabel(item["desc"], objectName="cardHint")
+        desc.setWordWrap(True)
+        lv.addWidget(desc)
+
+        btns = QHBoxLayout()
+        for act in item["actions"]:
+            b = QPushButton(BTN_TEXT[act])
+            b.clicked.connect(lambda _=False, it=item, a=act: self._on_action(it, a))
+            btns.addWidget(b)
+        btns.addStretch(1)
+        lv.addLayout(btns)
+
+        self._cards[item["key"]] = (dot, item)
+        return card
+
+    def _set_card(self, key, on, label=None):
+        dot = self._cards.get(key)
+        if dot is None:
             return
-        for k, val in tpl.items():
-            if k in self._vars:
-                self._vars[k].set(val)
+        d, item = dot
+        d.setText("●" if on else "○")
+        d.setStyleSheet("color:#7ecb6a; font-size:15px;" if on else "color:#999; font-size:15px;")
 
-    def _test_ssh(self):
-        host = self._vars["ssh_server"].get().strip()
-        user = self._vars["ssh_user"].get().strip()
-        port = self._vars["ssh_port"].get().strip() or "22"
-        if not host or not user:
-            self._test_lbl.configure(text="请先填服务器 IP 和用户名", foreground="#c33")
-            return
-        self._test_btn.configure(state="disabled")
-        self._test_lbl.configure(text="测试中…", foreground="#888")
-
-        def worker():
-            try:
-                import shutil
-                ssh = shutil.which("ssh")
-                if not ssh:
-                    raise FileNotFoundError("ssh 不在 PATH 中")
-                r = subprocess.run(
-                    [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=6",
-                     "-o", "StrictHostKeyChecking=accept-new",
-                     "-p", port, user + "@" + host, "echo ok"],
-                    capture_output=True, text=True, errors="replace", timeout=18,
-                    creationflags=subprocess.CREATE_NO_WINDOW)
-                ok = r.returncode == 0
-                if ok:
-                    msg, col = "✅ SSH 连接成功, 免密可用", "#3c3"
-                else:
-                    err = (r.stderr or r.stdout or "").strip().replace("\n", " ")[:180]
-                    msg, col = "❌ 失败 - 检查 IP/用户名/免密配置: " + err, "#c33"
-            except Exception as e:
-                msg, col = "测试异常: " + str(e)[:140], "#c33"
-            self.after(0, lambda: (self._test_lbl.configure(text=msg, foreground=col),
-                                   self._test_btn.configure(state="normal")))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_save(self):
-        try:
-            cfg = {}
-            cfg["ssh_server"] = self._vars["ssh_server"].get().strip() or "YOUR_PUBLIC_IP"
-            cfg["ssh_user"] = self._vars["ssh_user"].get().strip() or "tunnel"
-            cfg["dash_repo"] = self._vars["dash_repo"].get().strip()
-            cfg["dash_port"] = int(self._vars["dash_port"].get().strip())
-            cfg["dash_cmd"] = self._vars["dash_cmd"].get().strip().split()
-            # forward_ports 支持 "8090,8022,8091" 或 "[8090, 8022, 8091]" 两种写法
-            _fp_raw = self._vars["forward_ports"].get().strip().strip("[]").replace(" ", "")
-            cfg["forward_ports"] = [int(x) for x in _fp_raw.split(",") if x]
-            cfg["poll_seconds"] = int(self._vars["poll_seconds"].get().strip())
-            cfg["remote_poll_seconds"] = int(self._vars["remote_poll_seconds"].get().strip())
-            cfg["lab_server"] = self._vars["lab_server"].get().strip()
-            cfg["lab_user"] = self._vars["lab_user"].get().strip()
-            lp = self._vars["lab_port"].get().strip()
-            cfg["lab_port"] = int(lp) if lp else int(self._cfg.get("lab_port", 3090))
-            rp = self._vars["reverse_port"].get().strip()
-            cfg["reverse_port"] = int(rp) if rp else int(self._cfg.get("reverse_port", 8091))
-        except ValueError:
-            messagebox.showerror("输入错误", "端口/轮询间隔/端口列表必须为整数.", parent=self)
-            return
-        self.result = cfg
-        self.destroy()
-
-
-class InstallDialog(tk.Toplevel):
-    # 辅助本地安装 dsh: 填仓库地址/目标目录 -> 环境预检 -> clone+安装+构建。
-    # 安装命令在后台线程执行, 流式输出到主界面日志区。
-
-    DEFAULT_URL = "https://github.com/deepseek-ai/deepseek-harness.git"
-
-    def __init__(self, master):
-        super().__init__(master)
-        self._master = master
-        self.title("安装 dsh")
-        self.configure(padx=15, pady=12)
-        self.result = None
-        self._url = tk.StringVar(value=self.DEFAULT_URL)
-        self._dir = tk.StringVar()
-        self._env_lbl = None
-        self._build()
-
-    def _build(self):
-        wrap = ttk.Frame(self)
-        wrap.pack(fill="both", expand=True)
-        ttk.Label(wrap, text="一键安装本机 dsh（无需求会提前提示）",
-                  font=F_BOLD).pack(anchor="w", pady=(0, 4))
-        # 仓库地址
-        ttk.Label(wrap, text="dsh 仓库地址（git 克隆源）:").pack(anchor="w", pady=(6, 0))
-        ttk.Entry(wrap, textvariable=self._url, width=64).pack(anchor="w", fill="x")
-        ttk.Label(wrap, text="默认使用官方 deepseek-harness，可改成你自己的仓库。",
-                  font=F_SMALL, foreground="#888").pack(anchor="w")
-        # 目标目录
-        ttk.Label(wrap, text="安装到的目标目录（如 C:/Users/你的名字/dsh）:").pack(anchor="w", pady=(10, 0))
-        drow = ttk.Frame(wrap)
-        drow.pack(anchor="w", fill="x")
-        ttk.Entry(drow, textvariable=self._dir, width=54).pack(side="left", fill="x", expand=True)
-        ttk.Button(drow, text="浏览…", command=self._browse_dir).pack(side="left", padx=4)
-        ttk.Label(wrap, text="留空则默认安装到用户主目录下的 dsh 文件夹。",
-                  font=F_SMALL, foreground="#888").pack(anchor="w")
-        # 环境预检
-        ttk.Label(wrap, text="环境预检:", font=F_BOLD).pack(anchor="w", pady=(12, 2))
-        self._env_lbl = tk.Label(wrap, text="检查中…", font=F_SMALL, justify="left", anchor="w")
-        self._env_lbl.pack(anchor="w", fill="x")
-        # 按钮
-        btns = ttk.Frame(wrap)
-        btns.pack(fill="x", pady=(14, 0))
-        ttk.Button(btns, text="开始安装", command=self._start).pack(side="left", padx=4)
-        ttk.Button(btns, text="取消", command=self.destroy).pack(side="left", padx=4)
-        self.transient(self._master)
-        self.grab_set()
-        self._check_env()
-
-    def _check_env(self):
-        # 异步检查 git / node / npm / pnpm 是否可用。
-        def worker():
-            import shutil
-            lines = []
-            for tool in ("git", "node", "npm", "pnpm"):
-                path = shutil.which(tool)
-                status = "OK" if path else "缺失"
-                lines.append(f"  {tool:5s}: {status}" + (f"  ({path})" if path else ""))
-            text = "\n".join(lines)
-            missing = [l.split(":")[0].strip() for l in lines if "缺失" in l]
-            if missing:
-                text += "\n\n⚠ 缺少: " + ", ".join(missing) + "  — 请先安装后再安装 dsh。"
-            self.after(0, lambda: self._env_lbl.configure(text=text))
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _browse_dir(self):
-        from tkinter import filedialog
-        start = self._dir.get().strip() or os.path.expanduser("~")
-        chosen = filedialog.askdirectory(title="选择 dsh 安装目录", initialdir=start,
-                                         parent=self)
-        if chosen:
-            self._dir.set(chosen)
-
-    def _start(self):
-        url = self._url.get().strip()
-        target = self._dir.get().strip()
-        if not url:
-            messagebox.showerror("缺少仓库地址", "请填写 dsh 的 git 仓库地址。", parent=self)
-            return
-        # target 默认: 用户主目录/dsh
-        target = target or os.path.join(os.path.expanduser("~"), "dsh")
-        self.result = (url, target)
-        self.destroy()
-class EnvDialog(tk.Toplevel):
-    # 独立"环境检查"窗口: 展示 git/node/npm/pnpm 版本与推荐基准,
-    # 提供 更新/安装/卸载 操作(点击确认后执行)。
-
-    TOOLS = [
-        ("git",  "git",  ["git", "--version"]),
-        ("node", "node", ["node", "--version"]),
-        ("npm",  "npm",  ["npm.cmd", "--version"]),
-        ("pnpm", "pnpm", ["pnpm.cmd", "--version"]),
-    ]
-    # 推荐基准版本(作者开发机实测可跑 dsh 的版本)
-    RECOMMENDED = {
-        "git":  "2.53",
-        "node": "v24.19",
-        "npm":  "11.17",
-        "pnpm": "11.7",
-    }
-    # 每个工具的操作定义:
-    #   install/uninstall: 安装/卸载引导
-    #   update: 更新操作(可多条)
-    #   每条: (类型, 内容, 描述)
-    #   类型: cmd=执行命令 / browser=打开网页 / hint=仅提示
-    OPS = {
-        "git": dict(
-            name="Git",
-            install=[("browser", "https://git-scm.com/download/win", "打开官网下载 Git 安装包")],
-            update=[("cmd", ["git", "update-git-for-windows"], "运行 Git 自带升级器 (git update-git-for-windows)")],
-            uninstall=[("page", "ms-settings:appsfeatures", "打开 Windows 设置 - 应用 - 安装的应用，找到 Git 卸载")],
-        ),
-        "node": dict(
-            name="Node.js",
-            install=[("browser", "https://nodejs.org/zh-cn/download", "打开官网下载 Node.js LTS 安装包")],
-            update=[("hint", "Node.js 无官方自升级命令。\n建议用 nvm-windows 管理版本, 或到官网 https://nodejs.org 下载新版安装包。")],
-            uninstall=[("page", "ms-settings:appsfeatures", "打开 Windows 设置 - 应用 - 安装的应用，找到 Node.js 卸载")],
-        ),
-        "npm": dict(
-            name="npm",
-            install=[("hint", "npm 随 Node.js 一起安装, 装好 Node.js 即自带 npm。")],
-            update=[("cmd", ["npm.cmd", "install", "-g", "npm@latest"], "npm install -g npm@latest")],
-            uninstall=[("cmd", ["npm.cmd", "uninstall", "-g", "npm"], "npm uninstall -g npm（移除 npm 自身，Node.js 保留）")],
-        ),
-        "pnpm": dict(
-            name="pnpm",
-            install=[("cmd", ["npm.cmd", "install", "-g", "pnpm"], "npm install -g pnpm")],
-            update=[("cmd", ["pnpm.cmd", "self-update"], "pnpm self-update（官方推荐的 pnpm 更新方式）")],
-            uninstall=[("cmd", ["npm.cmd", "uninstall", "-g", "pnpm"], "npm uninstall -g pnpm（卸载全局 pnpm 包）")],
-        ),
-    }
-
-    def __init__(self, master):
-        # master 可以是 Dashboard 实例(推荐) 或 Tk 根窗口
-        if hasattr(master, "root"):
-            tk_master = master.root
-            self._master = master
-        else:
-            tk_master = master
-            self._master = None
-        super().__init__(tk_master)
-        self.title("环境检查")
-        self.configure(padx=15, pady=12)
-        self._rows = {}
-        self._build()
-        self.transient(tk_master)
-        self.grab_set()
-        self._refresh()
-
-    def _build(self):
-        wrap = ttk.Frame(self)
-        wrap.pack(fill="both", expand=True)
-        ttk.Label(wrap, text="开发环境检查（git / node / npm / pnpm）",
-                  font=F_BOLD).pack(anchor="w", pady=(0, 6))
-        table = ttk.Frame(wrap)
-        table.pack(fill="x")
-        for j, t in enumerate(("工具", "当前版本", "推荐基准", "状态", "操作")):
-            ttk.Label(table, text=t, font=F_BOLD, width=11, anchor="w").grid(row=0, column=j, padx=2)
-        for i, (key, name, _cmd) in enumerate(self.TOOLS):
-            r = i + 1
-            ttk.Label(table, text=name, width=11, anchor="w").grid(row=r, column=0, sticky="w", pady=2)
-            ver = ttk.Label(table, text="...", width=11, anchor="w")
-            ver.grid(row=r, column=1, sticky="w", padx=2)
-            ttk.Label(table, text=self.RECOMMENDED.get(key, ""), width=14, anchor="w").grid(
-                row=r, column=2, sticky="w", padx=2)
-            status = ttk.Label(table, text="", width=8, anchor="w")
-            status.grid(row=r, column=3, sticky="w", padx=2)
-            ops = ttk.Frame(table)
-            ops.grid(row=r, column=4, sticky="w", padx=2)
-            ttk.Button(ops, text="更新", width=5,
-                       command=lambda k=key: self._do_action(k, "update", "更新")).pack(side="left", padx=1)
-            ttk.Button(ops, text="安装", width=5,
-                       command=lambda k=key: self._do_action(k, "install", "安装")).pack(side="left", padx=1)
-            ttk.Button(ops, text="卸载", width=5,
-                       command=lambda k=key: self._do_action(k, "uninstall", "卸载")).pack(side="left", padx=1)
-            self._rows[key] = (ver, status)
-        ttk.Label(wrap, text="点“更新/安装/卸载”会先说明将执行什么, 确认后才执行。",
-                  font=F_SMALL, foreground="#888").pack(anchor="w", pady=(12, 0))
-        ttk.Button(wrap, text="关闭", command=self.destroy).pack(anchor="e", pady=(12, 0))
-
-    def _get_version(self, cmd):
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
-                               timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
-            return (r.stdout or r.stderr or "").strip().splitlines()[0] if (r.stdout or r.stderr) else None
-        except Exception:
-            return None
-
-    def _refresh(self):
-        def worker():
-            res = {}
-            for key, _name, cmd in self.TOOLS:
-                res[key] = self._get_version(cmd)
-            try:
-                self.after(0, lambda: self._apply(res))
-            except tk.TclError:
-                pass   # 窗口已关闭, 忽略
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _apply(self, res):
-        for key, (ver_lbl, st_lbl) in self._rows.items():
-            v = res.get(key)
-            if v is None:
-                ver_lbl.configure(text="未安装", foreground="#c33")
-                st_lbl.configure(text="缺失", foreground="#c33")
-            else:
-                ver_lbl.configure(text=v, foreground="#000")
-                st_lbl.configure(text="OK", foreground="#3c3")
-
-    def _do_action(self, key, kind, label):
-        ops = self.OPS.get(key)
-        if ops is None:
-            return
-        name = ops["name"]
-        plan = ops.get(kind) or []
-        if not plan:
-            return
-        for typ, payload, desc in plan:
-            ok = messagebox.askyesno(
-                label + " " + name,
-                "将执行：\n" + desc + "\n\n是否继续？",
-                parent=self)
-            if not ok:
-                return
-            if typ == "cmd":
-                self._run_cmd(payload, desc)
-            elif typ == "browser":
-                self._open_url(payload)
-            elif typ == "page":
-                self._open_apps_page()
-            elif typ == "hint":
-                messagebox.showinfo(label + " " + name, payload, parent=self)
-
-    def _run_cmd(self, cmd, desc):
-        # 后台线程执行, 输出流式打到主界面日志区(复用 Dashboard._stream_cmd), 完成弹结果框。
-        def worker():
-            m = self._master
-            use_stream = hasattr(m, "_stream_cmd") and hasattr(m, "log")
-            if use_stream:
-                m.log("[环境] " + desc + " 开始执行...", "warn")
-                try:
-                    env = None
-                    if cmd and str(cmd[0]).lower().startswith("pnpm"):
-                        # pnpm 要求全局 bin 目录在 PATH 中, 自动注入避免报错
-                        env = dict(os.environ)
-                        pnpm_bin = os.path.join(os.environ.get("LOCALAPPDATA", ""), "pnpm", "bin")
-                        if pnpm_bin and pnpm_bin not in env.get("PATH", ""):
-                            env["PATH"] = env.get("PATH", "") + os.pathsep + pnpm_bin
-                    ok = m._stream_cmd(cmd, env=env)
-                except Exception as e:
-                    ok = False
-                    m.log("  [环境] 执行异常: " + str(e), "err")
-                try:
-                    self.after(0, lambda: messagebox.showinfo(
-                        "结果: " + desc, "已" + ("完成" if ok else "失败") + "（详见主界面日志区）", parent=self))
-                except tk.TclError:
-                    pass
-            else:
-                # 容错回退: 无主界面时用 subprocess 捕获
-                try:
-                    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
-                                       timeout=600, creationflags=subprocess.CREATE_NO_WINDOW)
-                    tail = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()[-600:]
-                    head = "完成" if r.returncode == 0 else "失败 (code=%s)" % r.returncode
-                    body = head + "\n\n" + tail
-                    try:
-                        self.after(0, lambda: messagebox.showinfo("结果: " + desc, body, parent=self))
-                    except tk.TclError:
-                        pass
-                except Exception as e:
-                    try:
-                        self.after(0, lambda: messagebox.showerror("执行出错", str(e), parent=self))
-                    except tk.TclError:
-                        pass
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _open_url(self, url):
-        try:
-            os.startfile(url)
-        except Exception as e:
-            messagebox.showerror("无法打开", str(e), parent=self)
-
-    def _open_apps_page(self):
-        try:
-            os.startfile("ms-settings:appsfeatures")
-        except Exception as e:
-            messagebox.showerror("无法打开", str(e), parent=self)
-class Dashboard:
-    def __init__(self, root):
-        self.root = root
-        root.title("dsh 控制台 · 隧道与健康监控  v" + APP_VERSION)
-        # 窗口尺寸自适应屏幕: 默认 1200x840, 但不超过屏幕可用高度,
-        # 否则日志区和底部状态栏会被挤到屏幕外。
-        sw = root.winfo_screenwidth()
-        sh = root.winfo_screenheight()
-        w = min(1200, max(1000, sw - 80))
-        h = min(840, max(600, sh - 160))   # 留出标题栏+任务栏+系统缩放余量
-        root.geometry(f"{w}x{h}")
-        root.minsize(940, 600)
-
-        self.monitor_stop = threading.Event()
-        self.remote_state = None   # {port: bool}, None=SSH不可达
-        self.DASH_REPO = DASH_REPO   # 供插件管理等页面取 dsh 仓库目录(cwd)
-        self._build_ui()
-        self._start_monitor()
-        self.root.after(800, self._maybe_first_run)   # 首次启动引导(未配置时)
-
-    # ── 首次启动引导 ──────────────────────────
-    def _maybe_first_run(self):
-        # 未配置(ssh_server 为空或占位符)时, 引导用户打开配置向导; 可跳过
-        try:
-            ssh_server = str(CONFIG.get("ssh_server") or "")
-            unconfigured = (not ssh_server) or ssh_server.startswith("YOUR_")
-            if not unconfigured:
-                return
-            ok = messagebox.askyesno(
-                "欢迎使用 dsh-console-aio",
-                "检测到尚未完成基础配置（服务器地址等）。\n\n"
-                "是否现在打开【配置向导】？\n（也可以跳过，之后随时点顶部【配置】按钮）",
-                parent=self.root)
-            if ok:
-                self._open_config()
-        except Exception:
-            pass   # 引导失败不影响主界面
-
-    # ── UI ────────────────────────────────
-    def _build_ui(self):
-        # 统一代码构建(pygubu/.ui 已废弃见 legacy/); PySide6 迁移前 tkinter 版
-        self._build_ui_code()
-    def _build_ui_code(self):
-        # 代码构建(无 pygubu 时的回退): 与原布局一致
-        pad = 10
-        # ── 顶部栏: 标题 + 部署选择器 + 动作按钮 ──
-        top = ttk.Frame(self.root)
-        top.pack(fill="x", padx=pad, pady=(pad, 4))
-        ttk.Label(top, text="dsh 控制台", font=("Segoe UI", 16, "bold")).pack(side="left")
-        ttk.Label(top, text="  v" + APP_VERSION, font=F_SMALL, foreground="#888").pack(side="left")
-        ttk.Label(top, text="   部署:").pack(side="left")
-        self.deploy_var = tk.StringVar(value="本机")
-        self.deploy_combo = ttk.Combobox(top, textvariable=self.deploy_var,
-                                         state="readonly", width=14, font=F_SMALL)
-        self.deploy_combo.pack(side="left", padx=(2, 8))
-        self.deploy_combo.bind("<<ComboboxSelected>>", self._on_deploy_changed)
-        ttk.Label(top, text=f"轮询 {POLL_SECONDS}s·{REMOTE_POLL_SECONDS}s",
-                  font=F_SMALL, foreground="#666").pack(side="left")
-        # 右侧按钮
-        ttk.Button(top, text="立即刷新", command=self._force_refresh).pack(side="right")
-        ttk.Button(top, text="配置", command=self._open_config).pack(side="right", padx=(0, 6))
-        ttk.Button(top, text="安装 dsh", command=self._open_install).pack(side="right", padx=(0, 6))
-        ttk.Button(top, text="环境", command=self._open_env).pack(side="right", padx=(0, 6))
-
-        # ── 主体: 左导航 + 中栏页面 + 右状态 ──
-        body = ttk.Frame(self.root)
-        body.pack(fill="both", expand=True, padx=pad, pady=4)
-        navf = ttk.Frame(body)
-        navf.pack(side="left", fill="y")
-        self.nav_list = tk.Listbox(navf, width=13, font=F_SMALL, relief="flat",
-                                   highlightthickness=1, activestyle="none")
-        self.nav_list.pack(fill="both", expand=True)
-        for _label, _key in NAV_ITEMS:
-            self.nav_list.insert("end", _label)
-        self.nav_list.bind("<<ListboxSelect>>", self._on_nav)
-        # 中栏页面容器
-        center = ttk.Frame(body)
-        center.pack(side="left", fill="both", expand=True, padx=(6, 0))
-        self.page_host = ttk.Frame(center)
-        self.page_host.pack(fill="both", expand=True)
-        # 右状态栏
-        right = ttk.LabelFrame(body, text="状态", padding=6)
-        right.pack(side="left", fill="y", padx=(6, 0))
-        self.mon_widgets = {}
-        ttk.Label(right, text="本机端口", font=F_BOLD, foreground="#555").pack(anchor="w")
-        r1 = ttk.Frame(right)
-        r1.pack(fill="x", pady=(2, 8))
-        for port, label, note in LOCAL_PORTS:
-            self._add_mon_cell(r1, "L" + str(port), label, "端口 " + str(port), note)
-        ttk.Label(right, text="公网服务器 反向隧道", font=F_BOLD, foreground="#555").pack(anchor="w")
-        r2 = ttk.Frame(right)
-        r2.pack(fill="x", pady=(2, 4))
-        for port, label, note in REMOTE_TUNNELS:
-            self._add_mon_cell(r2, "R" + str(port), label, "端口 " + str(port), note)
-        f = ttk.Frame(r2)
-        f.pack(side="left", expand=True, fill="both", padx=4)
-        d = tk.Label(f, text="●", font=("Segoe UI", 12), fg=COLOR_OFF)
-        d.pack()
-        ttk.Label(f, text="公网服务器 SSH", font=F_BOLD).pack()
-        det = ttk.Label(f, text="--", font=F_SMALL, foreground="#888")
-        det.pack()
-        self.mon_widgets["公网服务器"] = (d, det)
-
-        # ── 底部: 控制台输出 ──
-        logf = ttk.LabelFrame(self.root, text="控制台输出", padding=4)
-        logf.pack(fill="both", expand=True, padx=pad, pady=(4, 0))
-        self.log_text = tk.Text(logf, height=7, wrap="word", font=F_MONO,
-                                state="disabled", bg="#1e1e1e", fg="#e6e6e6")
-        sb = ttk.Scrollbar(logf, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=sb.set)
-        self.log_text.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        self.log_text.tag_configure("ok", foreground="#7ecb6a")
-        self.log_text.tag_configure("err", foreground=COLOR_RED)
-        self.log_text.tag_configure("warn", foreground=COLOR_WARN)
-
-        self.status = ttk.Label(self.root, text="就绪", anchor="w",
-                                font=F_SMALL, relief="sunken")
-        self.status.pack(fill="x", side="bottom")
-
-        # ── 部署列表 + 默认页 ──
-        self._current_deploy = None
-        self._current_page_key = None
-        self._refresh_deploy_list()
-        self._show_page("overview")
-
-
-    def _add_mon_cell(self, parent, key, label, portline, note):
-        f = ttk.Frame(parent)
-        f.pack(side="left", expand=True, fill="both", padx=4)
-        dot = tk.Label(f, text="●", font=("Segoe UI", 12), fg=COLOR_OFF)
-        dot.pack()
-        ttk.Label(f, text=label, font=F_BOLD).pack()
-        det = ttk.Label(f, text="--", font=F_SMALL, foreground="#888")
-        det.pack()
-        ttk.Label(f, text=portline, font=F_SMALL, foreground="#aaa").pack()
-        self.mon_widgets[key] = (dot, det)
-
-    # ── 导航与页面 ──────────────────────────
-    def _on_nav(self, _evt=None):
-        sel = self.nav_list.curselection()
-        if not sel:
-            return
-        self._show_page(NAV_ITEMS[sel[0]][1])
-
-    def _show_page(self, key):
-        # 切换中栏页面: 销毁旧页面并构建新页面(总览内置, 其余动态加载 mgmt 模块 Page)
-        for w in self.page_host.winfo_children():
-            w.destroy()
-        self._current_page_key = key
-        if key == "overview":
-            self._build_overview_page(self.page_host)
-            return
-        if key == "tunnels":
-            self._build_tunnels_page(self.page_host)
-            return
-        mod_name, cls_name = PAGE_MODULES.get(key, (None, None))
-        if not mod_name:
-            self.log("未知页面: " + str(key), "err")
-            return
-        try:
-            mod = importlib.import_module(mod_name)
-            cls = getattr(mod, cls_name)
-            if key == "version":
-                page = cls(self.page_host, self, APP_VERSION)
-            else:
-                page = cls(self.page_host, self)
-            page.pack(fill="both", expand=True)
-        except Exception as e:
-            self.log("打开页面 " + str(key) + " 失败: " + str(e), "err")
-
-    def _build_overview_page(self, parent):
-        # 总览页: 部署状态总览(隧道操控见"隧道"页; 健康状态在右侧栏)
-        ttk.Label(parent, text="部署总览", font=F_BOLD).pack(anchor="w", pady=(0, 4))
-        # 部署状态总览卡片
-        depf = ttk.LabelFrame(parent, text="部署状态", padding=8)
-        depf.pack(fill="x", pady=(0, 6))
-        self.dep_status_lbl = ttk.Label(depf, text="加载中…", font=F_SMALL, foreground="#888")
-        self.dep_status_lbl.pack(anchor="w")
-        ttk.Button(depf, text="刷新部署状态", command=self._refresh_dep_status).pack(anchor="e")
-        self._refresh_dep_status()
-        ttk.Label(parent, text="隧道/健康状态见右侧状态栏；更多管理功能见左侧导航。",
-                  font=F_SMALL, foreground="#888").pack(anchor="w")
-
-    def _build_tunnels_page(self, parent):
-        # 隧道页: 隧道操控卡片(健康状态在右侧栏)
-        cards = ttk.LabelFrame(parent, text="操控", padding=8)
-        cards.pack(fill="x", pady=(0, 6))
-        self.cards = {}
-        for i, cfg_item in enumerate(ITEMS):
-            cards.columnconfigure(i, weight=1)
-            self.cards[cfg_item["key"]] = self._build_card(cards, cfg_item, i)
-        ttk.Label(parent, text="隧道/健康状态见右侧状态栏；更多管理功能见左侧导航。",
-                  font=F_SMALL, foreground="#888").pack(anchor="w")
-
-    def _refresh_dep_status(self):
-        # 后台线程汇总所有部署快照(本机 + deployments), 结果回主线程显示
-        depls = [{"name": "本机", "host": ""}] + dsh_data.load_deployments()
-        def worker():
-            rows = []
-            for d in depls:
-                try:
-                    snap = dsh_data.deployment_snapshot(dsh_data.DshRemote(d if d.get("host") else None))
-                except Exception as e:
-                    snap = {"ok": False, "error": str(e), "name": d.get("name")}
-                rows.append(snap)
-            try:
-                self.root.after(0, lambda: self._dep_status_done(rows))
-            except tk.TclError:
-                pass
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _dep_status_done(self, rows):
-        # 主线程更新部署状态标签
-        try:
-            parts = []
-            for s in rows:
-                name = s.get("name") or "?"
-                if not s.get("ok"):
-                    parts.append(name + ":离线")
-                    continue
-                parts.append("%s:v%s 会话%d 插件%d" % (
-                    name, s.get("version") or "?",
-                    s.get("sessions") or 0, s.get("plugins") or 0))
-            self.dep_status_lbl.configure(text="   |  ".join(parts))
-        except tk.TclError:
-            pass   # 页面已切换
-
-    # ── 部署选择器 ──────────────────────────
-    def _refresh_deploy_list(self):
-        self._deployments = [{"name": "本机", "host": ""}] + dsh_data.load_deployments()
-        self.deploy_combo["values"] = [d.get("name") or "?" for d in self._deployments]
-        self.deploy_var.set("本机")
-        self._current_deploy = None
-
-    def _on_deploy_changed(self, _evt=None):
-        name = self.deploy_var.get()
-        dep = None
-        for d in self._deployments:
-            if d.get("name") == name and d.get("host"):
-                dep = d
-                break
-        self._current_deploy = dep
-        self.log("切换部署: " + name + (" (" + dep.get("host") + ")" if dep else ""), "warn")
-        if self._current_page_key:
-            self._show_page(self._current_page_key)
-
-    def _open_config(self):
-        from copy import deepcopy
-        dlg = ConfigDialog(self.root, deepcopy(CONFIG))
-        self.root.wait_window(dlg)
-        if dlg.result:
-            # 合并: 只覆盖对话框编辑过的字段, 保留 local_ports/remote_tunnels
-            # /forward_ports/lab_*/reverse_port 等对话框外字段。
-            merged = dict(CONFIG)
-            merged.update(dlg.result)
-            success = save_config(merged)
-            if success:
-                messagebox.showinfo("已保存", "配置已写入 config.json\n重启程序后生效。")
-                self.log("[配置] 已更新并保存到 config.json（重启后生效）", "ok")
-            else:
-                messagebox.showerror("保存失败", "无法写入 config.json（请检查文件权限）。")
-
-    def _build_card(self, parent, cfg_item, col):
-        title = cfg_item.get("title") or (
-            os.path.basename(cfg_item["file"]) if cfg_item.get("file") else cfg_item["key"])
-        f = ttk.Frame(parent, padding=6, relief="groove", borderwidth=1)
-        f.grid(row=0, column=col, sticky="nsew", padx=3)
-        header = ttk.Frame(f)
-        header.pack(fill="x")
-        accent = cfg_item["type"] in ("dsh", "update")
-        ttk.Label(header, text=title, font=F_BOLD,
-                  foreground=ACCENT if accent else "#000").pack(side="left")
-        st = tk.Label(header, text="○ 停止" if cfg_item["type"] != "update" else "○ 空闲",
-                      font=F_SMALL, fg=COLOR_OFF)
-        st.pack(side="right")
-        ttk.Label(f, text=cfg_item["desc"], font=F_SMALL, foreground="#666",
-                  wraplength=200, justify="left").pack(anchor="w", pady=(2, 6))
-
-        btns = ttk.Frame(f)
-        btns.pack(fill="x")
-        for act in cfg_item["actions"]:
-            ttk.Button(btns, text=BTN_TEXT[act], width=7,
-                       command=lambda c=cfg_item, a=act: self.action(c, a)).pack(side="left", padx=2)
-        return {"frame": f, "st": st, "cfg": cfg_item}
-
-    # ── 日志 / 状态 ────────────────────────
-    def log(self, msg, tag=""):
-        self.root.after(0, lambda: self._log_do(msg, tag))
-
-    def _log_do(self, msg, tag):
-        self.log_text.configure(state="normal")
-        self.log_text.insert("end", msg + "\n", tag)
-        if int(self.log_text.index("end-1c").split(".")[0]) > LOG_RING:
-            self.log_text.delete("1.0", f"{LOG_RING - LOG_TAIL}.0")
-        self.log_text.see("end")
-        self.log_text.configure(state="disabled")
-
-    def set_status(self, msg):
-        self.root.after(0, lambda: self.status.configure(text=msg))
-
-    # ── 动作分发 ───────────────────────────
-    def action(self, cfg_item, mode):
-        t = cfg_item["type"]
+    # ---- 动作分派(后台线程执行, 经信号回 UI) ----
+    def _on_action(self, item, mode):
+        t = item["type"]
+        key = item["key"]
         if t == "dsh":
-            self.log("[本机 dsh] 模式: " + mode, "warn")
-            self.set_status(f"正在 {mode} 本机 dsh ...")
+            self.app.set_status("正在 %s 本机 dsh ..." % mode)
             threading.Thread(target=self._run_dsh, args=(mode,), daemon=True).start()
             return
-        if cfg_item.get("backend") == "python":
-            if cfg_item["key"] == "update-dsh":
-                self.log("[update-dsh] 开始运行更新 (纯 Python)", "warn")
-                self.set_status("正在运行更新（构建较久，请耐心等待）...")
-                threading.Thread(target=self._run_update, daemon=True).start()
-                return
-            # 纯 Python 隧道
-            self.log(f"[{cfg_item['key']}] 模式: {mode}（Python）", "warn")
-            self.set_status(f"正在执行 {mode} → {cfg_item['key']} (Python) ...")
-            threading.Thread(target=self._run_python_tunnel,
-                             args=(cfg_item, mode), daemon=True).start()
+        if key == "update-dsh":
+            self.app.set_status("正在运行更新(构建较久, 请耐心)...")
+            threading.Thread(target=self._run_update, daemon=True).start()
             return
-            # 纯 Python 隧道（不再调 ps1）
-            self.log(f"[{cfg_item['key']}] 模式: {mode}（Python）", "warn")
-            self.set_status(f"正在执行 {mode} → {cfg_item['key']} (Python) ...")
-            threading.Thread(target=self._run_python_tunnel,
-                             args=(cfg_item, mode), daemon=True).start()
-            return
-        # ps1 隧道
-        path = script_path(cfg_item)
-        if not os.path.exists(path):
-            messagebox.showerror("找不到脚本",
-                                 f"{path}\n不存在。请确认脚本与 dsh-console-aio.py 放在同一目录。")
-            return
-        self.log(f"[{cfg_item['key']}] 模式: {mode}", "warn")
-        self.set_status(f"正在执行 {mode} → {os.path.basename(path)} ...")
-        threading.Thread(target=self._run_ps1, args=(cfg_item, path, mode), daemon=True).start()
+        # python 隧道
+        self.app.loge("[%s] 模式: %s (Python)" % (key, mode), "warn")
+        self.app.set_status("正在执行 %s -> %s (Python) ..." % (mode, key))
+        threading.Thread(target=self._run_python_tunnel, args=(item, mode), daemon=True).start()
 
-    # ── 本机 dsh ───────────────────────────
+    # ---- 本机 dsh ----
     def _run_dsh(self, mode):
-        if mode == "start":
+        if mode in ("start", "restart"):
             self._dsh_start()
-        elif mode == "restart":
+        if mode in ("stop", "restart"):
             self._dsh_stop()
-            self.log("  停止完成, 重新启动…", "warn")
-            self._dsh_start()
-        elif mode == "stop":
-            self._dsh_stop()
+            if mode == "restart":
+                self.app.loge("  停止完成, 重新启动...", "warn")
+                self._dsh_start()
 
     def _dsh_start(self):
         if not os.path.isdir(DASH_REPO):
-            self.log(f"  仓库不存在: {DASH_REPO}", "err")
-            self.set_status("启动失败: 仓库目录不存在")
+            self.app.loge("  仓库不存在: %s" % DASH_REPO, "err")
+            self.app.set_status("启动失败: 仓库目录不存在")
             return
-        self.log(f"  $ cd {DASH_REPO} && {' '.join(DASH_CMD)}")
+        self.app.loge("  $ cd %s && %s" % (DASH_REPO, " ".join(DASH_CMD)))
         try:
             logdir = os.path.join(os.environ.get("TEMP", "."), "dsh-dash")
             os.makedirs(logdir, exist_ok=True)
             out = open(os.path.join(logdir, "dsh-web.out.log"), "ab")
             err = open(os.path.join(logdir, "dsh-web.err.log"), "ab")
-            subprocess.Popen(DASH_CMD, cwd=DASH_REPO,
-                             stdout=out, stderr=err,
+            subprocess.Popen(DASH_CMD, cwd=DASH_REPO, stdout=out, stderr=err,
                              creationflags=subprocess.CREATE_NO_WINDOW)
-            self.log(f"  已在后台启动, 等待 {DASH_PORT} 端口就绪…", "ok")
-            self.set_status(f"已触发本机 dsh 启动 → http://127.0.0.1:{DASH_PORT}")
+            self.app.loge("  已在后台启动, 等待 %d 端口就绪..." % DASH_PORT, "ok")
+            self.app.set_status("已触发本机 dsh 启动 -> http://127.0.0.1:%d" % DASH_PORT)
+            self._set_card("dsh-web", True)
         except FileNotFoundError:
-            self.log(f"  找不到 {DASH_CMD[0]}, 请确认 pnpm 在 PATH 或修改配置", "err")
-            self.set_status("启动失败: 找不到启动命令")
+            self.app.loge("  找不到 %s, 请确认 pnpm 在 PATH 或修改配置" % DASH_CMD[0], "err")
+            self.app.set_status("启动失败: 找不到启动命令")
         except Exception as e:
-            self.log(f"  异常: {e}", "err")
-            self.set_status(f"启动出错: {e}")
+            self.app.loge("  异常: %s" % e, "err")
+            self.app.set_status("启动出错: %s" % e)
 
     def _dsh_stop(self):
         ps = ("$n=0\n"
               "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" -ErrorAction SilentlyContinue |\n"
               "  Where-Object { $_.CommandLine -match 'dsh' -and $_.CommandLine -match 'web' } |\n"
               "  ForEach-Object { Write-Output ('stop node ' + $_.ProcessId); taskkill /PID $_.ProcessId /T /F | Out-Null; $n++ }\n"
-              "Get-CimInstance Win32_Process -Filter \"Name='pnpm.cmd'\" -ErrorAction SilentlyContinue |\n"
-              "  Where-Object { $_.CommandLine -match 'dsh' -and $_.CommandLine -match 'web' } |\n"
-              "  ForEach-Object { Write-Output ('stop pnpm ' + $_.ProcessId); taskkill /PID $_.ProcessId /T /F | Out-Null; $n++ }\n"
               "if($n -eq 0){ Write-Output 'no dsh web process' }\n")
-        self.log("  $ stopping dsh web (node/pnpm, 匹配 dsh+web)…")
+        self.app.loge("  $ stopping dsh web (node, 匹配 dsh+web)...")
         try:
             r = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy",
                                 "Bypass", "-Command", ps],
                                capture_output=True, text=True, errors="replace",
                                timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
-            out = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
-            for ln in (out.splitlines() or ["(无输出)"]):
-                self.log("    " + ln, "ok" if r.returncode == 0 else "err")
-            self.set_status("已停止本机 dsh web" if r.returncode == 0
-                            else "停止本机 dsh 出错")
+            for ln in ((r.stdout or "").splitlines() or ["(无输出)"]):
+                self.app.loge("    " + ln, "ok" if r.returncode == 0 else "err")
+            self.app.set_status("已停止本机 dsh web" if r.returncode == 0 else "停止本机 dsh 出错")
+            self._set_card("dsh-web", False)
         except subprocess.TimeoutExpired:
-            self.log("  [停止] 超时(60s)", "err")
-            self.set_status("停止本机 dsh 超时")
+            self.app.loge("  [停止] 超时(60s)", "err")
+            self.app.set_status("停止本机 dsh 超时")
         except Exception as e:
-            self.log(f"  异常: {e}", "err")
-            self.set_status(f"停止出错: {e}")
+            self.app.loge("  异常: %s" % e, "err")
+            self.app.set_status("停止出错: %s" % e)
 
-    # ── 更新（纯 Python: git + pnpm, 流式日志） ──
-    def _run_update(self):
-        repo = DASH_REPO
-        if not os.path.isdir(repo):
-            self.log(f"  仓库不存在: {repo}", "err")
-            self.set_status("更新失败: 仓库目录不存在")
-            return
-        # [1] 停掉当前 dsh web（与 _dsh_stop 相同匹配逻辑）
-        self.log("[更新] 步骤1/5: 停止当前 dsh web", "warn")
-        self._stop_dsh_web_silent()
-        time.sleep(2)
-        # [2..5] git + pnpm
-        steps = [
-            ("[更新] 步骤2/5: git fetch + pull",
-             ["git", "fetch", "origin", "--prune"], None),
-            ("[更新] 步骤2.5/5: git pull --ff-only",
-             ["git", "pull", "--ff-only"], repo),
-            ("[更新] 步骤3/5: pnpm install",
-             ["pnpm.cmd", "install"], repo),
-            ("[更新] 步骤4/5: pnpm run build",
-             ["pnpm.cmd", "run", "build"], repo),
-        ]
-        for label, cmd, cwd in steps:
-            self.log(label, "warn")
-            if not self._stream_cmd(cmd, cwd=cwd):
-                self.set_status("更新失败: " + label)
-                return
-        # [5] 重启 GUI
-        self.log("[更新] 步骤5/5: 重启 dsh web", "warn")
-        self._dsh_start()
-        self.log("  [更新] 完成 ✓ 访问 http://127.0.0.1:%d" % DASH_PORT, "ok")
-        self.set_status("更新完成")
-
-    def _open_env(self):
-        EnvDialog(self)
-    # ── 安装 dsh ──────────────────────────
-    def _open_install(self):
-        dlg = InstallDialog(self.root)
-        self.root.wait_window(dlg)
-        if dlg.result:
-            url, target = dlg.result
-            self.log(f"[安装 dsh] 目标: {target}  源: {url}", "warn")
-            self.set_status("正在安装 dsh(clone+依赖+构建, 较久请耐心)...")
-            threading.Thread(target=self._run_install, args=(url, target), daemon=True).start()
-
-    def _run_install(self, url, target):
-        import shutil
-        # 0) 环境预检
-        need = [t for t in ("git", "node", "npm", "pnpm") if not shutil.which(t)]
-        if need:
-            self.log(f"[安装] 缺少依赖: {', '.join(need)}", "err")
-            self.log("  请先安装 Node.js(含 npm) 和 git; 然后 npm install -g pnpm", "warn")
-            self.set_status("安装中止: 缺少依赖 " + ", ".join(need))
-            return
-        # 1) clone(完整克隆, 便于后续 update 的 git pull)
-        if os.path.isdir(target) and os.listdir(target):
-            self.log(f"[安装] 目录已存在且有内容, 跳过 clone: {target}", "warn")
-        else:
-            self.log("[安装] 步骤1/3: git clone ...", "warn")
-            if not self._stream_cmd(["git", "clone", url, target]):
-                self.set_status("安装失败: git clone")
-                return
-        # 2) install
-        self.log("[安装] 步骤2/3: pnpm install", "warn")
-        if not self._stream_cmd(["pnpm.cmd", "install"], cwd=target):
-            self.set_status("安装失败: pnpm install")
-            return
-        # 3) build
-        self.log("[安装] 步骤3/3: pnpm run build", "warn")
-        if not self._stream_cmd(["pnpm.cmd", "run", "build"], cwd=target):
-            self.set_status("安装失败: pnpm run build")
-            return
-        # 4) 写 config.dash_repo
-        self.log(f"[安装] 完成! 目标目录: {target}", "ok")
-        try:
-            cfg = load_config()
-            cfg["dash_repo"] = target
-            if save_config(cfg):
-                self.log("[安装] 已把 dash_repo 写入 config.json, 重启后生效。", "ok")
-            else:
-                self.log("[安装] 无法写 config.json(权限?), 请在配置向导里手动设置 dash_repo。", "warn")
-        except Exception as e:
-            self.log(f"[安装] 写 config 失败: {e}", "warn")
-        self.set_status("dsh 安装完成 ✓ 重启后生效")
-
-    def _stream_cmd(self, cmd, cwd=None, env=None):
-        """流式运行命令, 输出逐行打进日志。返回 True/False。"""
-        self.log("  $ " + " ".join(cmd))
-        try:
-            p = subprocess.Popen(
-                cmd, cwd=cwd, env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                encoding="utf-8", errors="replace", bufsize=1, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW)
-        except FileNotFoundError:
-            self.log(f"  找不到命令: {cmd[0]}", "err")
-            return False
-        deadline = time.time() + UPDATE_TIMEOUT
-        while True:
-            line = p.stdout.readline() if p.stdout else None
-            if line:
-                self.log("    " + line.rstrip())
-                continue
-            if p.poll() is not None:
-                break
-            if time.time() > deadline:
-                p.kill()
-                self.log("  [更新] 超时，已强制终止", "err")
-                return False
-            time.sleep(0.1)
-        rc = p.wait()
-        if rc != 0:
-            self.log(f"  [更新] 步骤失败 (exit {rc})", "err")
-            return False
-        return True
-
-    def _stop_dsh_web_silent(self):
-        """静默停止本机 dsh web（复用 _dsh_stop 的杀进程逻辑, 不打日志回显）。"""
-        ps = ("$n=0; "
-              "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" -ErrorAction SilentlyContinue | "
-              "Where-Object { $_.CommandLine -match 'dsh' -and $_.CommandLine -match 'web' } | "
-              "ForEach-Object { taskkill /PID $_.ProcessId /T /F | Out-Null; $n++ }; "
-              "Get-CimInstance Win32_Process -Filter \"Name='pnpm.cmd'\" -ErrorAction SilentlyContinue | "
-              "Where-Object { $_.CommandLine -match 'dsh' -and $_.CommandLine -match 'web' } | "
-              "ForEach-Object { taskkill /PID $_.ProcessId /T /F | Out-Null; $n++ }")
-        try:
-            subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy",
-                            "Bypass", "-Command", ps],
-                           capture_output=True, text=True, errors="replace",
-                           timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
-        except Exception:
-            pass
-
-    # ── 纯 Python 隧道 ──────────────────────
-    def _build_tunnel(self, cfg_item):
-        """根据 config 构造一条 Tunnel。返回 tunnel_mgr.Tunnel 实例。"""
-        key = cfg_item["key"]
-        if key == "dsh-tunnel":
-            # 在家正向: 本机 8090/8022/8091 -> 公网服务器 同端口
-            forwards = [(p, "127.0.0.1", p) for p in FORWARD_PORTS]
-            host, user, mode = SSH_SERVER, SSH_USER, "forward"
-            watch = FORWARD_PORTS[0] if FORWARD_PORTS else None
-        elif key == "connect-lab-dsh":
-            # 实验室直连: 本机 3090 -> 实验室dsh 的 3090 (局域网, 不经 公网服务器)
-            forwards = [(LAB_PORT, "127.0.0.1", LAB_PORT)]
-            host, user, mode = LAB_SERVER, LAB_USER, "forward"
-            watch = LAB_PORT
-        elif key == "dsh-tunnel-reverse":
-            # 本机 -> 公网服务器 反向: 公网服务器 的 reverse_port -> 本机 dsh
-            forwards = [(REVERSE_PORT, "127.0.0.1", DASH_PORT)]
-            host, user, mode = SSH_SERVER, SSH_USER, "reverse"
-            watch = None   # 反向隧道本机无法直接探测; 用 PID 轨道判断
-        else:
-            raise ValueError("unknown tunnel: " + key)
-        t = tunnel_mgr.Tunnel(
-            BASE_DIR, key, host, user,
-            mode=mode, forwards=forwards, watch_port=watch)
-        t.set_logger(lambda msg, tag="": self.log("  " + msg, tag))
-        return t
-
-    def _run_python_tunnel(self, cfg_item, mode):
-        key = cfg_item["key"]
+    # ---- python 隧道 ----
+    def _run_python_tunnel(self, item, mode):
+        key = item["key"]
         if mode == "stop":
-            self._stop_py_tunnel(cfg_item)
+            self._stop_py_tunnel(item)
             return
-        # start / persist
-        t = self._build_tunnel(cfg_item)
+        t = _build_tunnel_obj(self.app, item)
         ok = t.start()
         if not ok:
-            self.set_status(f"启动失败: {key}")
+            self.app.set_status("启动失败: %s" % key)
+            self._set_card(key, False)
             return
-        self.set_status(f"{key} 已启动 (Python)")
+        self.app.set_status("%s 已启动 (Python)" % key)
+        self._set_card(key, True)
         if mode == "persist":
-            self._start_persist(cfg_item, t)
-        # 等端口就绪
-        import time as _t
-        for _ in range(6):
-            if t.is_running():
-                self.log(f"  [{key}] 端口就绪。", "ok")
-                break
-            _t.sleep(1)
+            self._start_persist(item, t)
 
-    def _start_persist(self, cfg_item, t):
-        """启动后台探活重连线程。GUI 存活期间, 隧道断开则自动重启。"""
-        key = cfg_item["key"]
+    def _start_persist(self, item, t):
+        key = item["key"]
         stop_flag = threading.Event()
         if not hasattr(self, "_py_persist"):
-            self._py_persist = {}   # key -> stop_event
-        # 停掉旧的
+            self._py_persist = {}
         old = self._py_persist.get(key)
         if old:
             old.set()
@@ -1311,194 +976,10 @@ class Dashboard:
         def loop():
             while not stop_flag.is_set():
                 if not t.is_running():
-                    self.log(f"  [{key}] 隧道断开, 尝试重连…", "warn")
+                    self.app.loge("  [%s] 隧道断开, 尝试重连..." % key, "warn")
                     t.start()
-                stop_flag.wait(5)
-        th = threading.Thread(target=loop, daemon=True)
-        th.start()
-        self.log(f"  [{key}] 常驻模式已启用（断线自动重连）", "ok")
-
-    def _stop_py_tunnel(self, cfg_item):
-        key = cfg_item["key"]
-        if hasattr(self, "_py_persist") and self._py_persist.get(key):
-            self._py_persist[key].set()
-            self._py_persist.pop(key, None)
-            self.log(f"  [{key}] 已取消常驻重连", "warn")
-        t = self._build_tunnel(cfg_item)
-        n = t.stop()
-        self.set_status(f"{key} 已停止 (Python)" if n else f"{key} 停止(无进程)")
-
-    # ── 隧道脚本 ───────────────────────────
-    def _run_ps1(self, cfg_item, path, mode):
-        key = cfg_item["key"]
-        args = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                "-File", path]
-        if mode == "persist":
-            args.append("-Persist")
-        elif mode == "stop":
-            args.append("-Stop")
-        self.log(f"  $ powershell {display_args(args)}")
-
-        try:
-            if mode == "stop":
-                r = subprocess.run(args, capture_output=True, text=True,
-                                   errors="replace", timeout=120,
-                                   creationflags=subprocess.CREATE_NO_WINDOW)
-                out = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
-                for ln in (out.splitlines() or ["(无输出)"]):
-                    self.log("    " + ln, "ok" if r.returncode == 0 else "err")
-                if r.returncode == 0:
-                    self.log("  [停止] 完成", "ok")
-                    self.set_status(f"已发送停止: {os.path.basename(path)}")
-                else:
-                    self.log(f"  [停止] 退出码 {r.returncode}", "err")
-                    self.set_status(f"停止 {key} 返回非 0")
-            else:
-                subprocess.Popen(args, creationflags=subprocess.CREATE_NO_WINDOW)
-                self.log(f"  已触发 {mode}, 等待端口/进程就绪…", "ok")
-                self.set_status(f"已触发 {mode} → {os.path.basename(path)}")
-        except subprocess.TimeoutExpired:
-            self.log("  [停止] 超时(120s)", "err")
-            self.set_status(f"停止 {key} 超时")
-        except Exception as e:
-            self.log(f"  异常: {e}", "err")
-            self.set_status(f"执行出错: {e}")
-
-    def _force_refresh(self):
-        threading.Thread(target=self._tick, daemon=True).start()
-        threading.Thread(target=self._remote_tick, daemon=True).start()
-
-    # ── 健康监控 ───────────────────────────
-    def _start_monitor(self):
-        self.monitor_stop.clear()
-        threading.Thread(target=self._monitor_loop, daemon=True).start()
-        threading.Thread(target=self._remote_loop, daemon=True).start()
-
-    def _monitor_loop(self):
-        while not self.monitor_stop.is_set():
-            self._tick()
-            self.monitor_stop.wait(POLL_SECONDS)
-
-    def _remote_loop(self):
-        while not self.monitor_stop.is_set():
-            self._remote_tick()
-            self.monitor_stop.wait(REMOTE_POLL_SECONDS)
-
-    def _tick(self):
-        results = {}
-        for port, _, _ in LOCAL_PORTS:
-            results[port] = tcp_ok("127.0.0.1", port)
-        results["公网服务器"] = tcp_ok(SSH_SERVER, 22)
-        ssh_count = ssh_proc_count()
-        # 后台线程预计算隧道状态(端口探测/读PID), 主线程 apply 只做 UI 更新(防阻塞)
-        py_state = {}
-        cards = getattr(self, "cards", {}) or {}
-        for key, card in cards.items():
-            cfg_item = card.get("cfg") or {}
-            port = cfg_item.get("port")
-            if port is None or port < 0:
-                py_state[key] = False
-            elif cfg_item.get("backend") == "python":
-                try:
-                    t = self._build_tunnel(cfg_item)
-                    py_state[key] = t.is_running()
-                except Exception:
-                    py_state[key] = False
-        self._render(results, ssh_count, py_state)
-
-    def _remote_tick(self):
-        state = probe_remote_tunnels()
-        self.remote_state = state
-        self._render_remote(state)
-
-    def _render(self, results, ssh_count, py_state=None):
-        # 本机端口健康（不含 公网服务器 公网连通, 概念分开）
-        local_ok = [port for port, (ok, _) in results.items()
-                    if port != "公网服务器" and ok]
-        local_total = len(LOCAL_PORTS)
-        ssh_ok = results.get("公网服务器", (False, -1))[0]
-        ssh_txt = "公网服务器 在线" if ssh_ok else "公网服务器 不可达"
-        summary = (f"本机端口 {len(local_ok)}/{local_total} · {ssh_txt}"
-                   f" · ssh.exe {ssh_count if ssh_count >= 0 else '?'}")
-        def apply():
-            try:
-                self._render_apply(results, ssh_count, py_state, summary)
-            except tk.TclError:
-                pass   # 页面已切换/窗口关闭, 卡片销毁, 忽略
-        self.root.after(0, apply)
-
-    def _render_apply(self, results, ssh_count, py_state, summary):
-        # 主线程 UI 更新(无 IO): 监控点 + 卡片 + 状态栏
-        for port, (ok, dt) in results.items():
-            if port == "公网服务器":
-                dot, det = self.mon_widgets["公网服务器"]
-                dot.configure(fg=COLOR_ON if ok else COLOR_RED)
-                det.configure(text="在线" if ok else "不可达")
-                continue
-            key = "L" + str(port)
-            if key not in self.mon_widgets:
-                continue
-            dot, det = self.mon_widgets[key]
-            dot.configure(fg=COLOR_ON if ok else COLOR_RED)
-            det.configure(text=str(dt) + "ms" if ok else "未就绪")
-        cards = getattr(self, "cards", {}) or {}
-        for key, card in cards.items():
-            cfg_item = card.get("cfg") or {}
-            port = cfg_item.get("port")
-            if port is None or port < 0:
-                card["st"].configure(text="○ 空闲", fg=COLOR_OFF)
-                continue
-            if cfg_item.get("backend") == "python":
-                on = bool((py_state or {}).get(key))
-            elif port:
-                on = port in results and results[port][0]
-            else:
-                on = ssh_count > 0
-            card["st"].configure(text="● 运行中" if on else "○ 停止",
-                                 fg=COLOR_ON if on else COLOR_OFF)
-        self.status.configure(text=summary)
-
-    def _py_tunnel_running(self, cfg_item):
-        """纯 Python 隧道在线判断: forward 探测端口, reverse 查 PID 轨道。"""
-        try:
-            t = self._build_tunnel(cfg_item)
-            return t.is_running()
-        except Exception:
-            return False
-
-    def _render_remote(self, state):
-        def apply():
-            if state is None:
-                for port, _, _ in REMOTE_TUNNELS:
-                    key = f"R{port}"
-                    dot, det = self.mon_widgets[key]
-                    dot.configure(fg=COLOR_WARN)
-                    det.configure(text="SSH不可达")
-                return
-            for port, _, _ in REMOTE_TUNNELS:
-                key = f"R{port}"
-                dot, det = self.mon_widgets[key]
-                on = bool(state.get(port))
-                dot.configure(fg=COLOR_ON if on else COLOR_RED)
-                det.configure(text="隧道在线" if on else "未监听")
-        self.root.after(0, apply)
-
-
-def display_args(args):
-    skip = {"powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"}
-    return " ".join(a for a in args if a not in skip)
-
-
-def main():
-    try:
-        import ctypes
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
-    root = tk.Tk()
-    Dashboard(root)
-    root.mainloop()
+                stop_f
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
