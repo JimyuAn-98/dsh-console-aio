@@ -146,6 +146,7 @@ NAV_ITEMS = [
     ("LLM 配置", "llm"),
     ("主题外观", "theme"),
     ("备份与运维", "ops"),
+    ("SSH 密钥", "keys"),
     ("关于与更新", "version"),
     ("部署管理", "deployments"),
 ]
@@ -159,6 +160,7 @@ PAGE_MODULES = {
     "llm": ("mgmt_llm", "LlmPage"),
     "theme": ("mgmt_theme", "ThemePage"),
     "ops": ("mgmt_ops", "OpsPage"),
+    "keys": ("mgmt_keys", "KeysPage"),
     "version": ("mgmt_version", "VersionPage"),
     "deployments": ("mgmt_deployments", "DeploymentPage"),
 }
@@ -772,24 +774,6 @@ class Dashboard:
         ttk.Button(top, text="配置", command=self._open_config).pack(side="right", padx=(0, 6))
         ttk.Button(top, text="安装 dsh", command=self._open_install).pack(side="right", padx=(0, 6))
         ttk.Button(top, text="环境", command=self._open_env).pack(side="right", padx=(0, 6))
-        mgmt_btn = tk.Menubutton(top, text="dsh 管理", relief="raised", padx=6)
-        mgmt_menu = tk.Menu(mgmt_btn, tearoff=0)
-        mgmt_btn.configure(menu=mgmt_menu)
-        for _label, _mod, _cls in [
-            ("会话与工作区", "mgmt_sessions", "SessionDialog"),
-            ("Agent 模式", "mgmt_agents", "AgentDialog"),
-            ("Profile 管理", "mgmt_profiles", "ProfileDialog"),
-            ("插件管理", "mgmt_plugins", "PluginDialog"),
-            ("任务看板", "mgmt_taskboard", "TaskboardDialog"),
-            ("模型用量", "mgmt_usage", "UsageDialog"),
-            ("LLM 配置", "mgmt_llm", "LlmDialog"),
-            ("主题外观", "mgmt_theme", "ThemeDialog"),
-            ("备份与运维", "mgmt_ops", "OpsDialog"),
-            ("关于与更新", "mgmt_version", "VersionDialog"),
-            ("部署管理", "mgmt_deployments", "DeploymentDialog"),
-        ]:
-            mgmt_menu.add_command(label=_label, command=lambda m=_mod, c=_cls: self._open_mgmt(m, c))
-        mgmt_btn.pack(side="right", padx=(0, 6))
 
         # ── 主体: 左导航 + 中栏页面 + 右状态 ──
         body = ttk.Frame(self.root)
@@ -896,15 +880,55 @@ class Dashboard:
             self.log("打开页面 " + str(key) + " 失败: " + str(e), "err")
 
     def _build_overview_page(self, parent):
-        # 总览页: 隧道操控卡片(健康状态在右侧栏)
+        # 总览页: 隧道操控卡片 + 部署状态总览(健康状态在右侧栏)
         cards = ttk.LabelFrame(parent, text="操控", padding=8)
         cards.pack(fill="x", pady=(0, 6))
         self.cards = {}
         for i, cfg_item in enumerate(ITEMS):
             cards.columnconfigure(i, weight=1)
             self.cards[cfg_item["key"]] = self._build_card(cards, cfg_item, i)
+        # 部署状态总览卡片
+        depf = ttk.LabelFrame(parent, text="部署状态", padding=8)
+        depf.pack(fill="x", pady=(0, 6))
+        self.dep_status_lbl = ttk.Label(depf, text="加载中…", font=F_SMALL, foreground="#888")
+        self.dep_status_lbl.pack(anchor="w")
+        ttk.Button(depf, text="刷新部署状态", command=self._refresh_dep_status).pack(anchor="e")
+        self._refresh_dep_status()
         ttk.Label(parent, text="隧道/健康状态见右侧状态栏；更多管理功能见左侧导航。",
                   font=F_SMALL, foreground="#888").pack(anchor="w")
+
+    def _refresh_dep_status(self):
+        # 后台线程汇总所有部署快照(本机 + deployments), 结果回主线程显示
+        depls = [{"name": "本机", "host": ""}] + dsh_data.load_deployments()
+        def worker():
+            rows = []
+            for d in depls:
+                try:
+                    snap = dsh_data.deployment_snapshot(dsh_data.DshRemote(d if d.get("host") else None))
+                except Exception as e:
+                    snap = {"ok": False, "error": str(e), "name": d.get("name")}
+                rows.append(snap)
+            try:
+                self.root.after(0, lambda: self._dep_status_done(rows))
+            except tk.TclError:
+                pass
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _dep_status_done(self, rows):
+        # 主线程更新部署状态标签
+        try:
+            parts = []
+            for s in rows:
+                name = s.get("name") or "?"
+                if not s.get("ok"):
+                    parts.append(name + ":离线")
+                    continue
+                parts.append("%s:v%s 会话%d 插件%d" % (
+                    name, s.get("version") or "?",
+                    s.get("sessions") or 0, s.get("plugins") or 0))
+            self.dep_status_lbl.configure(text="   |  ".join(parts))
+        except tk.TclError:
+            pass   # 页面已切换
 
     # ── 部署选择器 ──────────────────────────
     def _refresh_deploy_list(self):
@@ -1104,19 +1128,6 @@ class Dashboard:
         self._dsh_start()
         self.log("  [更新] 完成 ✓ 访问 http://127.0.0.1:%d" % DASH_PORT, "ok")
         self.set_status("更新完成")
-
-    def _open_mgmt(self, module_name, class_name):
-        # 动态加载管理窗口模块并打开(独立文件 mgmt_*.py)
-        try:
-            mod = importlib.import_module(module_name)
-            cls = getattr(mod, class_name)
-            if class_name == "VersionDialog":
-                cls(self, APP_VERSION)
-            else:
-                cls(self)
-        except Exception as e:
-            self.log(f"打开 {class_name} 失败: {e}", "err")
-            messagebox.showerror("打开失败", str(e), parent=self.root)
 
     def _open_env(self):
         EnvDialog(self)

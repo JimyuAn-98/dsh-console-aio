@@ -168,6 +168,18 @@
 - **数据统计**：.anonymous-user-id —— 查看/关闭匿名统计。
 - **pet 开关**：settings.yaml pet.enabled。
 
+
+### E. SSH 密钥管理（新增, 2026-08-25） [规划中]
+- **安全红线（重中之重）**：
+  - 私钥内容（~/.ssh/id_* 等无 .pub 后缀文件）**绝不读取、绝不写入任何日志/剪贴板/文件/仓库**
+  - 只展示: 文件名 / 最后修改时间 / 算法与**指纹**（ssh-keygen -lf 输出, 不泄露私钥）
+  - 公钥（.pub）是公开信息, 可展示与复制
+  - 生成密钥: ssh-keygen -t ed25519（用户确认路径/口令选项）
+  - 部署到远程: 展示公钥 + 提示用户手动 ssh-copy-id（不代执行, 避免口令交互泄露）
+  - known_hosts: 只读展示主机名列表
+- 功能: 密钥列表(名称/算法/指纹/时间) / 生成新密钥 / 查看公钥 / 复制公钥 / 打开 .ssh 目录
+- 实现: mgmt_keys.py (KeysPage)
+
 ### 建议实施顺序 [v0.3.0 全部完成 ✅]
 1. Session + Workspace + 归档（同一批数据域，UI 类似）→ mgmt_sessions.py
 2. Agent 模式管理 → mgmt_agents.py

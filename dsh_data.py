@@ -175,18 +175,23 @@ def _parse_yaml_block(lines, idx, indent):
             idx += 1
     return out, idx
 
-def read_yaml(path):
-    # 解析 YAML 文件; 不存在返回 None
-    if not os.path.isfile(path):
-        return None
-    with io.open(path, encoding="utf-8", errors="replace") as fh:
-        raw = fh.read()
+def parse_yaml_text(raw):
+    # 从文本解析 YAML(供本地文件与远程 cat 复用)
     lines = [_strip_comment(l).rstrip() for l in raw.splitlines()]
     lines = [l for l in lines if l.strip() != ""]
     if not lines:
         return {}
     val, _ = _parse_yaml_block(lines, 0, 0)
     return val if val is not None else {}
+
+
+def read_yaml(path):
+    # 解析 YAML 文件; 不存在返回 None
+    if not os.path.isfile(path):
+        return None
+    with io.open(path, encoding="utf-8", errors="replace") as fh:
+        raw = fh.read()
+    return parse_yaml_text(raw)
 
 def _dump_scalar(v):
     if v is None:
@@ -260,74 +265,72 @@ def write_yaml(path, data):
     return path
 
 # ── 会话 / 工作区 ─────────────────────────────────────
-def read_workspace():
+def read_workspace(remote=None):
     # workspace.json -> {workspaceIds: [], archivedSessionIds: []}
-    p = os.path.join(dsh_home(), "storages", "workspace.json")
+    _r = remote if remote is not None else DshRemote(None)
     try:
-        with io.open(p, encoding="utf-8", errors="replace") as fh:
-            d = json.load(fh)
+        d = json.loads(_r.read_file("storages/workspace.json"))
         return d.get("global", {})
     except (OSError, ValueError):
         return {}
 
-def list_sessions():
+def list_sessions(remote=None):
     # 按工作目录分组: [{workdir, count, bytes, sessions:[{name,size,mtime}]}]
-    base = sessions_dir()
+    _r = remote if remote is not None else DshRemote(None)
     groups = []
-    if not os.path.isdir(base):
+    try:
+        dirs = _r.list_dir("sessions")
+    except OSError:
         return groups
-    for d in sorted(os.listdir(base)):
-        dp = os.path.join(base, d)
-        if not os.path.isdir(dp):
+    for d in sorted(dirs):
+        try:
+            st = _r.dir_stats("sessions/" + d)
+        except OSError:
             continue
         items = []
-        total = 0
-        for sd in sorted(os.listdir(dp)):
-            sdp = os.path.join(dp, sd)
-            if os.path.isdir(sdp):
-                size = 0
-                for fn in os.listdir(sdp):
-                    fp = os.path.join(sdp, fn)
-                    if os.path.isfile(fp):
-                        size += os.path.getsize(fp)
-                total += size
-                items.append({"name": sd, "bytes": size,
-                              "mtime": os.path.getmtime(sdp)})
-        groups.append({"workdir": d, "count": len(items), "bytes": total, "sessions": items})
+        for name in sorted(st["dirs"]):
+            items.append({"name": name, "bytes": st["dirs"][name], "mtime": 0})
+        groups.append({"workdir": d, "count": len(items), "bytes": st["total"], "sessions": items})
     return groups
 
 # ── Profile / 插件 ────────────────────────────────────
-def list_profiles():
+def list_profiles(remote=None):
     # 返回 [{name, cordis(bool), patch(bool), pkg(bool)}]
-    base = profiles_dir()
+    _r = remote if remote is not None else DshRemote(None)
     out = []
-    if not os.path.isdir(base):
+    try:
+        dirs = _r.list_dir("profiles")
+    except OSError:
         return out
-    for d in sorted(os.listdir(base)):
-        dp = os.path.join(base, d)
-        if os.path.isdir(dp):
-            out.append({
-                "name": d,
-                "cordis": os.path.isfile(os.path.join(dp, "cordis.yml")),
-                "patch": os.path.isfile(os.path.join(dp, "cordis.patch.yml")),
-                "pkg": os.path.isfile(os.path.join(dp, "package.json")),
-            })
+    for d in sorted(dirs):
+        try:
+            files = set(_r.list_dir("profiles/" + d))
+        except OSError:
+            files = set()
+        out.append({
+            "name": d,
+            "cordis": "cordis.yml" in files,
+            "patch": "cordis.patch.yml" in files,
+            "pkg": "package.json" in files,
+        })
     return out
 
-def read_cordis(profile):
-    # 解析 profile 的 cordis.yml(或 patch), 返回 entries list
-    base = os.path.join(profiles_dir(), profile)
-    d = read_yaml(os.path.join(base, "cordis.yml")) or {}
+def _read_cordis_file(profile, fn, remote):
+    _r = remote if remote is not None else DshRemote(None)
+    try:
+        d = parse_yaml_text(_r.read_file("profiles/" + profile + "/" + fn))
+    except (OSError, ValueError):
+        d = {}
     if isinstance(d, dict):
         d = []
     return d if isinstance(d, list) else []
 
-def read_cordis_patch(profile):
-    base = os.path.join(profiles_dir(), profile)
-    d = read_yaml(os.path.join(base, "cordis.patch.yml")) or {}
-    if isinstance(d, dict):
-        d = []
-    return d if isinstance(d, list) else []
+def read_cordis(profile, remote=None):
+    # 解析 profile 的 cordis.yml, 返回 entries list
+    return _read_cordis_file(profile, "cordis.yml", remote)
+
+def read_cordis_patch(profile, remote=None):
+    return _read_cordis_file(profile, "cordis.patch.yml", remote)
 
 def write_cordis_patch(profile, entries):
     # 备份后写回 cordis.patch.yml
@@ -339,13 +342,11 @@ def plugin_cmd(profile, *args):
     # 组装 dsh plugin --profile X ... 命令(由 UI 层经 _stream_cmd 执行)
     return ["dsh", "plugin", "--profile", profile] + list(args)
 
-def read_profile_package(profile):
+def read_profile_package(profile, remote=None):
     # 读 profile/package.json: 返回 {dependencies: {...}, bundles: [...]}
-    base = os.path.join(profiles_dir(), profile)
-    p = os.path.join(base, 'package.json')
+    _r = remote if remote is not None else DshRemote(None)
     try:
-        with io.open(p, encoding='utf-8', errors='replace') as fh:
-            d = json.load(fh)
+        d = json.loads(_r.read_file("profiles/" + profile + "/package.json"))
         dsh = d.get('dsh') or {}
         prof = dsh.get('profile') or {}
         return {
@@ -357,21 +358,24 @@ def read_profile_package(profile):
 
 
 # ── settings.yaml ─────────────────────────────────────
-def read_settings():
-    return read_yaml(os.path.join(dsh_home(), "settings.yaml")) or {}
+def read_settings(remote=None):
+    _r = remote if remote is not None else DshRemote(None)
+    try:
+        return parse_yaml_text(_r.read_file("settings.yaml")) or {}
+    except (OSError, ValueError):
+        return {}
 
 def write_settings(data):
     return write_yaml(os.path.join(dsh_home(), "settings.yaml"), data)
 
 # ── 任务看板 ──────────────────────────────────────────
-def read_taskboard():
+def read_taskboard(remote=None):
     # 返回 {ledger: {...}, scheduler: {...}}; 文件缺失返回空 dict
+    _r = remote if remote is not None else DshRemote(None)
     out = {}
     for key, fn in (("ledger", "ledger-v2.json"), ("scheduler", "scheduler-v2.json")):
-        p = os.path.join(dsh_home(), "task-board", fn)
         try:
-            with io.open(p, encoding="utf-8", errors="replace") as fh:
-                out[key] = json.load(fh)
+            out[key] = json.loads(_r.read_file("task-board/" + fn))
         except (OSError, ValueError):
             out[key] = {}
     return out
@@ -384,10 +388,12 @@ def zstd_available():
     except ImportError:
         return False
 
-def usage_stats():
+def usage_stats(remote=None):
     # 解压全部 session jsonl.zstd, 聚合 token 用量。
     # 返回 {ok: bool, error?: str, models: {model: {provider, input, output, calls}},
     #        days: {date: {input, output}}, sessions: n}
+    if remote is not None and remote.is_remote:
+        return {"ok": False, "error": "远程用量统计暂不支持(需远程 Python + zstandard)"}
     if not zstd_available():
         return {"ok": False, "error": "缺少 zstandard 库(pip install zstandard)"}
     import zstandard as zstd
@@ -480,26 +486,27 @@ def backup_dsh_home(out_zip):
     return count
 
 # ── Agent 模式 ────────────────────────────────────────
-def list_agent_presets():
+def list_agent_presets(remote=None):
     # .agent-presets/<name>/preset.yml
-    base = os.path.join(dsh_home(), ".agent-presets")
+    _r = remote if remote is not None else DshRemote(None)
     out = []
-    if not os.path.isdir(base):
+    try:
+        dirs = _r.list_dir(".agent-presets")
+    except OSError:
         return out
-    for d in sorted(os.listdir(base)):
-        dp = os.path.join(base, d)
-        if os.path.isdir(dp):
-            info = {"name": d, "desc": "", "files": 0}
-            pp = os.path.join(dp, "preset.yml")
-            if os.path.isfile(pp):
-                try:
-                    pdata = read_yaml(pp)
-                    if isinstance(pdata, dict):
-                        info["desc"] = str(pdata.get("description") or pdata.get("desc") or "")
-                except Exception:
-                    pass
-            info["files"] = len([f for f in os.listdir(dp) if os.path.isfile(os.path.join(dp, f))])
-            out.append(info)
+    for d in sorted(dirs):
+        info = {"name": d, "desc": "", "files": 0}
+        try:
+            pdata = parse_yaml_text(_r.read_file(".agent-presets/" + d + "/preset.yml"))
+            if isinstance(pdata, dict):
+                info["desc"] = str(pdata.get("description") or pdata.get("desc") or "")
+        except (OSError, ValueError):
+            pass
+        try:
+            info["files"] = len(_r.list_dir(".agent-presets/" + d))
+        except OSError:
+            pass
+        out.append(info)
     return out
 
 def load_deployments():
