@@ -1,6 +1,8 @@
 ; dsh-console-aio 安装脚本 (Inno Setup 6)
 #define MyAppName "dsh-console-aio"
+#ifndef MyAppVersion
 #define MyAppVersion "0.3.0"
+#endif
 #define MyAppExeName "dsh-console-aio.exe"
 #define MyAppPublisher "dsh-tools"
 

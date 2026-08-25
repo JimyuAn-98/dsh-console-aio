@@ -1,0 +1,54 @@
+name: Release
+
+# 触发: 推送 v* 标签时自动构建并发布 GitHub Release
+# 用法: 打 tag (git tag v0.3.1 && git push origin v0.3.1) 即自动构建+发布
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build onefile exe
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name dsh-console-aio `
+            --hidden-import mgmt_sessions --hidden-import mgmt_agents --hidden-import mgmt_profiles `
+            --hidden-import mgmt_plugins --hidden-import mgmt_taskboard --hidden-import mgmt_usage `
+            --hidden-import mgmt_llm --hidden-import mgmt_theme --hidden-import mgmt_ops --hidden-import mgmt_version `
+            --add-data "RELEASE_NOTES.md;." `
+            dsh-console-aio.py
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME -replace '^v', ''
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss "/DMyAppVersion=$ver"
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/dsh-console-aio.exe
+            dist/dsh-console-aio-setup-*.exe
+          body_path: RELEASE_BODY.md
+          generate_release_notes: false
