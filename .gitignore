@@ -31,3 +31,6 @@ _research/
 
 # 配置备份(含真实IP, 不入库)
 config.json.bak
+
+# PySide6 观感预览截图(临时, 不入库)
+*_preview.png
