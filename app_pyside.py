@@ -549,8 +549,6 @@ def main():
     return app.exec()
 
 
-if __name__ == "__main__":
-    sys.exit(main())
 
 
 
@@ -758,3 +756,7 @@ class TunnelsPage(BasePage):
                     self.app.loge("  [%s] 隧道断开, 尝试重连..." % key, "warn")
                     t.start()
                 stop_f
+
+
+if __name__ == "__main__":
+    sys.exit(main())
