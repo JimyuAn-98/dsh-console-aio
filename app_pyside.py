@@ -385,6 +385,8 @@ class MainWindow(QMainWindow):
         self._current_page_key = None
         self._deployments = []
         self.bridge = LogBridge()
+        self.DASH_REPO = DASH_REPO          # 供插件等页面取 dsh 仓库目录(cwd)
+        self.APP_VERSION = APP_VERSION
 
         central = QWidget(objectName="central")
         self.setCentralWidget(central)
@@ -504,6 +506,27 @@ class MainWindow(QMainWindow):
         elif key == "taskboard":
             from pyside.pages_taskboard import TaskboardPage
             page = TaskboardPage(self)
+        elif key == "agents":
+            from pyside.pages_agents import AgentPage
+            page = AgentPage(self)
+        elif key == "plugins":
+            from pyside.pages_plugins import PluginPage
+            page = PluginPage(self)
+        elif key == "usage":
+            from pyside.pages_usage import UsagePage
+            page = UsagePage(self)
+        elif key == "llm":
+            from pyside.pages_llm import LlmPage
+            page = LlmPage(self)
+        elif key == "ops":
+            from pyside.pages_ops import OpsPage
+            page = OpsPage(self)
+        elif key == "version":
+            from pyside.pages_version import VersionPage
+            page = VersionPage(self)
+        elif key == "deployments":
+            from pyside.pages_deployments import DeploymentPage
+            page = DeploymentPage(self)
         else:
             label = dict(NAV_ITEMS).get(key, key)
             page = PlaceholderPage(self, label)

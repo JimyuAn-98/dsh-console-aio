@@ -74,16 +74,16 @@ dsh-console-aio 原为 tkinter 零依赖 GUI。现决定 UI 层迁移到 PySide6
 | 总览 | overview | pages_overview.py | OverviewPage | 已迁 |
 | 隧道 | tunnels | pages_tunnels.py | TunnelsPage | 已迁 |
 | 会话与工作区 | sessions | pages_sessions.py | SessionPage | 已迁 |
-| Agent 模式 | agents | pages_agents.py | AgentPage | 待迁 |
+| Agent 模式 | agents | pages_agents.py | AgentPage | 已迁 |
 | Profile 管理 | profiles | pages_profiles.py | ProfilePage | 已迁 |
-| 插件管理 | plugins | pages_plugins.py | PluginPage | 待迁 |
+| 插件管理 | plugins | pages_plugins.py | PluginPage | 已迁 |
 | 任务看板 | taskboard | pages_taskboard.py | TaskboardPage | 已迁 |
-| 模型用量 | usage | pages_usage.py | UsagePage | 待迁 |
-| LLM 配置 | llm | pages_llm.py | LlmPage | 待迁 |
-| 备份与运维 | ops | pages_ops.py | OpsPage | 待迁 |
+| 模型用量 | usage | pages_usage.py | UsagePage | 已迁 |
+| LLM 配置 | llm | pages_llm.py | LlmPage | 已迁 |
+| 备份与运维 | ops | pages_ops.py | OpsPage | 已迁 |
 | SSH 密钥 | keys | pages_keys.py | KeysPage | 已迁 |
-| 关于与更新 | version | pages_version.py | VersionPage | 待迁 |
-| 部署管理 | deployments | pages_deployments.py | DeploymentPage | 待迁 |
+| 关于与更新 | version | pages_version.py | VersionPage | 已迁 |
+| 部署管理 | deployments | pages_deployments.py | DeploymentPage | 已迁 |
 
 ## 6. 页面加载方式（主框架 _show_page）
 
