@@ -492,6 +492,9 @@ class MainWindow(QMainWindow):
             page = OverviewPage(self)
         elif key == "tunnels":
             page = TunnelsPage(self)
+        elif key == "sessions":
+            from pyside.pages_sessions import SessionPage
+            page = SessionPage(self)
         else:
             label = dict(NAV_ITEMS).get(key, key)
             page = PlaceholderPage(self, label)
