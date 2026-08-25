@@ -1,5 +1,12 @@
 # dsh-console-aio
 
+[![Release](https://img.shields.io/github/v/release/JimyuAn-98/dsh-console-aio)](https://github.com/JimyuAn-98/dsh-console-aio/releases)
+[![Stars](https://img.shields.io/github/stars/JimyuAn-98/dsh-console-aio)](https://github.com/JimyuAn-98/dsh-console-aio)
+[![License](https://img.shields.io/github/license/JimyuAn-98/dsh-console-aio)](LICENSE)
+[![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows&logoColor=white)](https://github.com/JimyuAn-98/dsh-console-aio)
+[![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Dependencies](https://img.shields.io/badge/dependencies-zero-green)](requirements.txt)
+
 > 中文 | [English](#english)
 
 **SSH 隧道可视化管理器 + 服务健康监控**（Windows GUI）。把平时要敲命令行的 SSH 隧道启动/停止/常驻，和一整套服务的健康监控，打包成一个零依赖的图形界面。
