@@ -715,6 +715,7 @@ class Dashboard:
             ("LLM 配置", "mgmt_llm", "LlmDialog"),
             ("主题外观", "mgmt_theme", "ThemeDialog"),
             ("备份与运维", "mgmt_ops", "OpsDialog"),
+            ("关于与更新", "mgmt_version", "VersionDialog"),
         ]:
             mgmt_menu.add_command(label=_label, command=lambda m=_mod, c=_cls: self._open_mgmt(m, c))
         mgmt_btn.pack(side="right", padx=(0, 6))
@@ -971,7 +972,10 @@ class Dashboard:
         try:
             mod = importlib.import_module(module_name)
             cls = getattr(mod, class_name)
-            cls(self)
+            if class_name == "VersionDialog":
+                cls(self, APP_VERSION)
+            else:
+                cls(self)
         except Exception as e:
             self.log(f"打开 {class_name} 失败: {e}", "err")
             messagebox.showerror("打开失败", str(e), parent=self.root)

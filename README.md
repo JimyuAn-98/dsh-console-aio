@@ -182,6 +182,7 @@
 - [ ] **dsh web 主题管理**：主题预览与切换（实现中）
 - [ ] **LLM 配置**：默认模型切换 + provider 浏览（实现中）
 - [ ] **备份与运维**：~/.dsh 一键备份 / 日志 / 凭据提示（实现中）
+- [x] **版本管理**：当前版本 / 检查更新 / 更新日志 / 一键自动更新（关于与更新窗口）
 - [ ] **小白引导**：首次使用向导 / 诊断助手 / 常见问题
 
 ## License
@@ -283,6 +284,7 @@ The **dsh management** menu on the top bar opens 9 management windows over the d
 - [ ] dsh web theme manager (preview & switch) — in progress
 - [ ] LLM config (default model switch + provider browse) — in progress
 - [ ] Backup & ops (~/.dsh one-click backup / logs / credential hints) — in progress
+- [x] Version management (current version / check update / changelog / one-click auto-update)
 - [ ] Beginner onboarding (first-run wizard / diagnostics / FAQ)
 
 ## License

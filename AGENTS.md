@@ -13,7 +13,8 @@ dsh-console-aio — 零依赖 Windows GUI（Python stdlib tkinter），面向 ds
 dsh-console-aio.py   主程序（GUI + 隧道/监控/环境/安装 + 顶部"dsh 管理"菜单）
 tunnel_mgr.py           纯 Python 隧道管理器（Tunnel 类: forward/reverse, start/persist/stop）
 dsh_data.py             数据层（~/.dsh 各数据域读取/写入/备份，纯函数零依赖）
-mgmt_*.py               管理窗口模块（会话/Agent模式/Profile/插件/任务看板/用量/LLM/主题/运维）
+mgmt_*.py               管理窗口模块（会话/Agent模式/Profile/插件/任务看板/用量/LLM/主题/运维/版本管理）
+version.json             发版版本源(检查更新读远程 main 分支此文件, 发版时更新)
 config.json             本地配置（真实 IP/用户名/路径，gitignore，绝不提交）
 config.example.json     配置模板（全占位符）
 启动dsh控制台.bat        双击启动器（conda pythonw 优先）
