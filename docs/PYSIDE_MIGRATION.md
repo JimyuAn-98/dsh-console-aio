@@ -64,6 +64,8 @@ dsh-console-aio 原为 tkinter 零依赖 GUI。现决定 UI 层迁移到 PySide6
 - 只允许主线程操作 Qt 组件。
 - 后台线程(SSH/子进程/IO)只做计算，结果经 app.loge / app.set_status(内部走 LogBridge queued signal)回到主线程，绝不直接改 UI 组件。
 - 子进程一律 creationflags=subprocess.CREATE_NO_WINDOW；批处理 shim 用 .cmd 后缀；text=True, errors='replace'。
+- 页面自建 Qt Signal(后台线程回主线程)用 **self.safe_emit(self.<sig>, ...)**（BasePage 提供）：页面切换销毁后对已删 QObject emit 会抛 RuntimeError，safe_emit 吞掉防线程崩溃。
+- **跨行字符串禁令**：Python 源码里字符串字面量禁止跨行（写文件链路会把换行塞进字符串 -> SyntaxError/未闭合）。需换行用 \n 转义 + 相邻字符串拼接；严禁在字符串里被写入真实换行。
 
 ## 5. 页面清单与状态
 

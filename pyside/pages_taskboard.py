@@ -101,7 +101,7 @@ class TaskboardPage(BasePage):
                 data = dsh_data.read_taskboard(remote=self._remote)
             except Exception as e:
                 err = str(e)
-            self._data.emit(data or {}, err)
+            self.safe_emit(self._data, data or {}, err)
 
         threading.Thread(target=worker, daemon=True).start()
 

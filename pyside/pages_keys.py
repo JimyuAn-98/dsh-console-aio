@@ -195,7 +195,7 @@ class KeysPage(BasePage):
                 keys = list_keys()
             except Exception as e:
                 err = str(e)
-            self._data.emit(keys or [], err)
+            self.safe_emit(self._data, keys or [], err)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -241,7 +241,7 @@ class KeysPage(BasePage):
                 pub = read_pubkey(name)
             except Exception as e:
                 err = str(e)
-            self._pub_loaded.emit(name, pub, err, action)
+            self.safe_emit(self._pub_loaded, name, pub, err, action)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -323,7 +323,7 @@ class KeysPage(BasePage):
                     msg = "生成失败: " + (r.stderr or "").strip()
             except Exception as e:
                 err = str(e)
-            self._gen_done.emit(msg, err)
+            self.safe_emit(self._gen_done, msg, err)
 
         threading.Thread(target=worker, daemon=True).start()
 

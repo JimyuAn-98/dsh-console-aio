@@ -152,7 +152,7 @@ class SessionPage(BasePage):
                 groups = dsh_data.list_sessions(remote=self._remote)
             except Exception as e:
                 err = str(e)
-            self._data.emit(ws or {}, groups or [], err)
+            self.safe_emit(self._data, ws or {}, groups or [], err)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -244,7 +244,7 @@ class SessionPage(BasePage):
                 _write_workspace_archived(sorted(new_arch))
             except Exception as e:
                 err = str(e)
-            self._write_done.emit(("已恢复会话: %s" % name) if was_archived
+            self.safe_emit(self._write_done, ("已恢复会话: %s" % name) if was_archived
                                   else ("已归档会话: %s" % name), err)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -278,7 +278,7 @@ class SessionPage(BasePage):
                 shutil.rmtree(target)
             except Exception as e:
                 err = str(e)
-            self._write_done.emit("已删除分组: %s" % workdir, err)
+            self.safe_emit(self._write_done, "已删除分组: %s" % workdir, err)
 
         threading.Thread(target=worker, daemon=True).start()
 

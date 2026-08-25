@@ -9,5 +9,13 @@ class BasePage(QWidget):
         self.app = app
         self._build()
 
+    def safe_emit(self, sig, *args):
+        # 后台线程回调 UI 的安全发射: 页面切换销毁后, 对已删 QObject emit 会抛 RuntimeError,
+        # 这里吞掉, 避免页面销毁竞态导致后台线程崩溃(AGENTS.md 线程收尾约定)。
+        try:
+            sig.emit(*args)
+        except RuntimeError:
+            pass
+
     def _build(self):
         pass
