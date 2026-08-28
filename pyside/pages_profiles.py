@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
-# Profile 管理页(PySide6 迁移版): 浏览/复制/删除 ~/.dsh/profiles。
+# Profile 管理页(UI 层): 只做展示/预检/确认框/busy 管理, 复制/删除业务在 dsh_core/profiles.py。
+# 复制/删除经 app.services 信号桥后台执行: service.copy_profile(src, new)/delete_profile(name)
+# -> result(op, payload) + finished(op, ok) 回页面槽(按 op key 分派), 接收者是页面自身,
+# 页面销毁 Qt 自动断开; log/status 不在页面 connect —— 主窗口级已 connect 一次(勿叠加)。
+# 列表读取暂留页面直连(远程读取可能秒级耗时, 纯读是分层设计允许的过渡态):
+# 后台线程 + 本页 _data 信号, 经 BasePage.safe_emit 回主线程(修复页面销毁竞态 RuntimeError)。
+# 远程只读红线: 远程部署(self._remote 非 None)下复制/删除一律拒绝, 不触 service。
 # 复制排除 node_modules; web 是默认 Profile 不可删除。dsh web 等价 dsh --profile web。
-# 后台线程做读取/复制/删除 IO, 结果经 Qt Signal 回主线程更新表格与弹窗, 不直接改 UI。
 
 import json
 import os
-import shutil
 import threading
 
 import dsh_data
@@ -20,6 +24,9 @@ from pyside.base import BasePage
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
+# 名称禁用字符: 与 dsh_core.profiles 同源(UI 预检, core 会再防线一次)
+_BAD_CHARS = '\\/:*?"<>|'
+
 
 def _load_dash_cmd():
     # 读取控制台 config.json 的 dash_cmd, 用于判断当前是否以 web Profile 启动
@@ -33,9 +40,8 @@ def _load_dash_cmd():
 
 
 class ProfilePage(BasePage):
-    # Profile 管理: BasePage 范式, app 为 MainWindow。
-    _data = Signal(object, str)         # (profiles, err)
-    _op_done = Signal(str, str, str)    # (title, msg, err)
+    # Profile 管理: BasePage 范式, app 为 MainWindow; 写操作业务经 service 信号桥。
+    _data = Signal(object, str)         # (profiles, err) 列表读取线程回包
 
     def __init__(self, app, parent=None):
         self._remote = None
@@ -43,9 +49,11 @@ class ProfilePage(BasePage):
         if _dep and _dep.get("host"):
             self._remote = dsh_data.DshRemote(_dep)
         self._is_web_current = "web" in _load_dash_cmd()
+        self._pending = None   # 正在等待的 service op: "profile-copy" / "profile-delete"
         super().__init__(app, parent)
         self._data.connect(self._apply_data)
-        self._op_done.connect(self._after_op)
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._refresh()
 
     def _build(self):
@@ -104,6 +112,7 @@ class ProfilePage(BasePage):
         t.setSelectionMode(QTableWidget.SingleSelection)
         return t
 
+    # ---- 列表读取(纯读暂留页面直连: 后台线程 + safe_emit 回主线程) ----
     def _refresh(self):
         self._set_status("正在读取 Profile 列表...")
         self._set_btns(False)
@@ -115,7 +124,7 @@ class ProfilePage(BasePage):
                 profiles = dsh_data.list_profiles(remote=self._remote)
             except Exception as e:
                 err = str(e)
-            self._data.emit(profiles or [], err)
+            self.safe_emit(self._data, profiles or [], err)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -134,6 +143,46 @@ class ProfilePage(BasePage):
         else:
             self._set_status("已加载 %d 个 Profile" % len(profiles))
 
+    # ---- service 信号槽(接收者=本页, 销毁自动断开) ----
+    def _on_result(self, op, payload):
+        # result(op, payload) 按 op key 分派; 其他页面的 op 直接忽略。
+        if op == "profile-copy":
+            self._pending = None
+            self._after_op("复制 Profile", payload)
+        elif op == "profile-delete":
+            self._pending = None
+            self._after_op("删除 Profile", payload)
+
+    def _on_finished(self, op, ok):
+        # 兜底: _run_result_op 契约保证 result+finished 成对到达, 正常路径 result 槽
+        # 已收尾; 若 result 槽漏执行导致 busy 悬挂, 在这里解除按钮禁用。
+        if op == self._pending:
+            self._pending = None
+            self._set_btns(True)
+
+    def _after_op(self, title, payload):
+        # payload = {"msg": 成功文案, "err": 中文失败文案}(文案由 core 出, 对称取值)。
+        msg = payload.get("msg", "")
+        err = payload.get("err", "")
+        self._set_btns(True)
+        self._refresh()
+        if err:
+            QMessageBox.critical(self, title, err)
+            self._set_status("操作失败: " + err)
+        else:
+            self.app.loge("[Profile管理] " + msg, "ok")
+            self._set_status(msg)
+            QMessageBox.information(self, title, msg)
+
+    # ---- 写操作入口(预检 + 确认框在 UI, 校验在 core 再防线一次) ----
+    def _refuse_remote_write(self):
+        # 远程只读红线: 远程部署下写操作一律拒绝, 不触 service。
+        if self._remote is not None:
+            QMessageBox.warning(self, "远程只读",
+                                "远程部署下暂不支持写操作（远程只读），请切换回本机部署。")
+            return True
+        return False
+
     def _selected(self):
         rows = self._table.selectionModel().selectedRows()
         if not rows:
@@ -141,6 +190,8 @@ class ProfilePage(BasePage):
         return self._table.item(rows[0].row(), 0).text()
 
     def _copy_profile(self):
+        if self._refuse_remote_write():
+            return
         base = dsh_data.profiles_dir()
         if not os.path.isdir(base):
             QMessageBox.information(self, "目录不存在", "尚未创建任何 Profile。")
@@ -156,7 +207,7 @@ class ProfilePage(BasePage):
         if not new:
             QMessageBox.warning(self, "名称无效", "Profile 名称不能为空。")
             return
-        if any(ch in new for ch in '\\/:*?"<>|'):
+        if any(ch in new for ch in _BAD_CHARS):
             QMessageBox.warning(self, "名称无效", '名称不能包含 \\ / : * ? " < > | 等字符。')
             return
         if new == src:
@@ -169,21 +220,14 @@ class ProfilePage(BasePage):
                                 "将复制 '%s' 到 '%s'（排除 node_modules）。\n是否继续？"
                                 % (src, new)) != QMessageBox.Yes:
             return
+        self._set_status("正在复制 Profile...")
+        self._pending = "profile-copy"
         self._set_btns(False)
-
-        def worker():
-            err = None
-            msg = "已复制 %s → %s" % (src, new)
-            try:
-                shutil.copytree(os.path.join(base, src), os.path.join(base, new),
-                                ignore=shutil.ignore_patterns("node_modules"))
-            except Exception as e:
-                msg, err = "复制失败", str(e)
-            self._op_done.emit("复制 Profile", msg, err)
-
-        threading.Thread(target=worker, daemon=True).start()
+        self.app.service.copy_profile(src, new)
 
     def _delete_profile(self):
+        if self._refuse_remote_write():
+            return
         base = dsh_data.profiles_dir()
         name = self._selected()
         if not name:
@@ -198,30 +242,12 @@ class ProfilePage(BasePage):
         if QMessageBox.question(self, "删除 Profile",
                                 "将永久删除 '%s' 目录及其全部内容。\n是否继续？" % name) != QMessageBox.Yes:
             return
+        self._set_status("正在删除 Profile...")
+        self._pending = "profile-delete"
         self._set_btns(False)
+        self.app.service.delete_profile(name)
 
-        def worker():
-            err = None
-            msg = "已删除 %s" % name
-            try:
-                shutil.rmtree(os.path.join(base, name))
-            except Exception as e:
-                msg, err = "删除失败", str(e)
-            self._op_done.emit("删除 Profile", msg, err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _after_op(self, title, msg, err):
-        self._set_btns(True)
-        self._refresh()
-        if err:
-            QMessageBox.critical(self, title, "%s：%s" % (msg, err))
-            self._set_status("操作失败: " + err)
-        else:
-            self.app.loge("[Profile管理] " + msg, "ok")
-            self._set_status(msg)
-            QMessageBox.information(self, title, msg)
-
+    # ---- 打开目录(页面本机动作, 留 UI 层) ----
     def _open_dir(self):
         base = dsh_data.profiles_dir()
         name = self._selected()
