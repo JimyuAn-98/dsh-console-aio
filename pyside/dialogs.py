@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 # dsh-console-aio PySide6 迁移: 配置向导 / 安装向导 / 环境检查 三个 QDialog。
-# 线程约定与 pyside/pages_sessions.py 一致: 后台线程只做子进程/IO,
-# 经类级 Signal + safe_emit 回主线程更新 UI, worker 绝不直接改 Qt 组件。
-# 子进程一律 creationflags=CREATE_NO_WINDOW; text=True, errors="replace";
-# 批处理 shim 用 .cmd(见 AGENTS.md 约定)。
+# 阶段3 分层: 子进程业务全部下沉 dsh_core/env.py 与 dsh_core/config.py(纯 Python 可单测),
+# 本模块只保留 UI/表单校验/内容配置表(TEMPLATES/OPS)与线程调度。线程约定: 对话框自有
+# 后台线程只调 core 函数(不碰子进程细节), 经类级 Signal + safe_emit 回主线程更新控件;
+# 有主窗口(service 可用)时 EnvDialog 工具命令走 service.run_cmd 流式进主日志。
+# 子进程细节(CREATE_NO_WINDOW/text=errors=/超时)统一在 dsh_core/env.py(AGENTS.md 约定)。
 
 import json
 import os
 import shutil
-import subprocess
 import threading
-import time
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -20,12 +19,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-# 配置文件在本包上一级(仓库根目录); 对话框写回前先 .bak 备份。
+from dsh_core import env as core_env
+
+# 配置文件在本包上一级(仓库根目录); 对话框读它做表单回填(写回业务在 dsh_core.config)。
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(_BASE_DIR, "config.json")
-
-# 长命令(安装/构建)超时, 与旧主程序 UPDATE_TIMEOUT 对齐。
-_STREAM_TIMEOUT = 1800
 
 
 def _resolve_app(app, parent):
@@ -49,26 +47,6 @@ def _load_config():
     except (OSError, ValueError):
         pass
     return {}
-
-
-def _backup_config():
-    # 写 config.json 前复制 .bak(AGENTS.md 安全与密钥约定)。
-    try:
-        if os.path.exists(CONFIG_PATH):
-            shutil.copy2(CONFIG_PATH, CONFIG_PATH + ".bak")
-    except OSError:
-        pass
-
-
-def _save_config(cfg):
-    # 合并写回 config.json(保留对话框外字段); 成功返回 True。
-    _backup_config()
-    try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-        return True
-    except OSError:
-        return False
 
 
 class _DialogBase(QDialog):
@@ -209,7 +187,7 @@ class ConfigDialog(_DialogBase):
                 self._vars[k].setText(val)
 
     def _test_ssh(self):
-        # SSH 测试: 后台线程跑 ssh(免密/超时), 经信号回主线程更新结果标签。
+        # SSH 测试: 后台线程调 core(免密/超时细节在 dsh_core.env), 信号回主线程更新标签。
         host = self._vars["ssh_server"].text().strip()
         user = self._vars["ssh_user"].text().strip()
         port = self._vars["ssh_port"].text().strip() or "22"
@@ -220,26 +198,13 @@ class ConfigDialog(_DialogBase):
         self._set_test("测试中…", None)
 
         def worker():
-            msg = ""
-            ok = False
-            try:
-                ssh = shutil.which("ssh")
-                if not ssh:
-                    raise FileNotFoundError("ssh 不在 PATH 中")
-                r = subprocess.run(
-                    [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=6",
-                     "-o", "StrictHostKeyChecking=accept-new",
-                     "-p", port, user + "@" + host, "echo ok"],
-                    capture_output=True, text=True, errors="replace", timeout=18,
-                    creationflags=subprocess.CREATE_NO_WINDOW)
-                ok = r.returncode == 0
-                if ok:
-                    msg = "✅ SSH 连接成功, 免密可用"
-                else:
-                    err = (r.stderr or r.stdout or "").strip().replace("\n", " ")[:180]
-                    msg = "❌ 失败 - 检查 IP/用户名/免密配置: " + err
-            except Exception as e:
-                msg = "测试异常: " + str(e)[:140]
+            r = core_env.test_ssh(host, user, port)
+            if r["err"]:
+                msg, ok = "测试异常: " + r["err"], False
+            elif r["ok"]:
+                msg, ok = "✅ SSH 连接成功, 免密可用", True
+            else:
+                msg, ok = "❌ 失败 - 检查 IP/用户名/免密配置: " + r["detail"], False
             self.safe_emit(self._ssh_done, msg, ok)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -394,7 +359,8 @@ class InstallDialog(_DialogBase):
             self._dir.setText(chosen)
 
     def _start(self):
-        # 校验输入后后台线程跑安装(旧 Dashboard._run_install 逻辑搬进向导)。
+        # 校验输入后后台线程跑安装: 业务全在 dsh_core.env.install_dsh(预检/clone/install/
+        # build/写 config), 本线程只把 events 转成对话框信号(step/line), 完成经 _done 收尾。
         url = self._url.text().strip()
         target = self._dir.text().strip()
         if not url:
@@ -407,83 +373,17 @@ class InstallDialog(_DialogBase):
         self._step_lbl.setText("正在安装…")
         self._log.clear()
 
+        def events(kind, payload):
+            if kind == "log":
+                self.safe_emit(self._line, payload)
+            elif kind == "step":
+                self.safe_emit(self._step, payload[0], payload[1])
+
         def worker():
-            # 0) 环境预检
-            need = [t for t in ("git", "node", "npm", "pnpm") if not shutil.which(t)]
-            if need:
-                self.safe_emit(self._line, "[安装] 缺少依赖: " + ", ".join(need))
-                self.safe_emit(self._line, "  请先安装 Node.js(含 npm) 和 git; 然后 npm install -g pnpm")
-                self.safe_emit(self._done, False, "缺少依赖: " + ", ".join(need))
-                return
-            # 1) clone(完整克隆, 便于后续 update 的 git pull)
-            if os.path.isdir(target) and os.listdir(target):
-                self.safe_emit(self._line, "[安装] 目录已存在且有内容, 跳过 clone: " + target)
-            else:
-                self.safe_emit(self._step, 1, "步骤 1/3: git clone ...")
-                ok, err = self._stream_cmd(["git", "clone", url, target])
-                if not ok:
-                    self.safe_emit(self._done, False, "git clone 失败: " + err)
-                    return
-            # 2) install
-            self.safe_emit(self._step, 2, "步骤 2/3: pnpm install")
-            ok, err = self._stream_cmd(["pnpm.cmd", "install"], cwd=target)
-            if not ok:
-                self.safe_emit(self._done, False, "pnpm install 失败: " + err)
-                return
-            # 3) build
-            self.safe_emit(self._step, 3, "步骤 3/3: pnpm run build")
-            ok, err = self._stream_cmd(["pnpm.cmd", "run", "build"], cwd=target)
-            if not ok:
-                self.safe_emit(self._done, False, "pnpm run build 失败: " + err)
-                return
-            # 4) 写 config.dash_repo
-            self.safe_emit(self._step, 4, "写 config.json(dash_repo)")
-            try:
-                cfg = _load_config()
-                cfg["dash_repo"] = target
-                if _save_config(cfg):
-                    self.safe_emit(self._line, "[安装] 已把 dash_repo 写入 config.json, 重启后生效。")
-                else:
-                    self.safe_emit(self._line, "[安装] 无法写 config.json(权限?), 请在配置向导里手动设置 dash_repo。")
-            except Exception as e:
-                self.safe_emit(self._line, "[安装] 写 config 失败: " + str(e))
-            self.safe_emit(self._done, True, "dsh 安装完成 ✓ 目标目录: " + target)
+            r = core_env.install_dsh(events, url, target)
+            self.safe_emit(self._done, not r["err"], r["err"] or r["msg"])
 
         threading.Thread(target=worker, daemon=True).start()
-
-    def _stream_cmd(self, cmd, cwd=None, env=None):
-        # 流式运行命令, 逐行经信号回主线程日志; 返回 (成功, 失败说明)。
-        self.safe_emit(self._line, "  $ " + " ".join(cmd))
-        try:
-            p = subprocess.Popen(
-                cmd, cwd=cwd, env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                encoding="utf-8", errors="replace", bufsize=1, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW)
-        except FileNotFoundError:
-            return False, "找不到命令: " + str(cmd[0] if cmd else "?")
-        deadline = time.time() + _STREAM_TIMEOUT
-        tail = []
-        while True:
-            line = p.stdout.readline() if p.stdout else None
-            if line:
-                text = line.rstrip()
-                self.safe_emit(self._line, text)
-                tail.append(text)
-                if len(tail) > 50:
-                    tail.pop(0)
-                continue
-            if p.poll() is not None:
-                break
-            if time.time() > deadline:
-                p.kill()
-                self.safe_emit(self._line, "[安装] 超时，已强制终止")
-                return False, "超时，已强制终止"
-            time.sleep(0.1)
-        rc = p.wait()
-        if rc != 0:
-            return False, "命令失败 (exit %s)" % rc
-        return True, ""
 
     def _on_step(self, step, text):
         self._bar.setValue(step)
@@ -571,9 +471,15 @@ class EnvDialog(_DialogBase):
         self.app = _resolve_app(app, parent)
         self.setWindowTitle("环境检查")
         self._rows = {}
+        self._cmd_desc = ""
         self._build()
         self._env_done.connect(self._apply)
         self._cmd_result.connect(self._show_cmd_result)
+        # 有主窗口时工具命令走 service.run_cmd(逐行进主日志), finished 回本对话框收尾;
+        # 接收者=本对话框, 关闭时 Qt 自动断开。
+        service = getattr(self.app, "service", None) if self.app is not None else None
+        if service is not None:
+            service.finished.connect(self._on_env_cmd_finished)
         self._refresh()
 
     def _build(self):
@@ -628,21 +534,13 @@ class EnvDialog(_DialogBase):
         self.resize(720, 400)
 
     def _get_version(self, cmd):
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
-                               timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
-            if r.stdout or r.stderr:
-                return (r.stdout or r.stderr or "").strip().splitlines()[0]
-            return None
-        except Exception:
-            return None
+        # 版本探测在 core(env.get_version): 命令缺失/超时返回 None
+        return core_env.get_version(cmd)
 
     def _refresh(self):
-        # 后台线程顺序跑版本命令, 结果经信号回主线程填表。
+        # 后台线程顺序跑版本命令(core), 结果经信号回主线程填表。
         def worker():
-            res = {}
-            for key, _name, cmd in self.TOOLS:
-                res[key] = self._get_version(cmd)
+            res = core_env.tool_versions(self.TOOLS)
             self.safe_emit(self._env_done, res)
         threading.Thread(target=worker, daemon=True).start()
 
@@ -684,40 +582,27 @@ class EnvDialog(_DialogBase):
                 QMessageBox.information(self, label + " " + name, payload)
 
     def _run_cmd(self, cmd, desc):
-        # 后台线程执行: 优先主窗口 _stream_cmd 流式打日志, 否则子进程捕获兜底。
+        # 有主窗口(service 可用): service.run_cmd 流式执行, 逐行进主日志, finished 回本对话框;
+        # 无主界面(独立窗口场景): 对话框线程内 core.run_capture 捕获兜底。
         app = self.app
+        if app is not None and getattr(app, "service", None) is not None:
+            env = core_env.pnpm_env() if cmd and str(cmd[0]).lower().startswith("pnpm") else None
+            self._cmd_desc = desc
+            app.loge("[环境] " + desc + " 开始执行...", "warn")
+            app.service.run_cmd(cmd, env=env, op="env-tool")
+            return
 
         def worker():
-            use_stream = app is not None and hasattr(app, "_stream_cmd") and hasattr(app, "loge")
-            if use_stream:
-                app.loge("[环境] " + desc + " 开始执行...", "warn")
-                try:
-                    env = None
-                    if cmd and str(cmd[0]).lower().startswith("pnpm"):
-                        # pnpm 要求全局 bin 目录在 PATH 中, 自动注入避免报错
-                        env = dict(os.environ)
-                        pnpm_bin = os.path.join(os.environ.get("LOCALAPPDATA", ""), "pnpm", "bin")
-                        if pnpm_bin and pnpm_bin not in env.get("PATH", ""):
-                            env["PATH"] = env.get("PATH", "") + os.pathsep + pnpm_bin
-                    ok = app._stream_cmd(cmd, env=env)
-                    tail = "" if ok else "详见主界面日志区"
-                except Exception as e:
-                    ok = False
-                    tail = "执行异常: " + str(e)
-                self.safe_emit(self._cmd_result, desc, ok, tail)
-            else:
-                # 容错回退: 无主界面时用 subprocess 捕获
-                try:
-                    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
-                                       timeout=600, creationflags=subprocess.CREATE_NO_WINDOW)
-                    tail = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()[-600:]
-                    ok = r.returncode == 0
-                except Exception as e:
-                    ok = False
-                    tail = str(e)
-                self.safe_emit(self._cmd_result, desc, ok, tail)
+            ok, tail = core_env.run_capture(cmd)
+            self.safe_emit(self._cmd_result, desc, ok, tail)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _on_env_cmd_finished(self, op, ok):
+        # service.run_cmd 只发 finished(无 result): 逐行输出已进主日志区, 这里收尾弹窗。
+        if op != "env-tool":
+            return
+        self._show_cmd_result(self._cmd_desc, ok, "详见主界面日志区")
 
     def _show_cmd_result(self, desc, ok, tail):
         body = "已" + ("完成" if ok else "失败")

@@ -5,6 +5,7 @@
 
 import os
 import json
+import shutil
 
 
 def load_config(path=None):
@@ -16,6 +17,21 @@ def load_config(path=None):
             return json.load(f) or {}
     except Exception:
         return {}
+
+
+def save_config(cfg, path=None):
+    # 写回配置(调用方传入合并后的完整 cfg); 写前复制 .bak(AGENTS.md 约定)。
+    # 成功返回 True; OSError(权限/占用)返回 False 由调用方提示。
+    if path is None:
+        path = os.environ.get('DSH_AIO_CONFIG') or _default_config_path()
+    try:
+        if os.path.exists(path):
+            shutil.copy2(path, path + ".bak")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        return True
+    except OSError:
+        return False
 
 
 def _default_config_path():
@@ -62,4 +78,4 @@ def load_derived(path=None, allow_empty_ports=False):
     return derived(load_config(path), allow_empty_ports=allow_empty_ports)
 
 
-__all__ = ['load_config', 'load_derived', 'derived']
+__all__ = ['load_config', 'save_config', 'load_derived', 'derived']
