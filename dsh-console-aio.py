@@ -825,11 +825,14 @@ class TunnelsPage(BasePage):
 
         head = QHBoxLayout()
         title = QLabel(item.get("title") or item["key"], objectName="cardTitle")
-        dot = QLabel("○", objectName="monDot")
-        dot.setStyleSheet("color:#999; font-size:15px;")
         head.addWidget(title)
         head.addStretch(1)
-        head.addWidget(dot)
+        # 状态圆点只对可探测的卡片显示(update-dsh 是纯动作卡, 无在线状态)
+        dot = None
+        if item.get("port", -1) >= 0:
+            dot = QLabel("○", objectName="monDot")
+            dot.setStyleSheet("color:#999; font-size:15px;")
+            head.addWidget(dot)
         lv.addLayout(head)
 
         desc = QLabel(item["desc"], objectName="cardHint")
@@ -848,10 +851,10 @@ class TunnelsPage(BasePage):
         return card
 
     def _set_card(self, key, on, label=None):
-        dot = self._cards.get(key)
-        if dot is None:
+        entry = self._cards.get(key)
+        if entry is None or entry[0] is None:
             return
-        d, item = dot
+        d, item = entry
         d.setText("●" if on else "○")
         d.setStyleSheet("color:#7ecb6a; font-size:15px;" if on else "color:#999; font-size:15px;")
 
