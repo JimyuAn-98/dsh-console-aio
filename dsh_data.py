@@ -4,6 +4,7 @@
 # 接口文档见 docs/ARCHITECTURE.md。
 
 import os
+import sys
 import io
 import json
 import zipfile
@@ -132,7 +133,7 @@ def _parse_yaml_block(lines, idx, indent):
                     sub, idx = _parse_yaml_block(lines, idx, nlead)
                     if isinstance(sub, dict):
                         item.update(sub)
-                    break
+                    # 继续循环: 同级字段(如 description:)尚未处理, 不 break
                 out.append(item)
             else:
                 out.append(_parse_scalar(rest))
@@ -569,9 +570,22 @@ def list_agent_presets(remote=None):
         out.append(info)
     return out
 
+def _config_path():
+    # config.json 路径: 优先级 DSH_AIO_CONFIG(测试隔离用) > frozen(exe)exe 目录 > 源码 __file__ 目录。
+    # 与主程序 dsh-console-aio.py 的 BASE_DIR / DSH_AIO_CONFIG 逻辑保持一致。
+    override = os.environ.get('DSH_AIO_CONFIG')
+    if override:
+        return override
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, 'config.json')
+
+
 def load_deployments():
     # 部署清单: config.json 的 deployments 数组(gitignored, 含主机信息)
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    p = _config_path()
     try:
         with io.open(p, encoding='utf-8', errors='replace') as fh:
             d = json.load(fh)
@@ -583,7 +597,7 @@ def load_deployments():
 
 def save_deployments(deployments):
     # 写回 config.json 的 deployments(保留其他字段, 写前备份)
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+    p = _config_path()
     backup_file(p)
     try:
         with io.open(p, encoding='utf-8', errors='replace') as fh:

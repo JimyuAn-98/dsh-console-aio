@@ -1,12 +1,41 @@
 @echo off
 rem ---- Build dsh-console-aio: onefile exe (PyInstaller) + setup.exe (Inno Setup) ----
-rem Prereq: pip install pyinstaller pyside6 ; Inno Setup 6 installed (ISCC in PATH or default dir)
+rem Prereq: conda env 'console' (python 3.12.9, pyside6 installed) + Inno Setup 6 (ISCC).
 rem PySide6 的 Qt 库由 PyInstaller hooks 自动收集; 此处仅显式添加 QSS 主题资源。
+
+rem ---- conda 完整路径(不依赖 PATH; 直接调 conda.exe run 拿 console 环境 python, 无需 PowerShell) ----
+if not defined CONDA_EXE set "CONDA_EXE=C:\ProgramData\miniconda3\Scripts\conda.exe"
+
+rem ---- 优先用环境变量 PYTHON_EXE; 否则从 conda 的 console 环境解析 python ----
+if defined PYTHON_EXE goto :have_python
+if not exist "%CONDA_EXE%" (
+    echo [ERROR] conda.exe not found: "%CONDA_EXE%"
+    echo         Set CONDA_EXE or PYTHON_EXE, or install Miniconda.
+    pause & exit /b 1
+)
+echo [0/2] Resolving console env python (conda run)...
+set "PYFILE=%TEMP%\dsh_console_python.txt"
+del "%PYFILE%" >nul 2>nul
+"%CONDA_EXE%" run -n console python -c "import sys;print(sys.executable)" > "%PYFILE%" 2>nul
+if not exist "%PYFILE%" (
+    echo [ERROR] conda run failed to resolve console env python.
+    pause & exit /b 1
+)
+set /p PYTHON_EXE=<"%PYFILE%"
+del "%PYFILE%" >nul 2>nul
+:have_python
+if not exist "%PYTHON_EXE%" (
+    echo [ERROR] Python not found: "%PYTHON_EXE%"
+    echo         Ensure conda env 'console' exists (python 3.12.9) or set PYTHON_EXE.
+    pause & exit /b 1
+)
+echo Python: "%PYTHON_EXE%"
+
 setlocal
 cd /d "%~dp0"
 
 echo [1/2] PyInstaller onefile build (PySide6)...
-python -m PyInstaller --noconfirm --clean --onefile --windowed ^
+"%PYTHON_EXE%" -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name dsh-console-aio ^
   --hidden-import dsh_data --hidden-import tunnel_mgr ^
   --hidden-import pyside.dialogs ^

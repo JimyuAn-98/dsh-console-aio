@@ -42,8 +42,9 @@ def _write_pids(base_dir, pids):
     try:
         with open(_pid_path(base_dir), "w", encoding="utf-8") as f:
             json.dump(pids, f, indent=2)
+        return True
     except OSError:
-        pass
+        return False
 
 
 def tcp_ok(host, port, timeout=0.8):
@@ -59,12 +60,23 @@ def tcp_ok(host, port, timeout=0.8):
 
 
 def _pid_alive(pid):
+    # 优先 os.kill(pid, 0): 跨平台且不依赖 tasklist 输出格式;
+    # 仅当 os.kill 不可用(理论上 Windows + Python 3 都支持)时回退 tasklist。
+    pid = int(pid)
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+    except Exception:
+        pass
+    # 回退: tasklist 按 PID 过滤(输出格式可能因语言/版本不同而匹配失败)
     try:
         out = subprocess.run(
-            ["tasklist", "/FI", "PID eq %d" % int(pid)],
+            ["tasklist", "/FI", "PID eq %d" % pid],
             capture_output=True, text=True, errors="replace",
             timeout=10, creationflags=NO_WINDOW).stdout
-        return ("%d" % int(pid)) in out
+        return ("%d" % pid) in out
     except Exception:
         return False
 
@@ -167,7 +179,8 @@ class Tunnel:
                           "mode": self.mode, "host": self.host,
                           "user": self.user, "forwards": list(self.forwards),
                           "watch": self.watch_port}
-        _write_pids(self.base_dir, pids)
+        if not _write_pids(self.base_dir, pids):
+            self._log("警告: PID 文件写入失败(隧道仍在运行, 但重启后可能无法自动恢复)", "warn")
         self._log("已启动（PID %d），等待端口就绪…" % self.proc.pid, "ok")
         return True
 
@@ -189,7 +202,8 @@ class Tunnel:
                 self._log("已停止 PID %d" % pid, "ok")
                 killed += 1
             pids.pop(self.key, None)
-            _write_pids(self.base_dir, pids)
+            if not _write_pids(self.base_dir, pids):
+                self._log("警告: PID 文件更新失败", "warn")
         sig, _ = self.callsig()
         killed += _kill_by_cmdline(sig)
         if not killed:
