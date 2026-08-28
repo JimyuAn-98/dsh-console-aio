@@ -10,6 +10,9 @@
 #   - DSH_HOME 指向假目录, 数据页读假数据。
 #   - 拦截 MainWindow._start_monitor(真实健康监控线程)与 _stream_cmd(真实子进程)。
 #   - --smoke 模式: OverviewPage/总览等不做真联网/真操作。
+#   - 硬拦截 threading.Thread.start(main_win 存续期间): 任何后台线程都不真正运行,
+#     线程对象只被登记进 _BLOCKED_THREADS, 目标函数绝不执行 —— 即使上述拦截有遗漏,
+#     页面构造器起的 daemon 线程也探测不到真实端口(如 3080)。
 #
 # 关于模块引用: 真实源文件是 dsh-console-aio.py(文件名带连字符, 不能直接 import),
 # 因此本文件用 console fixture(在假环境下通过 importlib 动态加载)拿主程序模块对象,
@@ -22,6 +25,7 @@
 import os
 import sys
 import importlib
+import threading
 
 import pytest
 
@@ -30,6 +34,9 @@ from fake_env import default_env
 pytest.importorskip("PySide6")
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 被拦截(未真正启动)的线程对象登记处: 哨兵测试据此断言线程拦截生效
+_BLOCKED_THREADS = []
 
 
 def _import_console():
@@ -77,12 +84,23 @@ def main_win(qapp_mod, console):
     _orig_stream = console.MainWindow._stream_cmd
     console.MainWindow._start_monitor = lambda self: None
     console.MainWindow._stream_cmd = lambda self, cmd, cwd=None, env=None: True
+    # 第 5 道隔离: 硬拦截 Thread.start 作为兜底 —— 即使上面两处拦截漏了某个入口,
+    # 页面构造器起的 daemon 线程也只是被登记, 线程目标函数绝不执行, 不可能探测真实端口。
+    _orig_thread_start = threading.Thread.start
+
+    def _blocked_start(self, *args, **kwargs):
+        # 只登记线程对象即返回, 不真正创建 OS 线程
+        _BLOCKED_THREADS.append(self)
+
+    threading.Thread.start = _blocked_start
     try:
         win = console.MainWindow(smoke=True)
         yield win
         win.close()
         qapp_mod.processEvents()
     finally:
+        # 三道拦截全部恢复, 缺一个都会把假环境泄漏到 fixture 之外的代码
+        threading.Thread.start = _orig_thread_start
         console.MainWindow._start_monitor = _orig_monitor
         console.MainWindow._stream_cmd = _orig_stream
 
@@ -314,3 +332,16 @@ class TestWindowSize:
     def test_minimum(self, main_win):
         assert main_win.minimumWidth() >= 960
         assert main_win.minimumHeight() >= 620
+
+
+class TestThreadInterception:
+    # 第 5 道隔离的哨兵: main_win 存续期间 threading.Thread.start 被硬拦截
+    def test_thread_start_blocked(self, main_win):
+        # 确定性断言: start() 只登记不调度, 目标函数绝不执行, 不依赖线程时序。
+        # 依赖 main_win 是刻意的 —— 拦截窗口随该 fixture 装卸, 不请求它则哨兵无效。
+        hit = []
+        before = len(_BLOCKED_THREADS)
+        t = threading.Thread(target=lambda: hit.append(1), daemon=True)
+        t.start()
+        assert hit == []
+        assert len(_BLOCKED_THREADS) == before + 1
