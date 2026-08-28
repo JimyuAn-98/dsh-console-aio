@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-# 会话与工作区管理页(PySide6 迁移版) - 范式样板。
-# 只读 dsh_data.read_workspace()/list_sessions(); 归档只写 workspace.json(先 .bak 备份)。
-# 后台线程读数据 -> Qt Signal 回主线程更新表格, 不直接改 UI(线程安全)。
+# 会话与工作区管理页(UI 层): 只做展示/确认框/busy 管理, 写业务在 dsh_core/sessions.py(纯 Python)。
+# 归档/恢复与删除分组经 app.services 信号桥后台执行: set_sessions_archived(ids) /
+# delete_session_group(workdir) -> result(op, payload) + finished(op, ok) 回页面槽;
+# 接收者是页面自身, 页面销毁 Qt 自动断开。log/status 不在页面 connect —— 主窗口级已 connect
+# 一次(勿叠加)。写盘路径校验与 rmtree 全部在 core(防线), 页面确认框只是交互前置。
+# 刷新读取保留页面内后台线程 + safe_emit(纯读过渡态; 阶段4 收敛 dsh_data 后统一走 service)。
+# 远程只读红线(本页关键约束): self._remote 非 None(远程部署)时归档/恢复/删除分组一律拒绝 ——
+# 读取走远程、写入却落本机 workspace.json/本机 sessions 目录是语义错误, 必须封死。
 
-import os
-import shutil
 import threading
 import time
 
@@ -30,25 +33,16 @@ def _fmt_time(ts):
     try:
         return time.strftime("%Y-%m-%d %H:%M", time.localtime(float(ts)))
     except Exception:
+        # 时间展示失败只影响该单元格, 显示占位符即可
         return "-"
 
 
-def _workspace_path():
-    return os.path.join(dsh_data.dsh_home(), "storages", "workspace.json")
-
-
-def _write_workspace_archived(session_ids):
-    p = _workspace_path()
-    dsh_data.backup_file(p)
-    ws = dsh_data.read_workspace()
-    ws["archivedSessionIds"] = list(session_ids)
-    dsh_data.write_workspace(ws)
+_REMOTE_READONLY_MSG = "远程部署下暂不支持写操作（远程只读），请切换回本机部署"
 
 
 class SessionPage(BasePage):
-    # 会话与工作区管理: BasePage 范式, app 为 MainWindow。
-    _data = Signal(object, object, str)     # (ws, groups, err)
-    _write_done = Signal(str, str)          # (msg, err)
+    # 会话与工作区管理: BasePage 范式, app 为 MainWindow; 写操作经 service 信号桥。
+    _data = Signal(object, object, str)     # (ws, groups, err) 刷新读取(页面内后台线程)
 
     def __init__(self, app, parent=None):
         self._remote = None
@@ -59,9 +53,11 @@ class SessionPage(BasePage):
         self._archived = set()
         self._sel_group = None
         self._last_op_msg = None
+        self._pending = None   # 正在等待的 service op: "sessions-archive" / "sessions-delete"
         super().__init__(app, parent)
         self._data.connect(self._apply_data)
-        self._write_done.connect(self._after_write)
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._refresh()
 
     def _build(self):
@@ -113,33 +109,22 @@ class SessionPage(BasePage):
         self._status_lbl = QLabel("就绪", objectName="statusBar")
         root.addWidget(self._status_lbl)
 
-    def _make_table(self, headers, anchors, widths, stretch_col):
-        t = QTableWidget(0, len(headers))
-        t.setHorizontalHeaderLabels(headers)
-        t.verticalHeader().setVisible(False)
-        t.setSelectionBehavior(QTableWidget.SelectRows)
-        t.setEditTriggers(QTableWidget.NoEditTriggers)
-        hh = t.horizontalHeader()
-        for i, (a, wd) in enumerate(zip(anchors, widths)):
-            hh.setSectionResizeMode(i, QHeaderView.ResizeToContents if i != stretch_col
-                                    else QHeaderView.Stretch)
-            t.setColumnWidth(i, wd)
-            if a == "e":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            elif a == "center":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignCenter)
-        t.setSelectionMode(QTableWidget.SingleSelection)
-        return t
+    # ---- service 信号槽(接收者=本页, 销毁自动断开) ----
+    def _on_result(self, op, payload):
+        # result(op, payload) 按 op 分派; 其他页面的 op 直接忽略。
+        if op == "sessions-archive":
+            self._after_op(payload)
+        elif op == "sessions-delete":
+            self._after_op(payload)
 
-    def _wrap_table(self, caption, table):
-        card = QFrame(objectName="card")
-        v = QVBoxLayout(card)
-        v.setContentsMargins(10, 8, 10, 8)
-        cap = QLabel(caption, objectName="rightTitle")
-        v.addWidget(cap)
-        v.addWidget(table)
-        return card
+    def _on_finished(self, op, ok):
+        # 兜底: _run_result_op 契约保证 result+finished 成对到达, 正常路径 result 槽
+        # 已收尾; 若 result 槽漏执行导致 busy 悬挂, 在这里解除按钮禁用。
+        if op == self._pending:
+            self._pending = None
+            self._set_btns(True)
 
+    # ---- 刷新(纯读, 页面内后台线程 + safe_emit) ----
     def _refresh(self):
         self._set_status("正在读取会话数据...")
         self._set_btns(False)
@@ -219,7 +204,11 @@ class SessionPage(BasePage):
                 for c in range(4):
                     self._detail_tree.item(r, c).setForeground(Qt.gray)
 
+    # ---- 归档/恢复(危险操作, 先确认; 远程只读红线) ----
     def _toggle_archive(self):
+        if self._remote is not None:
+            QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
+            return
         row = self._current_detail_row()
         if row is None:
             self._set_status("请先在右侧选择要归档/恢复的会话")
@@ -231,25 +220,22 @@ class SessionPage(BasePage):
             else ("确定归档会话\"%s\"？(写入 workspace.json, 数据保留)" % name)
         if QMessageBox.question(self, act + "会话", msg) != QMessageBox.Yes:
             return
+        new_arch = set(self._archived)
+        if was_archived:
+            new_arch.discard(name)
+        else:
+            new_arch.add(name)
+        self._pending = "sessions-archive"
+        self._set_status("正在写入归档状态...")
         self._set_btns(False)
+        # core 整体替换 archivedSessionIds(先 .bak 备份), 结果经 result 信号回 _after_op。
+        self.app.service.set_sessions_archived(sorted(new_arch))
 
-        def worker():
-            err = None
-            try:
-                new_arch = set(self._archived)
-                if was_archived:
-                    new_arch.discard(name)
-                else:
-                    new_arch.add(name)
-                _write_workspace_archived(sorted(new_arch))
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._write_done, ("已恢复会话: %s" % name) if was_archived
-                                  else ("已归档会话: %s" % name), err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
+    # ---- 删除分组(危险操作, 两次确认; 校验与 rmtree 在 core) ----
     def _delete_group(self):
+        if self._remote is not None:
+            QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
+            return
         rows = self._group_tree.selectionModel().selectedRows()
         if not rows:
             self._set_status("请先选择要删除的会话分组")
@@ -257,34 +243,23 @@ class SessionPage(BasePage):
         workdir = self._group_tree.item(rows[0].row(), 0).text()
         g = self._group_map.get(workdir)
         n = g.get("count") if g else 0
-        base = os.path.normpath(dsh_data.sessions_dir())
-        target = os.path.normpath(os.path.join(base, workdir))
-        try:
-            inside = os.path.commonpath([base, target]) == base
-        except ValueError:
-            inside = False
-        if not inside or target == base or not os.path.isdir(target):
-            QMessageBox.warning(self, "无法删除", "分组目录不存在或路径异常，已取消删除。")
-            return
         if QMessageBox.question(self, "删除分组", "确定删除整个会话分组\"%s\"？" % workdir) != QMessageBox.Yes:
             return
         if QMessageBox.question(self, "二次确认", "将删除 %d 个会话, 不可恢复! 是否继续?" % n) != QMessageBox.Yes:
             return
+        self._pending = "sessions-delete"
+        self._set_status("正在删除分组...")
         self._set_btns(False)
+        # 越界/不存在由 core 中文拒绝并经 result 信号回 _after_op, 绝不 rmtree base 外路径。
+        self.app.service.delete_session_group(workdir)
 
-        def worker():
-            err = None
-            try:
-                shutil.rmtree(target)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._write_done, "已删除分组: %s" % workdir, err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _after_write(self, msg, err):
-        self._set_btns(True)
+    def _after_op(self, payload):
+        # 写操作结果统一收尾: payload 至少含 "err"(成功为空字符串), "msg" 为成功文案。
+        msg = payload.get("msg", "")
+        err = payload.get("err", "")
+        self._pending = None
         if err:
+            self._set_btns(True)
             self._set_status("操作失败: " + err)
             return
         self.app.loge("[会话管理] " + msg, "ok")
@@ -296,6 +271,33 @@ class SessionPage(BasePage):
         if not rows:
             return None
         return rows[0].row()
+
+    def _make_table(self, headers, anchors, widths, stretch_col):
+        t = QTableWidget(0, len(headers))
+        t.setHorizontalHeaderLabels(headers)
+        t.verticalHeader().setVisible(False)
+        t.setSelectionBehavior(QTableWidget.SelectRows)
+        t.setEditTriggers(QTableWidget.NoEditTriggers)
+        hh = t.horizontalHeader()
+        for i, (a, wd) in enumerate(zip(anchors, widths)):
+            hh.setSectionResizeMode(i, QHeaderView.ResizeToContents if i != stretch_col
+                                    else QHeaderView.Stretch)
+            t.setColumnWidth(i, wd)
+            if a == "e":
+                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            elif a == "center":
+                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignCenter)
+        t.setSelectionMode(QTableWidget.SingleSelection)
+        return t
+
+    def _wrap_table(self, caption, table):
+        card = QFrame(objectName="card")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(10, 8, 10, 8)
+        cap = QLabel(caption, objectName="rightTitle")
+        v.addWidget(cap)
+        v.addWidget(table)
+        return card
 
     def _set_btns(self, on):
         for b in (self._btn_refresh, self._btn_archive, self._btn_delete):
