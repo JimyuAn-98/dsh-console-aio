@@ -43,6 +43,13 @@
 - **阶段3：对话框子进程业务下沉 `dsh_core/env.py`**：SSH 免密测试、工具版本探测、dsh 一键安装流（预检→clone→install→build→写 config）、pnpm PATH 注入；**三份重复的 `_stream_cmd` 实现归一为 `dshctl.stream_cmd` 一份**；`dsh_core/config` 新增 `save_config`（DSH_AIO_CONFIG 感知 + 写前 .bak）；无主窗口的独立对话框场景保留捕获式兜底
 - 新增 44 例纯单元（plugins 13 / deployments 9 / env 22），业务层累计 290 例全绿
 
+### UI 前后端分层阶段4（数据层归并 + 纯读页统一，重构全部完成）
+
+- **数据层归并**：`dsh_data.py` 整体并入 `dsh_core/data.py`（git mv 保历史），仓库根保留兼容 shim（旧 import 路径不变，`DEFAULT_PRICES` 原地修改跨命名空间等价）
+- **services 新增 `_run_core_op` 通用模板**：纯数据函数统一包装为 `result(op, {"data", "err"})`；新增 list_agent_presets / read_taskboard / read_usage_stats / read_settings / write_settings 五个触发方法
+- **四个纯读页统一走 service**：Agent 模式 / 任务看板 / 模型用量 / LLM 配置的读取与 LLM 保存全部经信号桥；页面不再自起读取线程、不再直接引用数据层
+- **分层重构主体完成**：dsh_core 12 个模块纯 Python 零 Qt、UI 层零子进程业务、后端→UI 全部 Qt 信号-槽，纯单元 294 例全绿
+
 ## v0.4.0 (未发布)
 
 

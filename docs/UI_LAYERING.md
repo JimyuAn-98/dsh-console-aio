@@ -90,6 +90,17 @@
         子进程业务(纯读线程与对话框 events 转发线程除外, 阶段4 收敛)。
         **[剩余 = 阶段4]**: dsh_data.py 归并进 dsh_core(config/ssh/data/stats),
         页面纯读统一经 service; 波5 纯读页(agents/taskboard/usage/llm)随阶段4。
+        **[阶段4 已完成 2026-08-29 — 分层重构全部完成]**:
+        - dsh_data.py 整体归并 dsh_core/data.py(git mv 保历史), 仓库根保留兼容 shim
+          (显式 re-export 含测试引用的私有助手; DEFAULT_PRICES 原地修改跨命名空间等价共享)。
+        - services 新增 _run_core_op(纯数据函数包装 {"data","err"}; 与 _run_result_op 的
+          events 域函数约定不同, 曾因此产生 TypeError 被纯单测拦截) + 五个纯读/轻写方法
+          (list_agent_presets/read_taskboard/read_usage_stats/read_settings/write_settings)。
+        - agents/taskboard/usage/llm 四页读取与 llm 保存全部走 service; 页面零自起线程、
+          零 dsh_data 引用(agents 详情为本机小文件同步直读)。
+        - 兼容路径: OverviewPage/主窗口/部分测试仍经 dsh_data shim 读小数据, 功能不变。
+        最终形态: dsh_core 12 个模块(含 data)纯 Python 零 Qt; pyside/ UI 层零子进程业务;
+        后端->UI 全部 Qt 信号-槽; 纯单元 294 例。
 - 阶段3: dialogs.py 评估是否抽业务(动态表单类可能保留一部分)
 - 阶段4: 收敛 dsh_data.py 到 dsh_core/(config/ssh/data/stats), 页面统一经 service 访问。
 - 每阶段: 业务层可加纯单元测试(不构造 MainWindow, 安全); GUI 交互验证由人工执行。

@@ -98,3 +98,12 @@ pages_* 直接 import subprocess 干业务), 业务不可独立测试、与 UI �
   dsh_core 11 个模块(config/dshctl/tunnels/version/keys/ops/profiles/sessions/env/
   plugins/deployments)全部纯 Python 零 Qt, 纯单元 290 例。剩余=阶段4(dsh_data 归并
   进 dsh_core + 四个纯读页统一经 service)。
+- **阶段4(2026-08-29, 重构全部完成)**: dsh_data.py 整体归并 dsh_core/data.py(git mv
+  保历史), 仓库根 shim 显式 re-export(含测试引用的私有助手; **教训**: `import *` 不带
+  下划线名, tests/test_dsh_data 引用的 YAML/SSH 助手必须显式列出; 部署测试覆盖
+  `__file__` 定位 config 的 mock 目标也要跟着搬到 dsh_core.data)。services 新增
+  _run_core_op(纯数据函数包装 {data, err}) —— **教训**: 它照搬 _run_result_op 的
+  func(ev,...) 约定, 而 dsh_data 纯函数第一参数是 remote 不是 events, 运行时会全员
+  TypeError; 纯单测在进 GUI 前拦截。四纯读页(agents/taskboard/usage/llm)统一走
+  service; agents 详情改本机小文件同步直读(丢弃过期回包判定的复杂度)。
+  最终形态: dsh_core 12 模块纯 Python 零 Qt, UI 层零子进程业务, 纯单元 294 例。
