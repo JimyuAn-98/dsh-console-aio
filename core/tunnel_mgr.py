@@ -60,9 +60,11 @@ def tcp_ok(host, port, timeout=0.8):
 
 
 def _pid_alive(pid):
-    # Windows 进程存在性检查。⚠ 不用 os.kill(pid, 0): 在宿主 harness 的工具调用进程树里
-    # 执行它会触发 harness 子进程管理异常(实测 web 宿主被杀, 2026-08-29 排查结论),
-    # 改用 tasklist CSV 按 PID 精确匹配, 纯子进程无系统调用副作用。
+    # Windows 进程存在性检查。⚠ 严禁 os.kill(pid, 0): Windows 上 signal 0 == CTRL_C_EVENT,
+    # os.kill(pid, 0) 实际是"向共享控制台发 Ctrl+C"(非 Unix 的杀 0 探活语义)。在宿主 harness
+    # 的伪控制台里执行会把 Ctrl+C 传导给宿主 web(实测 3080 宿主被 SIGINT 优雅退出, 2026-08-29
+    # 排查实锤: WMI 无控制台进程调用抛 WinError 87, 控制台内调用则传播 Ctrl+C)。
+    # 改用 tasklist CSV 按 PID 精确匹配, 纯子进程零信号副作用。
     pid = int(pid)
     try:
         out = subprocess.run(
