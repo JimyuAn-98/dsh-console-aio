@@ -1,0 +1,308 @@
+# -*- coding: utf-8 -*-
+# test_gui_ui.py - 纯 GUI 元素/事件/数据流测试(完全离屏, 零真实资源)。
+#
+# 目标: 不打开真实 GUI、不连真实 SSH/端口/进程、不启停 dsh, 就能验证 GUI 元素及其
+#       对应功能(页面构造/导航/按钮接线/日志桥/右栏状态/对话框字段)是否生效。
+#
+# 隔离手段:
+#   - DSH_AIO_CONFIG 指向假 config.json(占位符, 无真实服务器/IP);
+#     主程序 CONFIG 与 dsh_data.load_deployments 全部读假配置。
+#   - DSH_HOME 指向假目录, 数据页读假数据。
+#   - 拦截 MainWindow._start_monitor(真实健康监控线程)与 _stream_cmd(真实子进程)。
+#   - --smoke 模式: OverviewPage/总览等不做真联网/真操作。
+#
+# 本文件属于"纯 UI 层"(默认运行, 安全); 真实隧道启停/SSH/端口连通测试留给人工(-m gui)。
+
+import os
+import sys
+import importlib
+import importlib.util
+
+import pytest
+
+from fake_env import default_env
+
+pytest.importorskip("PySide6")
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _import_console():
+    # 动态导入 dsh-console-aio.py(文件名含连字符, 不能直接 import)
+    # 需在 DSH_AIO_CONFIG/DSH_HOME 设好后调用, 否则主程序会读真实 config.json。
+    main_path = os.path.join(ROOT_DIR, "dsh-console-aio.py")
+    name = "dsh_console_aio"
+    spec = importlib.util.spec_from_file_location(name, main_path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.fixture(scope="module")
+def qapp_mod():
+    # module-scoped QApplication(离屏)
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
+
+
+@pytest.fixture(scope="module")
+def ui_env(tmp_path_factory):
+    # 构造假 config + 假 DSH_HOME, 设好 DSH_AIO_CONFIG/DSH_HOME
+    root = tmp_path_factory.mktemp("gui-ui")
+    cfg_file, fake_home, restore = default_env(root)
+    yield cfg_file, fake_home
+    restore()
+
+
+@pytest.fixture(scope="module")
+def console(ui_env, qapp_mod):
+    # 在假环境下导入主程序(仅一次)
+    return _import_console()
+
+
+@pytest.fixture(scope="module")
+def main_win(qapp_mod, console):
+    # 离屏构造 MainWindow(smoke=True), 拦截真实副作用
+    _orig_monitor = console.MainWindow._start_monitor
+    _orig_stream = console.MainWindow._stream_cmd
+    console.MainWindow._start_monitor = lambda self: None
+    console.MainWindow._stream_cmd = lambda self, cmd, cwd=None, env=None: True
+    try:
+        win = console.MainWindow(smoke=True)
+        yield win
+        win.close()
+        qapp_mod.processEvents()
+    finally:
+        console.MainWindow._start_monitor = _orig_monitor
+        console.MainWindow._stream_cmd = _orig_stream
+
+
+class TestWindowConstruction:
+    # 窗口基础构造(假配置)
+    def test_title(self, main_win):
+        assert main_win.windowTitle().startswith("dsh 控制台")
+
+    def test_nav_count(self, main_win):
+        from dsh_console_aio import NAV_ITEMS
+        assert main_win.nav.count() == len(NAV_ITEMS) > 0
+
+    def test_deploy_combo_default_local(self, main_win):
+        assert main_win.deploy.currentText() == "本机"
+        assert main_win._current_deploy is None
+
+    def test_stack_initial_overview(self, main_win):
+        from dsh_console_aio import OverviewPage
+        assert isinstance(main_win.stack.currentWidget(), OverviewPage)
+
+    def test_bridge_attached(self, main_win):
+        assert main_win.bridge._view is not None
+
+    def test_smoke_flag(self, main_win):
+        assert main_win.smoke is True
+
+
+class TestNavToPages:
+    # 每个导航项都能映射到页面(不崩溃)
+    PAGES = ["overview", "tunnels", "sessions", "agents", "profiles",
+             "plugins", "taskboard", "usage", "llm", "ops",
+             "keys", "version", "deployments"]
+
+    @pytest.mark.parametrize("key", PAGES)
+    def test_show_page(self, main_win, qapp_mod, key):
+        main_win._show_page(key)
+        qapp_mod.processEvents()
+        assert main_win.stack.currentWidget() is not None
+
+    def test_page_types(self, main_win, qapp_mod):
+        import dsh_console_aio as C
+        from pyside.pages_sessions import SessionPage
+        from pyside.pages_deployments import DeploymentPage
+        from pyside.pages_version import VersionPage
+        expect = {"overview": C.OverviewPage, "tunnels": C.TunnelsPage,
+                  "sessions": SessionPage, "deployments": DeploymentPage,
+                  "version": VersionPage}
+        for key, cls in expect.items():
+            main_win._show_page(key)
+            qapp_mod.processEvents()
+            assert isinstance(main_win.stack.currentWidget(), cls), key
+
+
+class TestNavMappingAll:
+    # NAV_ITEMS 全部 key 都能生成页面
+    def test_all_keys(self, main_win, qapp_mod):
+        from dsh_console_aio import NAV_ITEMS
+        for label, key in NAV_ITEMS:
+            main_win._show_page(key)
+            qapp_mod.processEvents()
+            assert main_win.stack.currentWidget() is not None, "%s(%s)" % (label, key)
+
+
+class TestLogBridge:
+    # 线程安全日志桥: emit 应出现在日志区
+    def test_emit_ok(self, main_win, qapp_mod):
+        main_win.bridge.emit("ui unit log", "ok")
+        qapp_mod.processEvents()
+        assert "ui unit log" in main_win.log_view.toPlainText()
+
+    def test_emit_err(self, main_win, qapp_mod):
+        main_win.bridge.emit("ui err log", "err")
+        qapp_mod.processEvents()
+        assert "ui err log" in main_win.log_view.toPlainText()
+
+    def test_loge_status(self, main_win, qapp_mod):
+        main_win.loge("ui status")
+        qapp_mod.processEvents()
+        assert main_win.status.text() == "ui status"
+
+
+class TestRightBar:
+    # 右栏状态单元格更新(仅 UI 状态, 不真探测端口)
+    def test_right_bar_exists(self, main_win):
+        assert main_win.right is not None
+
+    def test_set_state_existing(self, main_win, qapp_mod):
+        if main_win.right._cells:
+            key = list(main_win.right._cells.keys())[0]
+            main_win.right.set_state(key, True, 42)
+            qapp_mod.processEvents()
+            main_win.right.set_state(key, False, -1)
+            qapp_mod.processEvents()
+
+    def test_set_state_missing(self, main_win, qapp_mod):
+        main_win.right.set_state("NONEXISTENT", True, 100)
+        qapp_mod.processEvents()
+
+
+class TestTunnelsPage:
+    # 隧道页卡片构造 + 动作按钮接线(不点真实启停)
+    def test_cards_built(self, main_win, qapp_mod):
+        import dsh_console_aio as C
+        main_win._show_page("tunnels")
+        qapp_mod.processEvents()
+        page = main_win.stack.currentWidget()
+        assert isinstance(page, C.TunnelsPage)
+        cards = set(page._cards.keys())
+        items = set(i["key"] for i in C.ITEMS)
+        assert cards == items
+
+    def test_action_buttons_wired(self, main_win, qapp_mod):
+        # 每个 ITEM 的动作按钮都存在且 wired 到处理函数(不点击 -> 不触发真实操作)
+        import dsh_console_aio as C
+        main_win._show_page("tunnels")
+        qapp_mod.processEvents()
+        page = main_win.stack.currentWidget()
+        assert page._on_action is not None
+        assert page._run_python_tunnel is not None
+        assert hasattr(page, "_stop_py_tunnel")
+
+
+class TestOverviewPage:
+    # 总览页在 smoke 模式显示演示/未配置文案
+    def test_smoke_shows_demo(self, main_win, qapp_mod):
+        import dsh_console_aio as C
+        main_win._show_page("overview")
+        qapp_mod.processEvents()
+        page = main_win.stack.currentWidget()
+        assert isinstance(page, C.OverviewPage)
+        text = page.dep_status.text()
+        assert ("演示" in text) or ("未配置" in text)
+
+    def test_refresh_smoke_noop(self, main_win, qapp_mod):
+        main_win._show_page("overview")
+        main_win.stack.currentWidget().refresh()
+        qapp_mod.processEvents()
+
+
+class TestForceRefresh:
+    # 立即刷新(overview)不崩溃
+    def test_force_refresh(self, main_win, qapp_mod):
+        main_win._force_refresh()
+        qapp_mod.processEvents()
+
+
+class TestDeploySwitch:
+    # 部署切换不崩溃
+    def test_switch_local(self, main_win, qapp_mod):
+        main_win._on_deploy_changed(0)
+        qapp_mod.processEvents()
+        assert main_win._current_deploy is None
+
+    def test_deploy_rebuilds_page(self, main_win, qapp_mod):
+        main_win._show_page("sessions")
+        qapp_mod.processEvents()
+        main_win._on_deploy_changed(0)
+        qapp_mod.processEvents()
+        assert main_win.stack.currentWidget() is not None
+
+
+class TestLayoutFacts:
+    # GUI 事实布局断言: 真实控件是否存在/层级/文字/尺寸(离屏下控件是真实构造的)。
+    def _topbar(self, main_win):
+        from PySide6.QtWidgets import QFrame
+        bar = main_win.findChild(QFrame, "topbar")
+        assert bar is not None, "topbar frame missing"
+        return bar
+
+    def test_topbar_buttons_exist(self, main_win):
+        # 顶部栏应含 标题/版本/部署下拉 + 配置/环境/安装/立即刷新 4 个入口按钮
+        from PySide6.QtWidgets import QPushButton
+        bar = self._topbar(main_win)
+        btns = [b.text() for b in bar.findChildren(QPushButton)]
+        assert set(btns) >= {"配置", "环境", "安装", "立即刷新"}, btns
+        # 部署下拉存在且默认"本机"
+        assert main_win.deploy.objectName() == "deploy"
+
+    def test_nav_labels_match_constants(self, main_win):
+        # 左导航每一项的文字应与 NAV_ITEMS 一致(事实层级/文案)
+        from dsh_console_aio import NAV_ITEMS
+        labels = [main_win.nav.item(i).text() for i in range(main_win.nav.count())]
+        assert labels == [l for l, _ in NAV_ITEMS]
+
+    def test_right_bar_sections_with_empty_ports(self, main_win):
+        # 假 config 端口全空 => 右栏不应有本地端口/远程隧道单元格
+        assert main_win.right._cells == {}, main_win.right._cells
+        # 但分区标题应仍存在
+        from PySide6.QtWidgets import QLabel
+        texts = [l.text() for l in main_win.right.findChildren(QLabel)]
+        assert "本机端口" in texts
+        assert "公网服务器 反向隧道" in texts
+
+    def test_log_area_present(self, main_win):
+        assert main_win.log_view is not None
+        # 日志区固定高度
+        assert main_win.log_view.height() > 40
+
+    def test_tunnels_cards_have_action_buttons(self, main_win, qapp_mod):
+        # 每张隧道卡片应含其 ITEMS 声明的动作按钮(事实层级)
+        import dsh_console_aio as C
+        from PySide6.QtWidgets import QFrame, QPushButton
+        main_win._show_page("tunnels")
+        qapp_mod.processEvents()
+        page = main_win.stack.currentWidget()
+        for item in C.ITEMS:
+            expected = [C.BTN_TEXT[a] for a in item["actions"]]
+            card_btns = []
+            for card in page.findChildren(QFrame, "card"):
+                card_btns.append([b.text() for b in card.findChildren(QPushButton)])
+            flat = [t for grp in card_btns for t in grp]
+            for t in expected:
+                assert t in flat, "按钮缺失: %s 的 %s" % (item["key"], t)
+
+    def test_window_resize_reflects(self, main_win, qapp_mod):
+        # resize 后实际几何应反映请求尺寸
+        main_win.resize(1280, 900)
+        qapp_mod.processEvents()
+        assert main_win.width() >= 1280
+        assert main_win.height() >= 900
+
+
+class TestWindowSize:
+    # 窗口尺寸约束
+    def test_minimum(self, main_win):
+        assert main_win.minimumWidth() >= 960
+        assert main_win.minimumHeight() >= 620

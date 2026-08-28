@@ -13,6 +13,12 @@ dist/
 *.err
 dsh-dash/
 
+# ── pytest 临时产物 / 缓存(不入库)──
+.pytest-tmp/
+pytest-cache-files-*/
+.pytest_cache/
+tmp/
+
 # ── 个人配置（内含你的服务器 IP/用户名，不入库）──
 config.json
 

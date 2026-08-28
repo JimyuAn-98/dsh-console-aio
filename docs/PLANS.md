@@ -229,3 +229,14 @@
     我们写入 patch 的是 bundle 名(匹配不上真实 entry), 导致 disabled 不生效。
   - 修复方向: 用 dsh --profile X --dump-config 获取组合后的真实 entry id 列表, 建立 bundle名->entry id 映射;
     停用/启用写入正确的 id。或读取插件 package.json 中声明的 id。
+
+---
+
+## 10. 自动化测试套件（pytest）[2026-08-28 加入]
+
+- `tests/` 提供 pytest 测试: test_dsh_data(数据层) / test_tunnel_mgr(隧道) / test_version_page(版本比较) /
+  test_dialogs(对话框) / test_gui_smoke(GUI 冒烟)。运行: `python -m pytest tests/`。
+- **安全边界**(新增): 默认 `-m "not gui"`, 只执行纯单元测试(隔离 tmp 数据)。
+  涉及真实 MainWindow / 监控线程 / SSH / 端口 / 进程的 GUI 冒烟(40 例)默认跳过,
+  仅 `python -m pytest tests/ -m gui` 手动执行——**切勿在 dsh(端口 3080)运行中自动触发**。
+- 决策详见 .agents/notes/implemented/testing/2026-08-28-test-suite-safe-boundary.md。
