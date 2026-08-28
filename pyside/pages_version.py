@@ -1,103 +1,36 @@
 # -*- coding: utf-8 -*-
-# 版本管理页(PySide6 迁移版): 当前版本/检查更新/更新日志/一键自动更新。
-# 数据源: 远程 GitHub main 分支 version.json + 本地 RELEASE_NOTES.md。
-# 后台线程做 IO/子进程(拉远程版本、读本地日志、下载解压并替换程序文件),
-# 结果经 Qt Signal 回主线程更新 UI; 自动更新为危险操作, 执行前 QMessageBox 确认。
+# 版本管理页: 只做展示/危险操作确认(QMessageBox.question)/按钮 busy 管理。
+# 业务全部在 dsh_core/version.py(纯 Python 零 Qt), 经 app.services.DshService 信号桥
+# 调用: 检查更新 -> service.check_console_update(), 一键更新 -> service.update_console();
+# 页面 connect service.result/finished(接收者=页面自身, 按操作 key 分派, 页面销毁时
+# Qt 自动断开); 不 connect service.log/status —— 主窗口级已接, 页面级再接会重复输出。
+# 本地更新日志是小文件, 经 dsh_core.version.read_local_notes 同步直读(不起线程);
+# 下载/解压/替换等 IO 与子进程一律在 core, 页面不再 import subprocess/urllib/zipfile。
+# 重启程序是 UI 生命周期动作: 调 core.spawn_restart 成功后页面才关窗退出。
 
-import io
-import json
 import os
-import shutil
-import subprocess
 import sys
-import threading
-import urllib.request
-import zipfile
 
-from PySide6.QtCore import Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QPushButton,
     QMessageBox, QPlainTextEdit)
 
+from dsh_core import version as core_version
 from pyside.base import BasePage
-
-# 与主程序一致的更新源(检查更新/自动更新共用)
-GITHUB_RAW = "https://raw.githubusercontent.com/JimyuAn-98/dsh-console-aio/main/"
-GITHUB_ZIP = "https://codeload.github.com/JimyuAn-98/dsh-console-aio/zip/refs/heads/main"
-VERSION_URL = GITHUB_RAW + "version.json"
-RELEASE_URL = GITHUB_RAW + "RELEASE_NOTES.md"
-
-# 更新时保留的本地文件(用户数据/配置, 不替换)
-KEEP_FILES = {"config.json", "dsh使用指南.txt", "tunnel-pids.json"}
-
-# 备份+替换在子进程(python -c)里执行, 不占住 GUI 线程; 脚本纯 ASCII(keep 清单经 argv 传入)
-_REPLACE_CODE = (
-    "import json, os, shutil, sys\n"
-    "src, base, bak, keep_json = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]\n"
-    "keep = set(json.loads(keep_json))\n"
-    "os.makedirs(bak, exist_ok=True)\n"
-    "replaced = 0\n"
-    "for fn in os.listdir(src):\n"
-    "    if fn in keep or fn == '.git':\n"
-    "        continue\n"
-    "    s = os.path.join(src, fn)\n"
-    "    d = os.path.join(base, fn)\n"
-    "    if os.path.isfile(s):\n"
-    "        if os.path.exists(d):\n"
-    "            shutil.copy2(d, os.path.join(bak, fn))\n"
-    "        shutil.copy2(s, d)\n"
-    "        replaced += 1\n"
-    "print(replaced)\n"
-)
-
-
-def _cmp_ver(a, b):
-    # 版本号 "x.y.z" 比较, 返回 -1/0/1
-    def t(v):
-        try:
-            return tuple(int(x) for x in str(v).split("."))
-        except ValueError:
-            return (0,)
-    x, y = t(a), t(b)
-    return (x > y) - (x < y)
-
-
-def _fetch(url, timeout=15):
-    # 下载文本(utf-8), 失败抛异常
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return r.read().decode("utf-8", errors="replace")
-
-
-def _base_dir():
-    # 程序所在目录: 打包(exe)后为 exe 目录, 源码模式为仓库根目录(pyside/ 的上级,
-    # 与 pages_profiles.py 的 BASE_DIR 一致; 旧 mgmt_version.py 位于仓库根目录时无需上溯)
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def _resource_dir():
-    # 打包资源目录: onefile 下资源在 _MEIPASS(临时解压), 源码模式为仓库根目录
-    if getattr(sys, "frozen", False):
-        return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class VersionPage(BasePage):
-    # 版本管理: BasePage 范式, app 为 MainWindow。
-    _check_result = Signal(str, str, str)   # (latest, notes, err) 远程检查结果
-    _log_ready = Signal(str)                # 本地更新日志文本
-    _update_result = Signal(str, str)       # (msg, err) 自动更新结果
-
+    # 版本管理: BasePage 范式, app 为 MainWindow; service 结果按操作 key 分派。
     def __init__(self, app, parent=None):
         self._version = str(getattr(app, "APP_VERSION", "") or "0.0.0")
         self._latest = None       # 最新版本号或 None
         self._latest_notes = ""
         super().__init__(app, parent)
-        self._check_result.connect(self._apply_check)
-        self._log_ready.connect(self._apply_log)
-        self._update_result.connect(self._after_update)
+        # connect 层级约定(见 app/services._run_result_op): 接收者是页面自身槽,
+        # 页面随导航销毁重建时 Qt 自动断开, 不会像 app 级槽那样叠加连接。
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._load_local_log()
 
     def _build(self):
@@ -157,57 +90,44 @@ class VersionPage(BasePage):
         self._status_lbl = QLabel("就绪", objectName="statusBar")
         root.addWidget(self._status_lbl)
 
-    # ---- 本地更新日志(离线可用, 后台线程读文件) ----
+    # ---- 本地更新日志(离线可用, 小文件同步直读) ----
     def _load_local_log(self):
         self._set_status("正在读取更新日志...")
+        self._log_text.setPlainText(core_version.read_local_notes())
+        self._set_status("就绪")
 
-        def worker():
-            base = _resource_dir()
-            p = os.path.join(base, "RELEASE_NOTES.md")
-            text = ""
-            try:
-                with io.open(p, encoding="utf-8", errors="replace") as fh:
-                    text = fh.read()
-            except OSError:
-                text = "(未找到 RELEASE_NOTES.md)"
-            self.safe_emit(self._log_ready, text)
+    # ---- service 结果分派(契约见 app/services._run_result_op) ----
+    def _on_result(self, op, payload):
+        # result(op, payload): payload 至少含 "err"(成功为空字符串)。
+        if op == "version-check":
+            self._apply_check(payload)
+        elif op == "version-update":
+            self._after_update(payload)
 
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _apply_log(self, text):
-        self._log_text.setPlainText(text)
-        if self._status_lbl.text() == "正在读取更新日志...":
-            self._set_status("就绪")
+    def _on_finished(self, op, ok):
+        # finished(op, ok) 每次操作恰好一发, 统一在此解除 busy(无论成败);
+        # err 文案展示由 _on_result 先行处理。
+        if op in ("version-check", "version-update"):
+            self._set_busy(False)
 
     # ---- 检查更新 ----
     def _check(self):
         self._set_busy(True)
         self._set_status("正在检查…")
+        self.app.service.check_console_update()
 
-        def worker():
-            err = None
-            latest = ""
-            notes = ""
-            try:
-                data = json.loads(_fetch(VERSION_URL))
-                latest = str(data.get("version") or "")
-                notes = str(data.get("notes") or "")
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._check_result, latest, notes, err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _apply_check(self, latest, notes, err):
+    def _apply_check(self, payload):
+        latest = str(payload.get("latest") or "")
+        notes = str(payload.get("notes") or "")
+        err = str(payload.get("err") or "")
         self._latest = latest or None
         self._latest_notes = notes
         if err:
             self._set_status("检查失败: " + err)
             self.app.loge("[版本管理] 检查更新失败: " + err, "err")
-            self._set_busy(False)
             return
         self._latest_lbl.setText("v" + latest)
-        cmpv = _cmp_ver(latest, self._version)
+        cmpv = core_version.cmp_ver(latest, self._version)
         if cmpv > 0:
             self._set_status("发现新版本 v" + latest + "!")
             self.app.loge("[版本管理] 发现新版本 v" + latest, "ok")
@@ -216,7 +136,6 @@ class VersionPage(BasePage):
             self.app.loge("[版本管理] 已是最新版本", "ok")
         else:
             self._set_status("当前版本高于远程(可能为开发版)")
-        self._set_busy(False)
 
     # ---- 一键更新(危险操作, 先确认) ----
     def _update(self):
@@ -240,50 +159,15 @@ class VersionPage(BasePage):
             return
         self._set_busy(True)
         self._set_status("正在下载更新…")
-        threading.Thread(target=self._do_update, daemon=True).start()
+        self.app.service.update_console()
 
-    def _do_update(self):
-        # 后台线程: 下载 zip -> 解压 -> python 子进程备份+替换 -> 回主线程收尾
-        base = _base_dir()
-        tmp = os.path.join(os.environ.get("TEMP", "."), "dsh-aio-update")
-        msg = ""
-        err = None
-        try:
-            shutil.rmtree(tmp, ignore_errors=True)
-            os.makedirs(tmp, exist_ok=True)
-            zip_path = os.path.join(tmp, "update.zip")
-            self.app.set_status("下载中(约几百 KB~几 MB)…")
-            urllib.request.urlretrieve(GITHUB_ZIP, zip_path)
-            self.app.set_status("解压中…")
-            extract = os.path.join(tmp, "x")
-            with zipfile.ZipFile(zip_path) as z:
-                z.extractall(extract)
-            # zip 顶层目录: dsh-console-aio-main/
-            roots = [d for d in os.listdir(extract)
-                     if os.path.isdir(os.path.join(extract, d))]
-            src = os.path.join(extract, roots[0]) if roots else extract
-            bak = os.path.join(tmp, "backup")
-            self.app.set_status("替换程序文件(自动备份)…")
-            r = subprocess.run(
-                [sys.executable, "-c", _REPLACE_CODE, src, base, bak,
-                 json.dumps(sorted(KEEP_FILES))],
-                capture_output=True, text=True, errors="replace", timeout=300,
-                creationflags=subprocess.CREATE_NO_WINDOW)
-            if r.returncode != 0:
-                err = (r.stderr or "").strip() or ("替换子进程退出码 %d" % r.returncode)
-            else:
-                replaced = (r.stdout or "").strip()
-                msg = "更新完成(" + replaced + " 个文件), 备份在: " + bak
-        except Exception as e:
-            err = str(e)
-        self.safe_emit(self._update_result, msg, err)
-
-    def _after_update(self, msg, err):
+    def _after_update(self, payload):
+        msg = str(payload.get("msg") or "")
+        err = str(payload.get("err") or "")
         if err:
             self._set_status("更新失败: " + err)
             self.app.loge("[版本管理] 更新失败: " + err, "err")
             QMessageBox.critical(self, "更新失败", "更新未完成，程序未改动。\n错误: " + err)
-            self._set_busy(False)
             return
         self._set_status("更新完成, 正在重启…")
         self.app.loge("[版本管理] " + msg, "ok")
@@ -291,19 +175,18 @@ class VersionPage(BasePage):
         self._restart()
 
     def _restart(self):
-        # 重启程序: 打包(exe)后直接重启 exe; 源码模式重启 PySide6 主框架 app_pyside.py
-        base = _base_dir()
-        try:
-            if getattr(sys, "frozen", False):
-                subprocess.Popen([sys.executable], cwd=base, text=True, errors="replace",
-                                 creationflags=subprocess.CREATE_NO_WINDOW)
-            else:
-                main = os.path.join(base, "app_pyside.py")
-                subprocess.Popen([sys.executable, main], cwd=base, text=True,
-                                 errors="replace",
-                                 creationflags=subprocess.CREATE_NO_WINDOW)
-        except Exception:
-            pass
+        # 重启程序: core.spawn_restart 成功(新进程已起)才关窗退出; 失败留在旧进程
+        # 并给出手动重启提示(不再静默吞异常 —— 旧实现正是因此掩盖了入口文件错误)。
+        res = core_version.spawn_restart()
+        if res.get("err"):
+            self._set_status("重启失败: " + res["err"])
+            self.app.loge("[版本管理] 重启失败: " + res["err"], "err")
+            QMessageBox.critical(
+                self, "重启失败",
+                "程序已更新，但自动重启失败。\n错误: " + res["err"]
+                + "\n请手动重新启动程序。")
+            return
+        self.app.loge("[版本管理] 新进程已启动, 关闭当前窗口", "ok")
         # 关闭承载页面的主窗口(新进程已启动); 页面可能已销毁, 吞掉 RuntimeError
         try:
             w = self.window()
@@ -331,7 +214,7 @@ class VersionPage(BasePage):
             self._btn_update.setEnabled(False)
         else:
             self._btn_update.setEnabled(bool(self._latest)
-                                        and _cmp_ver(self._latest, self._version) > 0)
+                                        and core_version.cmp_ver(self._latest, self._version) > 0)
 
     def _set_status(self, text):
         self._status_lbl.setText(text)
