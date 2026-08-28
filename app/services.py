@@ -142,6 +142,29 @@ class DshService(QObject):
         from dsh_core import keys as _keys
         self._run_result_op(op, _keys.generate_key, name)
 
+    # ---- 阶段2 波2: 写盘类操作(core 懒加载) ----
+    # 远程只读红线在页面侧执行(_current_deploy 非 None 时拒绝写操作并中文提示)。
+    def backup_dsh_home(self, target, op="ops-backup"):
+        from dsh_core import ops as _ops
+        self._run_result_op(op, _ops.backup_dsh_home, target)
+
+    def copy_profile(self, src, new, op="profile-copy"):
+        from dsh_core import profiles as _profiles
+        self._run_result_op(op, _profiles.copy_profile, src, new)
+
+    def delete_profile(self, name, op="profile-delete"):
+        from dsh_core import profiles as _profiles
+        self._run_result_op(op, _profiles.delete_profile, name)
+
+    def set_sessions_archived(self, session_ids, op="sessions-archive"):
+        # session_ids 为归档后的完整 id 列表(整体替换 workspace.json 的 archivedSessionIds)。
+        from dsh_core import sessions as _sessions
+        self._run_result_op(op, _sessions.set_archived, session_ids)
+
+    def delete_session_group(self, workdir, op="sessions-delete"):
+        from dsh_core import sessions as _sessions
+        self._run_result_op(op, _sessions.delete_group, workdir)
+
     # ---- 构造 ----
     @classmethod
     def from_env(cls, base_dir=None, parent=None):
