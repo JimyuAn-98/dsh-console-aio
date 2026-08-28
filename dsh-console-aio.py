@@ -7,15 +7,17 @@ UI 分层: 后端业务在 dsh_core/(纯 Python 零 Qt), 信号桥在 app/servic
 
 运行(双击 exe 或):  C:/Users/1/.conda/envs/console/pythonw.exe dsh-console-aio.py
 离屏验证:  QT_QPA_PLATFORM=offscreen python dsh-console-aio.py --smoke
+检查模式: 启动加 --inspect 或运行中按 F12 —— 悬停显示控件身份(类名+objectName),
+          左键点击在日志区打印控件完整路径(便于向开发者指认界面元素)。
 """
 import os, sys, json, threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
     QComboBox, QFrame, QSizePolicy, QAbstractItemView,
-    QMessageBox)
-from PySide6.QtCore import Qt, Signal, QObject, QTimer
-from PySide6.QtGui import QTextCursor, QColor
+    QMessageBox, QToolTip)
+from PySide6.QtCore import Qt, Signal, QObject, QTimer, QEvent, QPoint
+from PySide6.QtGui import QTextCursor, QColor, QCursor
 
 import dsh_data
 from app.services import DshService
@@ -402,6 +404,17 @@ class MainWindow(QMainWindow):
         self.service.status.connect(self.set_status)
         self._start_monitor()               # 右侧健康监控(实时探测端口/隧道)
 
+        # ---- 控件检查模式(悬停显示身份, 左键点击打印路径; --inspect 启动 / F12 切换) ----
+        self._inspect = "--inspect" in sys.argv
+        self._last_inspect_w = None
+        if not smoke:
+            QApplication.instance().installEventFilter(self)
+            self._inspect_timer = QTimer(self)
+            self._inspect_timer.timeout.connect(self._inspect_tick)
+            self._inspect_timer.start(250)
+            if self._inspect:
+                self.loge("控件检查模式已开启(F12 切换; 悬停看身份, 点击打印路径)", "ok")
+
         central = QWidget(objectName="central")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
@@ -625,6 +638,64 @@ class MainWindow(QMainWindow):
     def _set_status(self, text):
         if self.status is not None:
             self.status.setText(text)
+
+    # ---- 控件检查模式 ----
+    def eventFilter(self, obj, event):
+        # F12 开关; 开启时左键点击把控件完整路径打进日志区。
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_F12:
+            self._inspect = not self._inspect
+            self.set_status("控件检查模式: %s" % ("开" if self._inspect else "关"))
+            return False
+        if self._inspect and event.type() == QEvent.Type.MouseButtonPress \
+                and event.button() == Qt.MouseButton.LeftButton:
+            w = self._deep_widget(QCursor.pos())
+            if w is not None:
+                self.loge("[inspect] 点击控件: " + self._path(w), "warn")
+        return False
+
+    def _inspect_tick(self):
+        # 轮询悬停: widgetAt 做命中测试, 不依赖控件的鼠标跟踪/悬停属性。
+        if not self._inspect:
+            self._last_inspect_w = None
+            return
+        w = self._deep_widget(QCursor.pos())
+        if w is None or w is self._last_inspect_w:
+            return
+        self._last_inspect_w = w
+        QToolTip.showText(QCursor.pos() + QPoint(14, 18), self._identity(w))
+
+    @staticmethod
+    def _deep_widget(pos):
+        # 从 widgetAt 的命中控件向下钻取到最深层子控件。
+        w = QApplication.widgetAt(pos)
+        while w is not None:
+            child = w.childAt(w.mapFromGlobal(pos))
+            if child is None:
+                return w
+            w = child
+        return None
+
+    @staticmethod
+    def _identity(w):
+        cls = type(w).__name__
+        name = w.objectName() or ""
+        txt = ""
+        if hasattr(w, "text"):
+            t = w.text()
+            if t:
+                txt = " 文本=%r" % (t[:24],)
+        return "%s#%s%s" % (cls, name, txt) if name else "%s%s" % (cls, txt)
+
+    @staticmethod
+    def _path(w):
+        parts = []
+        cur = w
+        while cur is not None:
+            cls = type(cur).__name__
+            name = cur.objectName() or ""
+            parts.append("%s#%s" % (cls, name) if name else cls)
+            cur = cur.parentWidget() if isinstance(cur, QWidget) else None
+        return " > ".join(reversed(parts))
 
     # ---- 右侧健康监控(探测业务在 dsh_core, 经 service.monitor 信号回主线程) ----
     def _start_monitor(self):
