@@ -76,3 +76,13 @@ pages_* 直接 import subprocess 干业务), 业务不可独立测试、与 UI �
   dsh_core/__init__.py/主文档/提交)由主 agent 统一收口; 框架先行(波0 服务面先提交,
   agent 只填实现); 主 agent 评审 diff + 独立跑验证 + 门禁后提交。铁律对 agent 生效:
   任务书第一条即禁止跑构造 MainWindow 的测试。
+- **波2(2026-08-29)与 subagent 稳定性教训**: 波1 version/keys 双 agent 并行一次成功;
+  波2 三 agent 并行全员失败("Model request failed"/"captcha verify failed"/取消,
+  重试一轮仍失败)——平台不稳时不要反复重试, 主 agent 直接接手补完。被取消 agent 的
+  半成品(profiles 三件套/ops·sessions 的 core 与页面)质量可用, 逐文件审读后采纳,
+  缺失部分(ops 页面重写/两个测试文件/模块注册/文档)由主 agent 补齐。
+- **波2 修复的存量 bug**: ① sessions 归档调用不存在的 dsh_data.write_workspace
+  (AttributeError => 归档/恢复自 PySide6 迁移起即失效; read_workspace 只读不写,
+  数据层从来就没有写函数) —— core 信封直写(保留未知顶层 key, 写前 .bak)修复;
+  ② profiles 列表线程直接 _data.emit 未用 safe_emit; ③ 远程部署下"读远程写本机"
+  的语义错误 —— 统一远程只读红线(页面侧 _remote 非 None 拒绝写操作并中文提示)。

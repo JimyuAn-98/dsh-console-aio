@@ -72,7 +72,12 @@
         version 页(dsh_core/version.py, 顺带修复源码模式更新后不重启的存量 bug)与
         keys 页(dsh_core/keys.py, 私钥安全红线成文)迁移完成, 页面零
         subprocess/urllib/zipfile/shutil/threading。GUI 人工验收待用户执行。
-        余下波次: 波2 ops+profiles+sessions(写盘类) -> 波3 plugins+deployments
+        余下波次: **[波2 已完成 2026-08-29]**: ops(profiles 备份页)/profiles/sessions
+        三页写盘类迁移完成, service 触发方法 backup_dsh_home/copy_profile/delete_profile/
+        set_sessions_archived/delete_session_group; 统一"远程只读红线"(远程部署下写操作
+        拒绝并中文提示); 修复两个存量 bug: sessions 归档调用不存在的 dsh_data.write_workspace
+        (归档/恢复自迁移起失效, core 信封直写修复)、profiles 线程未用 safe_emit。
+        纯读仍留页面直连(线程+safe_emit), 阶段4 收敛。余下: 波3 plugins+deployments
         (解除 app._stream_cmd 依赖) -> 波4 dialogs(env/install, 三份 _stream_cmd 归一)
         -> 波5 纯读页留阶段4。
 - 阶段3: dialogs.py 评估是否抽业务(动态表单类可能保留一部分)

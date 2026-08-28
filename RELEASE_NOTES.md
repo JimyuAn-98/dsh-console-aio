@@ -28,6 +28,13 @@
 - **版本管理页业务下沉 `dsh_core/version.py`**：检查更新/一键更新走 service，页面不再 import subprocess/urllib/zipfile/shutil/threading；**修复存量 bug——源码模式更新后重启指向不存在的 app_pyside.py（FileNotFoundError 被吞，表现为更新完成后不重启）**
 - **SSH 密钥页业务下沉 `dsh_core/keys.py`**：列表/生成走 service，ssh-keygen 全在 core；私钥安全红线成文（内容绝不读取/进日志/进返回值，仅存在性+指纹）；生成密钥增加重名预检与文件名校验（防路径穿越），失败文案中文化
 
+### UI 前后端分层阶段2 波2（备份/Profile/会话页，详见 docs/UI_LAYERING.md）
+
+- **三个写盘页业务下沉**：备份与运维（`dsh_core/ops.py`，一键备份 ~/.dsh 走 service，日志列表/尾部本地小 IO 同步直调）、Profile 管理（`dsh_core/profiles.py`，复制/删除走 service，core 防线重做校验：名称合法性/重名/web 拒删/commonpath 防路径穿越）、会话与工作区（`dsh_core/sessions.py`，归档/删除分组走 service，路径越界校验从 UI 下沉 core）
+- **统一"远程只读红线"**：远程部署下三页的写操作（复制/删除/归档/备份）一律拒绝并中文提示——修复远程读却写本机目录的语义错误
+- **修复存量 bug**：会话页"归档/恢复"调用不存在的 `dsh_data.write_workspace`（AttributeError，该功能自 PySide6 迁移起即失效），core 改为信封直写并保留 workspace.json 未知顶层字段、写前 .bak；Profile 页列表线程未用 safe_emit（页面销毁竞态 RuntimeError）
+- 页面层不再 import shutil；新增三页纯单元测试（含越界拒绝零副作用断言）
+
 ## v0.4.0 (未发布)
 
 
