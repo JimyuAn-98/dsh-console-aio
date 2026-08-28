@@ -267,24 +267,24 @@ class TestProvidersMap:
 
 
 class TestReadTail:
-    """pages_ops._read_tail: 文件尾部读取。"""
+    """dsh_core.ops.read_tail: 文件尾部读取。"""
 
     def test_small_file(self, tmp_path):
-        from pyside.pages_ops import _read_tail
+        from dsh_core.ops import read_tail as _read_tail
         p = tmp_path / "test.log"
         p.write_text("line1\nline2\nline3\n", encoding="utf-8")
         result = _read_tail(str(p))
         assert "line3" in result
 
     def test_empty_file(self, tmp_path):
-        from pyside.pages_ops import _read_tail
+        from dsh_core.ops import read_tail as _read_tail
         p = tmp_path / "empty.log"
         p.write_text("", encoding="utf-8")
         result = _read_tail(str(p))
         assert result == ""
 
     def test_truncation(self, tmp_path):
-        from pyside.pages_ops import _read_tail, TAIL_BYTES
+        from dsh_core.ops import read_tail as _read_tail, TAIL_BYTES
         p = tmp_path / "big.log"
         # 写入超过 TAIL_BYTES 的内容
         content = "A" * (TAIL_BYTES + 1000) + "\nTAIL_LINE\n"
@@ -295,20 +295,20 @@ class TestReadTail:
 
 
 class TestLogEntries:
-    """pages_ops._log_entries: 日志目录扫描。"""
+    """dsh_core.ops.log_entries: 日志目录扫描。"""
 
     def test_empty_dir(self, tmp_path):
-        from pyside.pages_ops import _log_entries
+        from dsh_core.ops import log_entries as _log_entries
         result = _log_entries(str(tmp_path))
         assert result == []
 
     def test_nonexistent_dir(self, tmp_path):
-        from pyside.pages_ops import _log_entries
+        from dsh_core.ops import log_entries as _log_entries
         result = _log_entries(str(tmp_path / "nonexistent"))
         assert result == []
 
     def test_with_logs(self, tmp_path):
-        from pyside.pages_ops import _log_entries
+        from dsh_core.ops import log_entries as _log_entries
         (tmp_path / "test.log").write_text("content")
         (tmp_path / "test.txt").write_text("not a log")
         result = _log_entries(str(tmp_path))

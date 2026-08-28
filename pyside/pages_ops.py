@@ -1,25 +1,23 @@
 # -*- coding: utf-8 -*-
-# 备份与运维页(PySide6 迁移版)。
-# 三个运维分区: 备份 ~/.dsh 到 zip(数据层自动排除凭据/密钥/sessions/node_modules)、
-# 查看 dsh web 日志(目录/尾部, 尾部后台线程读, 防大文件)、凭据只提示存在性与时间(不明文展示)。
-# 本页只操作本机 dsh_home 与 %TEMP%/dsh-dash 日志, 与当前部署无关, 不需要 DshRemote。
-# 后台线程做 IO -> Qt Signal 回主线程更新控件, 绝不直接改 UI(线程安全)。
+# 备份与运维页(UI 层): 只做展示/确认框/busy 管理, 业务在 dsh_core/ops.py(纯 Python)。
+# 备份经 app.services 信号桥后台执行: service.backup_dsh_home(path) -> result(op, payload)
+# + finished(op, ok) 回页面槽(op key "ops-backup"), 接收者是页面自身, 页面销毁 Qt 自动断开;
+# log/status 不在页面 connect —— 主窗口级已 connect 一次(勿叠加)。
+# 日志目录/列表/尾部与凭据存在性是本地小 IO, 同步直调(dsh_core.ops / dsh_data 纯读,
+# 分层设计允许的过渡态; 阶段4 收敛数据层后统一走 service)。本页只操作本机, 与部署无关。
 
 import os
-import tempfile
-import threading
 import time
 
 import dsh_data
-from PySide6.QtCore import Qt, Signal
+import dsh_core.ops
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem,
     QPushButton, QHeaderView, QMessageBox, QFileDialog, QDialog, QPlainTextEdit)
 
 from pyside.base import BasePage
-
-TAIL_BYTES = 16384   # 查看日志尾部最多读取的字节数
 
 
 def _fmt_size(n):
@@ -42,61 +40,13 @@ def _fmt_time(ts):
         return "?"
 
 
-def _read_tail(path, limit=TAIL_BYTES):
-    # 从文件尾部读最多 limit 字节, 避免大文件整读; 截断时丢弃首行残余半行。
-    # 统一换行符, 避免 Windows 日志的 \r 残留显示。
-    with open(path, "rb") as fh:
-        fh.seek(0, os.SEEK_END)
-        size = fh.tell()
-        start = max(0, size - limit)
-        fh.seek(start)
-        data = fh.read()
-    text = data.decode("utf-8", errors="replace")
-    text = text.replace("\r\n", "\n")
-    if start > 0:
-        nl = text.find("\n")
-        if nl >= 0:
-            text = text[nl + 1:]
-    return text
-
-
-def _log_entries(log_dir):
-    # 列出日志目录下 *.log 的文件名/大小/修改时间; 目录不存在或读取失败返回空表。
-    out = []
-    if not os.path.isdir(log_dir):
-        return out
-    try:
-        names = sorted(os.listdir(log_dir))
-    except OSError:
-        return out
-    for fn in names:
-        if not fn.lower().endswith(".log"):
-            continue
-        fp = os.path.join(log_dir, fn)
-        if not os.path.isfile(fp):
-            continue
-        try:
-            st = os.stat(fp)
-        except OSError:
-            continue
-        out.append({"name": fn, "size": st.st_size, "mtime": st.st_mtime})
-    return out
-
-
 class OpsPage(BasePage):
     # 备份与运维: BasePage 范式, app 为 MainWindow。
-    _logs_data = Signal(object, str)              # (日志条目表, err) 日志列表刷新结果
-    _tail_read = Signal(str, str, str, str)       # (path, name, body, err) 尾部读取结果
-    _backup_done = Signal(int, int, str, str)     # (count, size, err, path) 备份完成结果
-
     def __init__(self, app, parent=None):
-        # dsh web 日志目录固定为 %TEMP%/dsh-dash
-        self._log_dir = os.path.join(os.environ.get("TEMP") or tempfile.gettempdir(), "dsh-dash")
-        self._last_op_msg = None
+        self._pending = None   # 正在等待的 service op(当前仅 "ops-backup")
         super().__init__(app, parent)
-        self._logs_data.connect(self._apply_logs)
-        self._tail_read.connect(self._show_tail)
-        self._backup_done.connect(self._after_backup)
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._refresh_logs()
         self._refresh_cred()
 
@@ -126,6 +76,7 @@ class OpsPage(BasePage):
         root.addWidget(bak)
 
         # ---- 日志分区 ----
+        self._log_dir = dsh_core.ops.log_dir()
         logs_card = QFrame(objectName="card")
         ll = QVBoxLayout(logs_card)
         ll.setContentsMargins(10, 8, 10, 8)
@@ -141,8 +92,7 @@ class OpsPage(BasePage):
         self._btn_open.clicked.connect(self._open_log_dir)
         self._btn_tail = QPushButton("查看尾部")
         self._btn_tail.clicked.connect(self._view_tail)
-        self._log_btns = (self._btn_refresh, self._btn_open, self._btn_tail)
-        for b in self._log_btns:
+        for b in (self._btn_refresh, self._btn_open, self._btn_tail):
             lobs.addWidget(b)
         lobs.addStretch(1)
         ll.addLayout(lobs)
@@ -182,24 +132,15 @@ class OpsPage(BasePage):
                 t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignCenter)
         return t
 
+    # ---- 日志(本地小 IO, 同步直调 core; 同步调用无重入, 不需要按钮禁用) ----
     def _refresh_logs(self):
-        # 列出 %TEMP%/dsh-dash/*.log 的文件名/大小/修改时间(后台线程 IO)
         self._set_status("正在刷新日志列表...")
-        self._set_log_btns(False)
-
-        def worker():
-            err = None
-            entries = None
-            try:
-                entries = _log_entries(self._log_dir)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._logs_data, entries or [], err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _apply_logs(self, entries, err):
-        self._set_log_btns(True)
+        try:
+            entries = dsh_core.ops.log_entries()
+            err = ""
+        except Exception as e:
+            # core 契约是 list_entries 不抛; 这里兜底防御, 失败降级为空表+提示
+            entries, err = [], str(e)
         self._logs_table.setRowCount(len(entries))
         for r, e in enumerate(entries):
             self._logs_table.setItem(r, 0, QTableWidgetItem(e["name"]))
@@ -208,9 +149,6 @@ class OpsPage(BasePage):
         if err:
             self._set_status("刷新日志失败: " + err)
             self.app.loge("[运维] 刷新日志失败: " + err, "err")
-        elif self._last_op_msg:
-            self._set_status(self._last_op_msg)
-            self._last_op_msg = None
         else:
             self._set_status("日志文件 %d 个" % len(entries))
 
@@ -225,29 +163,22 @@ class OpsPage(BasePage):
             QMessageBox.critical(self, "无法打开", str(e))
 
     def _view_tail(self):
-        # 读取所选日志尾部(后台线程), 完成后弹出只读窗口
-        row = self._selected_log_row()
-        if row is None:
+        # 读取所选日志尾部(同步小 IO), 完成后弹出只读窗口
+        rows = self._logs_table.selectionModel().selectedRows()
+        if not rows:
             QMessageBox.information(self, "提示", "请先在列表中选择一个日志文件。")
             return
-        fn = self._logs_table.item(row, 0).text()
+        fn = self._logs_table.item(rows[0].row(), 0).text()
         path = os.path.join(self._log_dir, fn)
-        self._set_status("正在读取日志尾部: " + fn)
+        try:
+            body = dsh_core.ops.read_tail(path)
+            err = ""
+        except Exception as e:
+            body, err = "", str(e)
+        self._show_tail(fn, body, err)
 
-        def worker():
-            err = None
-            body = None
-            try:
-                body = _read_tail(path)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._tail_read, path, fn, body or "", err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _show_tail(self, path, name, body, err):
-        # 主线程弹出只读窗口显示日志尾部
-        self._set_status("就绪")
+    def _show_tail(self, name, body, err):
+        # 弹出只读窗口显示日志尾部
         if err:
             self.app.loge("[运维] 读取日志尾部失败: " + err, "err")
             QMessageBox.critical(self, "读取失败", err)
@@ -271,8 +202,8 @@ class OpsPage(BasePage):
         vl.addLayout(hl)
         dlg.exec()
 
+    # ---- 备份(经 service 信号桥; 选路径与确认在 UI, 业务在 core) ----
     def _do_backup(self):
-        # 选 zip 路径 -> 确认 -> 后台线程备份, 完成后回主线程提示文件数与大小
         default_name = "dsh-backup-" + time.strftime("%Y%m%d-%H%M%S") + ".zip"
         path, _filter = QFileDialog.getSaveFileName(
             self, "选择备份文件", os.path.join(os.path.expanduser("~"), default_name),
@@ -284,23 +215,22 @@ class OpsPage(BasePage):
                 "将把 ~/.dsh 备份到：\n%s\n\n"
                 "自动排除：凭据/密钥文件、sessions、node_modules。\n是否继续？" % path) != QMessageBox.Yes:
             return
+        self._pending = "ops-backup"
+        self._backup_path = path
         self._backup_btn.setEnabled(False)
         self._backup_lbl.setText("备份中…")
+        self._set_status("正在备份 ~/.dsh ...")
+        self.app.service.backup_dsh_home(path)
 
-        def worker():
-            count = 0
-            size = 0
-            err = None
-            try:
-                count = dsh_data.backup_dsh_home(path)
-                size = os.path.getsize(path)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._backup_done, count, size, err, path)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _after_backup(self, count, size, err, path):
+    def _on_result(self, op, payload):
+        # result(op, payload) 按 op key 分派; 其他页面的 op 直接忽略。
+        if op != "ops-backup":
+            return
+        self._pending = None
+        err = payload.get("err", "")
+        count = payload.get("count", 0)
+        size = payload.get("size", 0)
+        path = getattr(self, "_backup_path", "")
         self._backup_btn.setEnabled(True)
         if err:
             self._backup_lbl.setText("备份失败")
@@ -310,12 +240,19 @@ class OpsPage(BasePage):
             return
         msg = "已备份 %d 个文件，大小 %s。\n%s" % (count, _fmt_size(size), path)
         self._backup_lbl.setText("完成：%d 个文件，%s" % (count, _fmt_size(size)))
-        self._set_status(msg)
-        self.app.loge("[运维] " + msg, "ok")
+        self._set_status("已备份 %d 个文件，大小 %s" % (count, _fmt_size(size)))
+        self.app.loge("[运维] " + msg.replace("\n", " "), "ok")
         QMessageBox.information(self, "备份完成", msg)
 
+    def _on_finished(self, op, ok):
+        # 兜底: _run_result_op 契约保证 result+finished 成对到达, 正常路径 result 槽
+        # 已收尾; 若 result 槽漏执行导致 busy 悬挂, 在这里解除按钮禁用。
+        if op == self._pending:
+            self._pending = None
+            self._backup_btn.setEnabled(True)
+
+    # ---- 凭据(存在性展示, 纯读, 绝不明文) ----
     def _refresh_cred(self):
-        # 凭据文件只显示存在性与最后修改时间, 不明文展示内容
         home = dsh_data.dsh_home()
         lines = []
         p1 = os.path.join(home, ".credentials.yaml")
@@ -329,16 +266,6 @@ class OpsPage(BasePage):
         else:
             lines.append(".anonymous-user-id：不存在")
         self._cred_lbl.setText("\n".join(lines))
-
-    def _selected_log_row(self):
-        rows = self._logs_table.selectionModel().selectedRows()
-        if not rows:
-            return None
-        return rows[0].row()
-
-    def _set_log_btns(self, on):
-        for b in self._log_btns:
-            b.setEnabled(on)
 
     def _set_status(self, text):
         self._status_lbl.setText(text)
