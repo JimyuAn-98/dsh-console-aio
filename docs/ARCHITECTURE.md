@@ -1,144 +1,88 @@
-# 架构（dsh 控制台 v2：管理功能扩展）
+# 架构（dsh 控制台 · 当前实现）
 
-> 2026-08-25 定稿。原则：零依赖（仅 Python stdlib）、数据层与 UI 分离、
-> 所有写操作先备份、只读功能优先、管理窗口独立文件（不膨胀主程序）。
+> 2026-08-25 初稿（tkinter 时代）→ **2026-08-29 重写**：PySide6 迁移 + UI 前后端分层重构
+> （阶段 0–4）完成后的当前结构。旧 tkinter 设计已废弃，归档见 `legacy/`；
+> 分层设计蓝图与信号-槽契约详见 `docs/UI_LAYERING.md`。
 
-## 分层
-
-```
-dsh-console-aio.py   主程序：现有功能 + 顶部"dsh 管理"菜单（导航到各管理窗口）
-dsh_data.py             数据层：~/.dsh 各数据域读取/写入/备份（纯函数，无 GUI）
-mgmt_*.py               管理窗口模块：每个提供一个 Toplevel 类（或 open(app) 函数）
-  mgmt_sessions.py        会话 / 工作区 / 归档
-  mgmt_agents.py          Agent 模式管理
-  mgmt_profiles.py        Profile 管理
-  mgmt_plugins.py         插件管理（参考 dsh-market：dsh plugin 命令 + disabled 补丁）
-  mgmt_taskboard.py       任务看板（ledger + scheduler）
-  mgmt_usage.py           模型用量/价格统计（解压 sessions 聚合）
-  mgmt_llm.py             LLM/模型配置（settings.yaml agent-default-model + providers）
-  mgmt_theme.py           主题/皮肤（settings.yaml UI 配置）
-  mgmt_ops.py             备份迁移 / 日志 / 凭据提示 / 统计 / pet
-```
-
-## 数据层接口约定（dsh_data.py）
-
-所有函数纯数据、无 tkinter 依赖；返回 dict/list；失败抛异常由 UI 捕获并中文提示。
-写入函数一律先对目标文件做 .bak 备份（`backup_file(path)`）。
-
-| 函数 | 作用 |
-|------|------|
-| dsh_home() | ~/.dsh 定位（DSH_HOME 环境变量优先） |
-| read_yaml(path) / write_yaml(path, data) | 最小 YAML 子集解析/序列化（缩进 dict + "- " list + 标量 + 注释忽略） |
-| read_workspace() | workspace.json（workspaceIds / archivedSessionIds） |
-| list_sessions() | sessions 目录按工作目录分组（名称/数量/大小） |
-| list_profiles() | profiles 目录列表（名称/含 cordis.yml 与否） |
-| read_cordis(profile) | 解析 profile 的 cordis.yml（list of entries: id/name/config/insert/disabled） |
-| write_cordis(profile, entries) | 写回（备份后） |
-| plugin_cmd(profile, args) | 组装 dsh plugin --profile X ... 命令（由 UI 层用 _stream_cmd 执行） |
-| read_settings() | settings.yaml dict |
-| write_settings(data) | 写回（备份后） |
-| read_taskboard() | ledger-v2.json + scheduler-v2.json |
-| usage_stats(sessions=None) | 解压 session jsonl.zstd 聚合 token（按模型/天/会话）；依赖 zstandard，缺失则返回错误标记 |
-| backup_dsh_home(out_zip) | 备份整个 ~/.dsh（排除凭据/密钥文件），返回文件清单 |
-
-## UI 集成方式
-
-主程序顶部加 **"dsh 管理"** Menubutton，菜单项打开对应 mgmt_*.py 的 Toplevel 窗口
-（模式同 EnvDialog：transient + grab_set + 中文界面 + 危险操作确认 + 流式日志复用 _stream_cmd）。
-
-管理窗口统一风格：ttk.Frame + F_BOLD 标题 + 表格（grid）+ 刷新按钮 + 关闭按钮；
-只读操作即时刷新；写操作确认框（askyesno）+ 结果提示。
-
-## 安全约束
-
-- 凭据文件（.credentials.yaml、含 apiKeyEnv 的环境变量名）只显示"存在/最后修改"，不明文展示值。
-- 写 settings.yaml / cordis.yml 前备份 .bak；导出备份 zip 排除凭据。
-- 插件安装只接受用户显式输入的 npm 包名 + 确认；不自动执行未知构建脚本（提示）。
-- 一切真实 IP/用户名不出现在任何提交文件（AGENTS.md 安全章节）。
-
-## 参考实现
-
-- dsh-market（https://github.com/dsh-market/dsh-market）：插件安装走官方 `dsh plugin --profile <name> add <pkg>`；
-  热启停写 cordis.patch.yml 的 `- id: … disabled: true|false`；更新逐插件对比 npm 版本；
-  备份/恢复用合并方式；写入前校验、失败自动回滚。
-
----
-
-## 5. 多部署远程抽象（v0.4）
-
-### DshRemote 接口（dsh_data.py）
-
-统一"本机 / 远程部署"两种数据访问模式，现有数据域函数全部通过它取值：
+## 当前分层（2026-08-29）
 
 ```
-class DshRemote:
-    # 模式: local(直接路径) / ssh(远程执行)
-    def __init__(self, deployment=None)   # None=本机
-    def read_file(self, rel_path) -> str  # 本地 open; 远程 ssh "cat <dsh_home>/<rel>"
-    def list_dir(self, rel_path) -> list  # 本地 os.listdir; 远程 ssh "ls"
-    def stat_dir(self, rel_path)          # 本地 os.stat; 远程 ssh "du -sb" 等
-    def exec(self, cmd) -> str            # 本地 subprocess; 远程 ssh "<cmd>"
-
-# 数据域函数签名统一改为 remote 参数(默认 None=本机):
-#   list_sessions(remote=None), read_workspace(remote=None), ...
+┌─ 后端层 dsh_core/  (纯 Python, 严禁 import PySide) ────────────────┐
+│  config.py      配置加载与派生常量(含 allow_empty_ports 隔离分支)     │
+│  data.py        数据域: YAML/workspace/profiles/plugins/用量/部署     │
+│                 (原 dsh_data.py 全部归并; dsh_data.py 为兼容 shim)    │
+│  dshctl.py      dsh 启停/完整更新/监控探测/流式命令 stream_cmd        │
+│  tunnels.py     隧道启停/常驻重连(基于 tunnel_mgr.py)                │
+│  version.py     控制台自身版本检查与自更新                           │
+│  keys.py        SSH 密钥(私钥安全红线)                              │
+│  env.py         环境检查/一键安装(dialogs 业务下沉)                  │
+│  ops.py         备份/日志/凭据存在性                                 │
+│  profiles.py    Profile 复制/删除(远程只读红线)                      │
+│  sessions.py    会话归档/恢复/分组删除(远程只读红线)                  │
+│  plugins.py     插件列表/启停/安装卸载(远程只读红线)                  │
+│  deployments.py 部署快照/保存(远程只读红线)                          │
+└─────────────────────────────────────────────────────────────────────┘
+┌─ 接口层 app/services.py  (可 import PySide) ────────────────────────┐
+│  DshService(QObject): status/log/card/monitor/result/finished 信号, │
+│  起后台线程跑 dsh_core, events 回调转发为 Qt Signal(唯一起线程处)     │
+└─────────────────────────────────────────────────────────────────────┘
+┌─ UI 层  (只展示 + 订阅信号 + 调 service) ───────────────────────────┐
+│  dsh-console-aio.py  主窗口壳(顶栏/导航/右栏/日志) + 总览页 + 隧道页  │
+│  pyside/pages_*.py   11 个管理页(sessions/agents/profiles/plugins/  │
+│                      taskboard/usage/llm/ops/keys/version/          │
+│                      deployments)                                   │
+│  pyside/dialogs.py   配置向导 / 安装向导 / 环境检查                  │
+│  pyside/base.py      BasePage(safe_emit 页面销毁竞态防护)            │
+│  ui/theme.qss        主题(内嵌 QSS 兜底)                            │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 部署清单（config.json, gitignored）
+## 数据与配置
 
-```json
-"deployments": [
-  {"name": "本机", "host": "", "user": "", "port": 22, "dsh_home": "~/.dsh"},
-  {"name": "实验室", "host": "10.x.x.x", "user": "hjy", "port": 22}
-]
-```
+| 项 | 位置 | 说明 |
+|----|------|------|
+| config.json | 仓库根(exe 旁), **gitignored** | dash_repo / dash_port / ssh 服务器 / 隧道 / 部署清单; `DSH_AIO_CONFIG` 环境变量可覆盖(测试隔离) |
+| ~/.dsh | `DSH_HOME` 可覆盖 | profiles/ sessions/ storages/ task-board/ settings.yaml / .agent-presets |
+| DshRemote | dsh_core/data.py | 本机 / 远程(ssh 免密只读)统一抽象 |
+| dsh_data.py | 仓库根 | **兼容 shim** → `from dsh_core.data import *`, 保留旧 import 路径(测试/页面/历史模块) |
+| tunnel_mgr.py | 仓库根 | 纯 Python SSH 隧道管理器, 被 dsh_core.tunnels 使用 |
 
-### 约束
-- 远程只用 ssh 免密（复用隧道配置的凭据体系）；写操作一律 UI 确认。
-- 阶段 A 远程只读轻量指标（cat 小文件 + ls/du）；不做远程 zstd 解压（远程未必有 python）。
-- 远程命令超时 + 中文错误提示；不可达部署显示"离线"。
----
+## 数据域 ↔ 实现映射
 
-## 6. GUI 重构（v0.4：控制台布局 + 多部署联动）
+| 数据域 | core 模块 | UI 页面 | 说明 |
+|--------|-----------|---------|------|
+| 会话/工作区/归档 | sessions.py | pyside/pages_sessions.py | 远程部署下写操作拒绝 |
+| Agent 模式 | data.py | pyside/pages_agents.py | .agent-presets 只读 |
+| Profile 管理 | profiles.py | pyside/pages_profiles.py | 复制/删除, web 拒删 |
+| 插件管理 | plugins.py | pyside/pages_plugins.py | 官方 dsh plugin 命令经 service.run_cmd |
+| 任务看板 | data.py | pyside/pages_taskboard.py | ledger-v2 + scheduler-v2 只读 |
+| 模型用量/价格 | data.py | pyside/pages_usage.py | zstd 解压聚合, 价格表可编辑 |
+| LLM/模型配置 | data.py | pyside/pages_llm.py | settings.yaml agent-default-model |
+| 备份/日志/凭据 | ops.py | pyside/pages_ops.py | 备份排除凭据 |
+| SSH 密钥 | keys.py | pyside/pages_keys.py | 私钥内容绝不读取 |
+| 版本/自更新 | version.py | pyside/pages_version.py | 控制台自身更新 |
+| 部署管理 | deployments.py | pyside/pages_deployments.py | 远程只读快照 |
+| 隧道/本机 dsh | dshctl.py + tunnels.py | dsh-console-aio.py(TunnelsPage) | 卡片动作经 service 信号桥 |
+| 总览 | data.py | dsh-console-aio.py(OverviewPage) | 部署状态快照(尚未走 service, 已知例外) |
 
-> 用户需求(2026-08-25): 当前 GUI 为单机+隧道为主, 不直观。改为"控制台"布局。
+## 信号-槽契约（硬约束）
 
-### 新布局
+- 业务层(dsh_core) **不 import PySide**，只向调用方抛纯数据事件/回调。
+- services.py 是**唯一**起后台线程并转 Qt 信号的地方；UI 只订阅信号 + 调 service 方法。
+- 禁止跨线程/跨进程直接改 UI（用户硬约束）。完整契约见 `docs/UI_LAYERING.md`。
 
-```
-┌────────────────────────────────────────────────────────┐
-│ 顶部: [dsh 控制台 v0.4] [部署选择器: 本机 ▾] [环境][安装][配置][dsh管理▾][刷新] │
-├──────────┬────────────────────────────┬────────────────┤
-│ 左导航     │ 中栏上部: 控制项页面(切换)   │ 右状态栏        │
-│ ▸ 总览     │ 总览/隧道/会话/插件/用量/   │ 本机端口        │
-│ ▸ 隧道     │ LLM/部署/主题/备份/关于     │ 远程隧道        │
-│ ▸ 会话     │                          │ 部署状态        │
-│ ▸ ...     │                          │                │
-├──────────┴────────────────────────────┴────────────────┤
-│ 底部: 控制台输出(日志常驻)                                │
-└────────────────────────────────────────────────────────┘
-```
+## 测试与安全边界
 
-### 技术决策: 继续 tkinter(不迁移 Qt)
-- 该布局 tkinter 完全可实现(Frame + PanedWindow + 导航 Listbox)。
-- 保持零依赖卖点(PySide6 会让安装包 +100MB, 破坏单文件零依赖)。
-- Qt 迁移 = 全部 UI 重写, 风险大收益有限; 若 tkinter 遇到无法满足的交互再评估。
+- 默认 `python -m pytest tests/` 只跑**纯单元 294 例**（`-m "not gui"`）；
+  构造 MainWindow 的测试(`test_gui_ui.py` / `test_gui_smoke.py`)一律 `-m gui` 人工执行——
+  **绝不自动跑会触碰端口 3080 真实 dsh 的测试**(历史事故教训)。
+- 纯单元测试隔离手段: DSH_AIO_CONFIG 假配置 + DSH_HOME 假目录 + monkeypatch 子进程 +
+  service 通道拦截 + threading.Thread.start 硬拦截。
+- 凭据安全红线: 私钥/API key 只显示存在性与指纹/环境变量名, 绝不读写明文; 远程写操作一律确认。
 
-### 页面体系
-- 页面 = 可嵌入中栏的 Frame 组件(类接口: build(parent, app) -> widget)。
-- 现有 mgmt_*.py 的 Toplevel 窗口分两类:
-  - 高价值页面化(会话/插件/用量/LLM/部署): 重构为页面类(保留 Toplevel 兼容)
-  - 工具类(主题/备份/关于): 保持 Toplevel 窗口(导航点击弹出)
-- 部署选择器: 顶部下拉(本机 + config.json deployments), 切换后中栏页面数据源
-  换为对应 DshRemote(remote 参数), 页面自动刷新。
+## 历史（tkinter 时代, 已废弃）
 
-### 轮询阻塞修复
-- 根因: _render 的 apply(主线程)里执行 _py_tunnel_running()(端口探测 IO)。
-- 修复: 探测全部在后台线程完成, apply 只做 widget 状态更新;
-  after 回调内禁止任何 IO/探测; 监控循环用 Event.wait 防堆积。
-
-### 实施顺序
-1. 布局骨架: 顶部栏 + 左导航 + 右状态 + 中栏容器 + 底部日志(重构 _build_ui)
-2. 总览页: 现有隧道卡片 + 健康监控移入中栏
-3. 部署选择器联动 + 轮询阻塞修复
-4. 高价值窗口页面化(会话/插件/用量/LLM/部署)
-5. 右状态栏: 本机/远程/部署状态汇总
+- 旧设计: 零依赖(仅 stdlib) tkinter 主程序 + `mgmt_*.py` 独立 Toplevel 管理窗口 +
+  `dsh_data.py` 数据层 + "dsh 管理"菜单。
+- 已由 PySide6 主框架替代(`07b70fd`), 旧 tkinter 主程序归档 `legacy/dsh-console-aio-tkinter.py`;
+  迁移记录见 `docs/PYSIDE_MIGRATION.md` 与 `RELEASE_NOTES.md`。

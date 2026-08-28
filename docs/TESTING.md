@@ -41,8 +41,9 @@ test_gui_ui.py 就这么做, 并通过 5 道隔离保证不碰真实资源(注�
 1. 假 config: 设 DSH_AIO_CONFIG 指向一个假 config.json(占位符 YOUR_*, 无真实服务器/IP),
    于是主程序 CONFIG 与 dsh_data.load_deployments() 全读假配置。
 2. 假 DSH_HOME: 设 DSH_HOME 指向临时假目录, 数据页(session/profile/用量等)读假数据。
-3. 拦截真实副作用: 把 MainWindow._start_monitor(真实健康监控线程)与 _stream_cmd(真实子进程)
-   替换为空实现, 避免探测端口 / 跑真实命令。
+3. 拦截真实副作用: 把 MainWindow._start_monitor(真实健康监控线程)与 DshService 子进程通道
+   (run_cmd/_run_result_op/_run_core_op —— 页面业务的统一出口, 原 MainWindow._stream_cmd
+   遗留已删除)替换为空实现, 避免探测端口 / 跑真实命令。
 4. --smoke 模式: OverviewPage 等在 smoke 下不做真联网/真操作。
 5. 线程硬拦截: 构造 MainWindow 前把 threading.Thread.start 替换为空实现(只登记线程对象
    到 _BLOCKED_THREADS), main_win 存续期间任何后台线程都不真正运行 —— 即使第 3 道拦截

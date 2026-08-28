@@ -8,7 +8,8 @@
 #   - DSH_AIO_CONFIG 指向假 config.json(占位符, 无真实服务器/IP);
 #     主程序 CONFIG 与 dsh_data.load_deployments 全部读假配置。
 #   - DSH_HOME 指向假目录, 数据页读假数据。
-#   - 拦截 MainWindow._start_monitor(真实健康监控线程)与 _stream_cmd(真实子进程)。
+#   - 拦截 MainWindow._start_monitor(真实健康监控线程); 子进程通道在 service 层拦截
+#     (DshService.run_cmd/_run_result_op/_run_core_op, 页面业务的统一出口)。
 #   - --smoke 模式: OverviewPage/总览等不做真联网/真操作。
 #   - 硬拦截 threading.Thread.start(main_win 存续期间): 任何后台线程都不真正运行,
 #     线程对象只被登记进 _BLOCKED_THREADS, 目标函数绝不执行 —— 即使上述拦截有遗漏,
@@ -83,11 +84,18 @@ def console(ui_env, qapp_mod):
 
 @pytest.fixture(scope="module")
 def main_win(qapp_mod, console):
-    # 离屏构造 MainWindow(smoke=True), 拦截真实副作用
+    # 离屏构造 MainWindow(smoke=True), 拦截真实副作用。
+    # 子进程通道拦截下沉到 service 层(DshService): 页面业务一律经 run_cmd/_run_result_op/
+    # _run_core_op 在后台线程执行(主窗口的 _stream_cmd 遗留已于清理时删除)。
+    from app import services as _services
     _orig_monitor = console.MainWindow._start_monitor
-    _orig_stream = console.MainWindow._stream_cmd
+    _orig_run_cmd = _services.DshService.run_cmd
+    _orig_run_result = _services.DshService._run_result_op
+    _orig_run_core = _services.DshService._run_core_op
     console.MainWindow._start_monitor = lambda self: None
-    console.MainWindow._stream_cmd = lambda self, cmd, cwd=None, env=None: True
+    _services.DshService.run_cmd = lambda self, cmd, cwd=None, env=None, op="run-cmd": None
+    _services.DshService._run_result_op = lambda self, *a, **k: None
+    _services.DshService._run_core_op = lambda self, *a, **k: None
     # 第 5 道隔离: 硬拦截 Thread.start 作为兜底 —— 即使上面两处拦截漏了某个入口,
     # 页面构造器起的 daemon 线程也只是被登记, 线程目标函数绝不执行, 不可能探测真实端口。
     _orig_thread_start = threading.Thread.start
@@ -103,10 +111,12 @@ def main_win(qapp_mod, console):
         win.close()
         qapp_mod.processEvents()
     finally:
-        # 三道拦截全部恢复, 缺一个都会把假环境泄漏到 fixture 之外的代码
+        # 拦截全部恢复, 缺一个都会把假环境泄漏到 fixture 之外的代码
         threading.Thread.start = _orig_thread_start
         console.MainWindow._start_monitor = _orig_monitor
-        console.MainWindow._stream_cmd = _orig_stream
+        _services.DshService.run_cmd = _orig_run_cmd
+        _services.DshService._run_result_op = _orig_run_result
+        _services.DshService._run_core_op = _orig_run_core
 
 
 class TestWindowConstruction:

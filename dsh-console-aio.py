@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-dsh-console-aio.py - dsh SSH 隧道管理 + 本机 dsh 启停 + 健康监控 (PySide6)。
-现代暗色主题 + 顶部部署栏 + 左导航 + 页面宿主 + 右状态栏(实时健康监控) + 底部日志 + 状态栏。
-复用数据层 dsh_data.py / tunnel_mgr.py 与 config.json；管理页在 pyside/pages_*.py，对话框在 pyside/dialogs.py。
+dsh-console-aio.py - dsh 控制台主程序 (PySide6): 主窗口骨架 + 总览/隧道页 + 日志桥。
+UI 分层: 后端业务在 dsh_core/(纯 Python 零 Qt), 信号桥在 app/services.py(DshService),
+管理页在 pyside/pages_*.py, 对话框在 pyside/dialogs.py, 主题在 ui/theme.qss(内嵌 QSS 兜底)。
+兼容 shim: dsh_data.py(转发 dsh_core.data); 隧道管理: tunnel_mgr.py(被 dsh_core.tunnels 使用)。
 
-运行(双击 exe 或):  C:/ProgramData/miniconda3/pythonw.exe dsh-console-aio.py
+运行(双击 exe 或):  C:/Users/1/.conda/envs/console/pythonw.exe dsh-console-aio.py
 离屏验证:  QT_QPA_PLATFORM=offscreen python dsh-console-aio.py --smoke
 """
 import os, sys, json, threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
-    QComboBox, QFrame, QScrollArea, QSizePolicy, QAbstractItemView,
+    QComboBox, QFrame, QSizePolicy, QAbstractItemView,
     QMessageBox)
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
-from PySide6.QtGui import QFont, QTextCursor, QColor
+from PySide6.QtGui import QTextCursor, QColor
 
 import dsh_data
 from app.services import DshService
@@ -42,9 +43,7 @@ def _load_config():
 CONFIG = _load_config()
 
 # ---------------- 业务常量(从 config.json 派生) ----------------
-DASH_REPO  = CONFIG.get("dash_repo") or ""
 DASH_PORT  = CONFIG.get("dash_port") or 3080
-POLL_SECONDS = CONFIG.get("poll_seconds") or 4
 
 BTN_TEXT = {"start": "启动", "restart": "重启", "persist": "常驻",
            "stop": "停止", "run": "运行更新"}
@@ -321,28 +320,6 @@ class OverviewPage(BasePage):
         return "   |  ".join(parts)
 
 
-# ---------------- 占位页(尚未迁移的 mgmt 页面) ----------------
-class PlaceholderPage(BasePage):
-    def __init__(self, app, name, parent=None):
-        self._name = name
-        super().__init__(app, parent)
-    def _build(self):
-        v = QVBoxLayout(self)
-        v.setContentsMargins(20, 20, 20, 20)
-        card = QFrame(objectName="card")
-        cv = QVBoxLayout(card)
-        cv.setContentsMargins(20, 20, 20, 20)
-        cv.setSpacing(8)
-        t = QLabel(self._name, objectName="cardTitle")
-        d = QLabel("该页面(mgmt_*.py)尚未迁移到 PySide6，仍是占位。", objectName="cardHint")
-        d.setWordWrap(True)
-        cv.addWidget(t)
-        cv.addWidget(d)
-        cv.addStretch(1)
-        v.addWidget(card)
-        v.addStretch(1)
-
-
 # ---------------- 右状态栏(监控点) ----------------
 class RightBar(QFrame):
     def __init__(self, parent=None):
@@ -416,7 +393,6 @@ class MainWindow(QMainWindow):
         self._current_page_key = None
         self._deployments = []
         self.bridge = LogBridge()
-        self.DASH_REPO = DASH_REPO          # 供插件等页面取 dsh 仓库目录(cwd)
         self.APP_VERSION = APP_VERSION
         # 业务层信号桥(dsh_core 的唯一 UI 入口): config 走 DSH_AIO_CONFIG, 与本模块一致。
         self.service = DshService.from_env(parent=self)
@@ -608,8 +584,8 @@ class MainWindow(QMainWindow):
             from pyside.pages_deployments import DeploymentPage
             page = DeploymentPage(self)
         else:
-            label = dict(NAV_ITEMS).get(key, key)
-            page = PlaceholderPage(self, label)
+            # 兜底(正常不可达: 13 个导航 key 全部有真实页面)
+            page = QLabel("未知页面: " + key)
         self.stack.addWidget(page)
 
     def _refresh_deploy_list(self):
@@ -649,18 +625,6 @@ class MainWindow(QMainWindow):
     def _set_status(self, text):
         if self.status is not None:
             self.status.setText(text)
-
-    def _stream_cmd(self, cmd, cwd=None, env=None):
-        # 流式运行命令, 逐行打进主日志; 返回 True/False。
-        # 实现收敛到 DshCtl.stream_cmd(超时/kill/FileNotFoundError 处理一致,
-        # update_timeout 取自同一份 config 派生, 见 dsh_core/config.py)。
-        # 仅供后台线程调用(loge 经 LogBridge 线程安全回主线程)。不可在主线程阻塞。
-        def _events(kind, payload):
-            # events 契约见 dsh_core/dshctl.py: ("log", (text, tag)) 逐行转主日志。
-            if kind == "log":
-                text, tag = payload
-                self.loge(text, tag)
-        return self.service.ctl.stream_cmd(cmd, cwd=cwd, env=env, events=_events)
 
     # ---- 右侧健康监控(探测业务在 dsh_core, 经 service.monitor 信号回主线程) ----
     def _start_monitor(self):

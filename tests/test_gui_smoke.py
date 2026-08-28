@@ -69,11 +69,17 @@ def main_win(qapp_mod, tmp_path):
     os.makedirs(fake_home, exist_ok=True)
     os.environ["DSH_HOME"] = fake_home
     mod = _get_main_mod()
-    # 隔离: 拦截真实健康监控线程与真实子进程流式命令
+    # 隔离: 拦截真实健康监控线程; 子进程通道下沉到 service 层(DshService)
+    # —— 页面业务经 run_cmd/_run_result_op/_run_core_op 后台执行, 不再走主窗口 _stream_cmd。
+    from app import services as _services
     _orig_monitor = mod.MainWindow._start_monitor
-    _orig_stream = mod.MainWindow._stream_cmd
+    _orig_run_cmd = _services.DshService.run_cmd
+    _orig_run_result = _services.DshService._run_result_op
+    _orig_run_core = _services.DshService._run_core_op
     mod.MainWindow._start_monitor = lambda self: None
-    mod.MainWindow._stream_cmd = lambda self, cmd, cwd=None, env=None: True
+    _services.DshService.run_cmd = lambda self, cmd, cwd=None, env=None, op="run-cmd": None
+    _services.DshService._run_result_op = lambda self, *a, **k: None
+    _services.DshService._run_core_op = lambda self, *a, **k: None
     try:
         win = mod.MainWindow(smoke=True)
         yield win
@@ -81,7 +87,9 @@ def main_win(qapp_mod, tmp_path):
         qapp_mod.processEvents()
     finally:
         mod.MainWindow._start_monitor = _orig_monitor
-        mod.MainWindow._stream_cmd = _orig_stream
+        _services.DshService.run_cmd = _orig_run_cmd
+        _services.DshService._run_result_op = _orig_run_result
+        _services.DshService._run_core_op = _orig_run_core
 
 
 class TestMainWindowConstruction:

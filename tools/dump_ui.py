@@ -8,9 +8,10 @@
 #
 # 安全性(重要): 本脚本构造真实 MainWindow/页面。页面构造器会启动 daemon 后台线程去读
 #       SSH/端口/进程等真实资源 —— 本脚本在 import 主程序前, 把 threading.Thread.start
-#       改成 no-op(所有后台线程不启动), 并拦截 MainWindow._start_monitor / _stream_cmd,
-#       再用全占位/空端口的假 config(DSH_AIO_CONFIG) 与假 DSH_HOME 隔离, 因此绝不触碰
-#       真实 config.json / 3080 / SSH / 端口 / 进程。
+#       改成 no-op(所有后台线程不启动), 并拦截 MainWindow._start_monitor 与 service 子进程
+#       通道(DshService.run_cmd/_run_result_op/_run_core_op, 原 MainWindow._stream_cmd
+#       遗留已删除), 再用全占位/空端口的假 config(DSH_AIO_CONFIG) 与假 DSH_HOME 隔离,
+#       因此绝不触碰真实 config.json / 3080 / SSH / 端口 / 进程。
 #
 # 运行:  python tools/dump_ui.py            (输出到仓库根 dump_ui.json / dump_ui.xml)
 #        python tools/dump_ui.py out_dir    (指定输出目录)
@@ -178,11 +179,17 @@ def main():
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
 
-    # 拦截监控与命令流(双保险)
+    # 拦截监控与命令流(双保险): service 子进程通道(run_cmd/_run_result_op/_run_core_op)
+    # 是页面业务统一出口(原 MainWindow._stream_cmd 遗留已删除)。
+    from app import services as _services
     _orig_monitor = console.MainWindow._start_monitor
-    _orig_stream = console.MainWindow._stream_cmd
+    _orig_run_cmd = _services.DshService.run_cmd
+    _orig_run_result = _services.DshService._run_result_op
+    _orig_run_core = _services.DshService._run_core_op
     console.MainWindow._start_monitor = lambda self: None
-    console.MainWindow._stream_cmd = lambda self, cmd, cwd=None, env=None: True
+    _services.DshService.run_cmd = lambda self, cmd, cwd=None, env=None, op="run-cmd": None
+    _services.DshService._run_result_op = lambda self, *a, **k: None
+    _services.DshService._run_core_op = lambda self, *a, **k: None
 
     try:
         win = console.MainWindow(smoke=True)
@@ -258,7 +265,9 @@ def main():
     finally:
         restore()
         console.MainWindow._start_monitor = _orig_monitor
-        console.MainWindow._stream_cmd = _orig_stream
+        _services.DshService.run_cmd = _orig_run_cmd
+        _services.DshService._run_result_op = _orig_run_result
+        _services.DshService._run_core_op = _orig_run_core
         shutil.rmtree(tmp, ignore_errors=True)
 
 

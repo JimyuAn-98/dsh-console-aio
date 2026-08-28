@@ -2,7 +2,7 @@
 # dsh_core/dshctl.py - 本机 dsh 启停 / 更新 / 监控探测(纯 Python, 不 import PySide)。
 #
 # 由 dsh-console-aio.py 中散落在 Qt 类里的业务逻辑抽出: _run_dsh/_dsh_start/_dsh_stop/
-# _probe/_ssh_proc_count/_probe_remote_tunnels/_stream_cmd。
+# _probe/_ssh_proc_count/_probe_remote_tunnels(原 _stream_cmd 流程已并入 stream_cmd)。
 #
 # 通讯约定: 本类不碰 UI。进度/结果通过 events(kind, payload) 回调向外报告(纯数据):
 #   events('log',    (text, tag))

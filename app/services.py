@@ -168,8 +168,7 @@ class DshService(QObject):
     # ---- 阶段2 波3: 插件/部署域(core 懒加载) + 通用流式命令 ----
     def run_cmd(self, cmd, cwd=None, env=None, op="run-cmd"):
         # 通用流式命令(dshctl.stream_cmd 的 service 入口): 逐行输出经 log 信号回主日志,
-        # 完成 finished(op, ok)。插件安装/卸载、环境工具命令等共用, 是页面脱开
-        # app._stream_cmd 依赖的正式通道。
+        # 完成 finished(op, ok)。插件安装/卸载、环境工具命令等共用的统一出口。
         ev = self._events()
 
         def run():

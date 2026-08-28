@@ -1,4 +1,4 @@
 {
-  "version": "0.3.0",
-  "notes": "v0.3.0: dsh 管理(All-In-One) - 会话/插件/用量/LLM 等 9 个管理窗口; 项目更名 dsh-console-aio"
+  "version": "0.5.0",
+  "notes": "v0.5.0: PySide6 迁移 + UI 前后端分层重构(dsh_core 业务层 + DshService 信号桥); 详见 RELEASE_NOTES.md"
 }

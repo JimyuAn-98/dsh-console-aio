@@ -341,7 +341,7 @@ def write_cordis_patch(profile, entries):
     return write_yaml(p, entries)
 
 def plugin_cmd(profile, *args):
-    # 组装 dsh plugin 命令(由 UI 层经 _stream_cmd 在 dsh 仓库目录执行)
+    # 组装 dsh plugin 命令(由 UI 层经 service.run_cmd 在 dsh 仓库目录执行)
     # 注意: dsh 需经 pnpm 调用(pnpm.cmd dsh ...), 且在 DASH_REPO 目录下执行
     return ["pnpm.cmd", "dsh", "plugin", "--profile", profile] + list(args)
 
