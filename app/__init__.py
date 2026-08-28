@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# app - UI 层: 展示 + 订阅信号 + 调服务。业务在 dsh_core。
+# app - 信号桥层: 唯一起后端线程并转 Qt 信号的地方。业务在 core。
 
 from . import services  # noqa: F401
 

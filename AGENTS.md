@@ -19,41 +19,53 @@ dsh-console-aio — PySide6（Qt）Windows GUI，面向 dsh 用户的"控制台"
    写业务字段/页面/模块之前，先定好架构、接口、页面范式；不在中途改框架。
 3. **所有逻辑实现一定要最简洁**：
    能简单实现、或用现有包/库的能力，就不要自己重复造轮子
-   （如 PySide6 的控件/布局, tunnel_mgr 的隧道, dsh_data 的数据函数, 页面只管调用）。
+   （如 PySide6 的控件/布局, core.tunnel_mgr 的隧道, core.data 的数据函数, 页面只管调用）。
 4. **测试和评审工作一定要完善**：
    每次改动 py_compile 必跑 + 页面构造/导航冒烟；
    能自行验证的测试做全；真实 SSH/启动服务等需要用户机器配合的才留给用户实测。
 
 ## 仓库布局
 
-dsh-console-aio.py   主程序（控制台布局: 顶部部署栏 + 左导航 + 中栏页面容器 + 右状态 + 底部日志）
-tunnel_mgr.py           纯 Python 隧道管理器（Tunnel 类: forward/reverse, start/persist/stop）
-dsh_data.py             数据层（~/.dsh 各数据域读取/写入/备份，纯函数零依赖）
-pyside/                  PySide6 页面包(pages_*.py: 会话/Agent/Profile/插件/看板/用量/LLM/运维/密钥/版本/部署; dialogs.py 对话框)
-version.json             发版版本源(检查更新读远程 main 分支此文件, 发版时更新)
-config.json             本地配置（真实 IP/用户名/路径，gitignore，绝不提交）
-config.example.json     配置模板（全占位符）
-启动dsh控制台.bat        双击启动器（conda pythonw 优先）
-legacy/                 旧 .ps1（只读历史参考，界面不再调用）
-docs/                   方案归档（ARCHITECTURE.md 架构 + PLANS.md 功能全景与路线）
-.agents/notes/          Agent Note 决策记录（见 .agents/notes/README.md）
+```
+dsh-console-aio.py  主程序（控制台布局: 顶部部署栏 + 左导航 + 中栏页面容器 + 右状态 + 底部日志）
+core/               后端业务层（纯 Python 零 Qt）: data.py 数据层 / tunnel_mgr.py 隧道 /
+                    dshctl.py 启停更新 / config.py / 各数据域(keys/env/ops/profiles/sessions/plugins/deployments/version)
+ui/                 前端页面包（pages_*.py: 会话/Agent/Profile/插件/看板/用量/LLM/运维/密钥/版本/部署;
+                    dialogs.py 对话框; base.py 页面基类; theme.qss 主题）
+app/                信号桥层（services.py: DshService, 唯一起后台线程并转 Qt 信号）
+tools/              工具（dump_ui.py 离屏渲染 dump）
+tests/              pytest 测试（纯单元默认跑; 构造 MainWindow 的测试须 -m gui 人工）
+docs/               文档（ARCHITECTURE.md 架构 + UI_LAYERING.md 分层契约 + TESTING.md + PLANS.md）
+installer/          Inno Setup 安装脚本(installer.iss) + 语言文件
+legacy/             旧 .ps1 / 旧 tkinter 主程序（只读历史参考，不再调用）
+.agents/notes/      Agent Note 决策记录（见 .agents/notes/README.md）
+version.json        发版版本源（检查更新读远程 main 分支此文件，发版时更新）
+config.json         本地配置（真实 IP/用户名/路径，gitignore，绝不提交）
+config.example.json 配置模板（全占位符）
+启动dsh控制台.bat    双击启动器（conda pythonw 优先）
+build_win.bat       一键打包: PyInstaller onefile exe + Inno Setup 安装包
+```
 
-架构分层（详见 docs/ARCHITECTURE.md）：主程序 MainWindow（顶部部署栏 + 左导航 + QStackedWidget 页面 + 右状态栏 + 底部日志，QSS 主题 ui/theme.qss）；数据层 dsh_data.py（纯函数，含 DshRemote 远程抽象）；pyside/ 包每页面一个 pages_*.py，继承 BasePage(app)，左导航路由注册在 NAV_ITEMS/_show_page；部署联动用 app._current_deploy 构造 DshRemote。
+架构分层（详见 docs/ARCHITECTURE.md）：core/ 纯业务（零 Qt，含 DshRemote 远程抽象）→
+app/services.py 信号桥（唯一线程出口，信号-槽硬约束）→ ui/ 页面 + 主程序（只展示 + 订阅信号 + 调 service）。
+ui/ 包每页面一个 pages_*.py，继承 BasePage(app)，左导航路由注册在 NAV_ITEMS/_show_page。
 
 ## 命令
 
-    python -m py_compile dsh-console-aio.py tunnel_mgr.py   # 编译检查（每次改动必跑）
+    python -m py_compile dsh-console-aio.py core/*.py ui/*.py app/*.py tests/*.py   # 编译检查（每次改动必跑）
     python dsh-console-aio.py                                # 运行 GUI
     git diff --cached --check                                   # 提交前检查（文件尾换行等）
     git push origin HEAD                                        # 推送（分支 main）
 build_win.bat                                                # 一键打包: PyInstaller onefile exe + Inno Setup 安装包(distsetup.exe)
-installer.iss                                                # Inno Setup 安装脚本(版本号在 #define MyAppVersion)
+installer/installer.iss                                      # Inno Setup 安装脚本(版本号在 #define MyAppVersion)
+
+文档约定：HANDOFF.md **仅在用户要求交接时更新**（平时不维护，不随每次改动刷新）。
 
 冒烟测试约定（只在本机无头环境做）：
 - GUI 测试用 timeout -k 3 N python 包裹，防止 600s 挂起（真实 SSH 到不可达主机是挂起主因，测试勿触发）。
 - 测试结束执行 win.close() + QApplication.processEvents() 或 app.quit() 正常退出。
 - 页面构造冒烟: 实例化 MainWindow 后遍历 NAV_ITEMS 逐个 _show_page + processEvents。
-- 不真跑 git clone / pnpm install / 升级命令；用 monkeypatch 拦截 _stream_cmd 验证命令参数与 env。
+- 不真跑 git clone / pnpm install / 升级命令；用 monkeypatch 拦截 DshCtl.stream_cmd / service.run_cmd 验证命令参数与 env。
 
 ## 安全与密钥
 
@@ -70,9 +82,9 @@ installer.iss                                                # Inno Setup 安装
 - Qt 线程安全：只有主线程可操作 QWidget；后台线程 emit 类级 Signal，槽函数在 Qt 事件循环中运行。
 - 三引号 docstring 禁令（本项目血泪教训）：经 JSON/补丁链路插入的多行字符串，三引号可能损坏成双引号导致 SyntaxError（invalid character '。'）。新代码一律用 # 注释代替 docstring；若必须用三引号，只写英文纯 ASCII 内容。
 - 错误处理：空 except 必须注释说明吞了什么、为何其他异常到不了这里；不静默失败，失败要有中文日志（self.log(..., "err")）与状态提示。
-- 危险操作：安装/更新/卸载/写配置一律先 QMessageBox.question 确认"将执行什么"，用户点是才执行；命令流式输出到主日志区（复用 _stream_cmd）。
+- 危险操作：安装/更新/卸载/写配置一律先 QMessageBox.question 确认"将执行什么"，用户点是才执行；命令流式输出到主日志区（经 service.run_cmd）。
 - 注释与文档：中文注释写契约与上下文，不叙述控制流，不注释代码中显而易见的事实；用直接具体的词，不用隐喻。
-- 命令输出：长耗时命令用 _stream_cmd（Popen 流式读行 + 超时 deadline + kill 兜底），不 capture 完再弹窗。
+- 命令输出：长耗时命令用 DshCtl.stream_cmd（Popen 流式读行 + 超时 deadline + kill 兜底），不 capture 完再弹窗。
 - 文件结尾：恰好一个换行；git diff --cached --check 门禁。
 - TODO 标记：FIXME(立即修) / TODO(计划) / XXX(危险)。
 - 对称性：平行取值保持对称，不对称往往意味着漏提取。

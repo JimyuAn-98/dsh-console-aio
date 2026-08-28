@@ -114,7 +114,7 @@ threading.Thread.start = _safe_start
 # ---- 2) 在假环境下动态加载主程序 ----
 def _import_console():
     ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    # 把仓库根加入 sys.path, 否则主程序里的 import dsh_data / tunnel_mgr / pyside.*
+    # 把仓库根加入 sys.path, 否则主程序里的 import core.data / core.tunnel_mgr / ui.*
     # 在 importlib 加载时解析不到(正常以 python 脚本启动会自动加脚本目录)。
     if ROOT_DIR not in sys.path:
         sys.path.insert(0, ROOT_DIR)

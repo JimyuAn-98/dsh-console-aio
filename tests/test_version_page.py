@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-# dsh_core/version.py 纯逻辑函数测试(业务已从 pages_version.py 下沉到 core)。
+# core/version.py 纯逻辑函数测试(业务已从 pages_version.py 下沉到 core)。
 # 覆盖: cmp_ver 版本号比较。
 # fetch / program_dir 等有副作用的函数只做路径验证, 不触发真实网络。
 
 import os
 
-from dsh_core.version import cmp_ver, program_dir, resource_dir
+from core.version import cmp_ver, program_dir, resource_dir
 
 
 class TestCmpVer:
@@ -49,7 +49,7 @@ class TestResourceDir:
     # program_dir / resource_dir: 路径定位。
     def test_program_dir_not_frozen(self):
         result = program_dir()
-        # 源码模式下应该是 dsh_core/ 的上级目录(项目根)
+        # 源码模式下应该是 core/ 的上级目录(项目根)
         assert os.path.isdir(result)
 
     def test_resource_dir_not_frozen(self):

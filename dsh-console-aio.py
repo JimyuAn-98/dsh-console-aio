@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 dsh-console-aio.py - dsh 控制台主程序 (PySide6): 主窗口骨架 + 总览/隧道页 + 日志桥。
-UI 分层: 后端业务在 dsh_core/(纯 Python 零 Qt), 信号桥在 app/services.py(DshService),
-管理页在 pyside/pages_*.py, 对话框在 pyside/dialogs.py, 主题在 ui/theme.qss(内嵌 QSS 兜底)。
-兼容 shim: dsh_data.py(转发 dsh_core.data); 隧道管理: tunnel_mgr.py(被 dsh_core.tunnels 使用)。
+UI 分层: 后端业务在 core/(纯 Python 零 Qt), 信号桥在 app/services.py(DshService),
+管理页在 ui/pages_*.py, 对话框在 ui/dialogs.py, 主题在 ui/theme.qss(内嵌 QSS 兜底)。
+兼容 shim: dsh_data.py(转发 core.data); 隧道管理: tunnel_mgr.py(被 core.tunnels 使用)。
 
 运行(双击 exe 或):  C:/Users/1/.conda/envs/console/pythonw.exe dsh-console-aio.py
 离屏验证:  QT_QPA_PLATFORM=offscreen python dsh-console-aio.py --smoke
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QEvent, QPoint
 from PySide6.QtGui import QTextCursor, QColor, QCursor
 
-import dsh_data
+from core import data as dsh_data
 from app.services import DshService
 
 if getattr(sys, 'frozen', False):
@@ -411,7 +411,7 @@ class MainWindow(QMainWindow):
         self._deployments = []
         self.bridge = LogBridge()
         self.APP_VERSION = APP_VERSION
-        # 业务层信号桥(dsh_core 的唯一 UI 入口): config 走 DSH_AIO_CONFIG, 与本模块一致。
+        # 业务层信号桥(core 的唯一 UI 入口): config 走 DSH_AIO_CONFIG, 与本模块一致。
         self.service = DshService.from_env(parent=self)
         # service -> 主窗口的日志/状态只在窗口级 connect 一次: 页面会随导航反复销毁重建,
         # 若在页面里 connect 到 app 的槽(接收者是长命的 MainWindow), 会导致连接叠加重复输出。
@@ -490,7 +490,7 @@ class MainWindow(QMainWindow):
     def _open_config(self):
         global CONFIG
         import copy
-        from pyside.dialogs import ConfigDialog
+        from ui.dialogs import ConfigDialog
         dlg = ConfigDialog(copy.deepcopy(CONFIG), parent=self, app=self)
         dlg.exec()
         if not getattr(dlg, "result", None):
@@ -510,11 +510,11 @@ class MainWindow(QMainWindow):
         self.set_status("配置已保存（隧道/端口等参数完整生效需重启）")
 
     def _open_env(self):
-        from pyside.dialogs import EnvDialog
+        from ui.dialogs import EnvDialog
         EnvDialog(self).exec()
 
     def _open_install(self):
-        from pyside.dialogs import InstallDialog
+        from ui.dialogs import InstallDialog
         dlg = InstallDialog(self)
         dlg.exec()
         if getattr(dlg, "result", None):
@@ -581,37 +581,37 @@ class MainWindow(QMainWindow):
         elif key == "tunnels":
             page = TunnelsPage(self)
         elif key == "sessions":
-            from pyside.pages_sessions import SessionPage
+            from ui.pages_sessions import SessionPage
             page = SessionPage(self)
         elif key == "profiles":
-            from pyside.pages_profiles import ProfilePage
+            from ui.pages_profiles import ProfilePage
             page = ProfilePage(self)
         elif key == "keys":
-            from pyside.pages_keys import KeysPage
+            from ui.pages_keys import KeysPage
             page = KeysPage(self)
         elif key == "taskboard":
-            from pyside.pages_taskboard import TaskboardPage
+            from ui.pages_taskboard import TaskboardPage
             page = TaskboardPage(self)
         elif key == "agents":
-            from pyside.pages_agents import AgentPage
+            from ui.pages_agents import AgentPage
             page = AgentPage(self)
         elif key == "plugins":
-            from pyside.pages_plugins import PluginPage
+            from ui.pages_plugins import PluginPage
             page = PluginPage(self)
         elif key == "usage":
-            from pyside.pages_usage import UsagePage
+            from ui.pages_usage import UsagePage
             page = UsagePage(self)
         elif key == "llm":
-            from pyside.pages_llm import LlmPage
+            from ui.pages_llm import LlmPage
             page = LlmPage(self)
         elif key == "ops":
-            from pyside.pages_ops import OpsPage
+            from ui.pages_ops import OpsPage
             page = OpsPage(self)
         elif key == "version":
-            from pyside.pages_version import VersionPage
+            from ui.pages_version import VersionPage
             page = VersionPage(self)
         elif key == "deployments":
-            from pyside.pages_deployments import DeploymentPage
+            from ui.pages_deployments import DeploymentPage
             page = DeploymentPage(self)
         else:
             # 兜底(正常不可达: 13 个导航 key 全部有真实页面)
@@ -714,7 +714,7 @@ class MainWindow(QMainWindow):
             cur = cur.parentWidget() if isinstance(cur, QWidget) else None
         return " > ".join(reversed(parts))
 
-    # ---- 右侧健康监控(探测业务在 dsh_core, 经 service.monitor 信号回主线程) ----
+    # ---- 右侧健康监控(探测业务在 core, 经 service.monitor 信号回主线程) ----
     def _start_monitor(self):
         self._monitor_busy = False
         self.service.monitor.connect(self._on_monitor)
@@ -868,7 +868,7 @@ class TunnelsPage(BasePage):
             return
         if key == "update-dsh":
             # 更新的是 dsh 本体(dash_repo), 不是本控制台(控制台更新在「关于与更新」页)。
-            # 流程: 停 web -> git 拉取 -> 清理旧构建 -> 依赖 -> 构建 -> 重启, 业务在 dsh_core.dshctl。
+            # 流程: 停 web -> git 拉取 -> 清理旧构建 -> 依赖 -> 构建 -> 重启, 业务在 core.dshctl。
             # 危险操作约定: 先确认"将执行什么", 用户点是才执行。
             ans = QMessageBox.question(
                 self, "更新 dsh",
@@ -887,7 +887,7 @@ class TunnelsPage(BasePage):
             self.app.set_status("正在运行更新(构建较久, 请耐心)...")
             self.app.service.update_dsh()
             return
-        # python 隧道: 启停/常驻重连业务在 dsh_core.tunnels; persist 停止标志由 service
+        # python 隧道: 启停/常驻重连业务在 core.tunnels; persist 停止标志由 service
         # 持有(窗口生命周期), 不再随页面重建丢失导致"停止后又被重连"。
         self.app.loge("[%s] 模式: %s (Python)" % (key, mode), "warn")
         self.app.set_status("正在执行 %s -> %s (Python) ..." % (mode, key))

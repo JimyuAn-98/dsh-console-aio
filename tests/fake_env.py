@@ -16,7 +16,7 @@ import shutil
 import pathlib
 import tempfile
 
-# 仓库根(pyside/.. 与 conftest 同规则)
+# 仓库根(ui/.. 与 conftest 同规则)
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -72,7 +72,7 @@ def make_fake_config_file(tmp_root):
 def point_dsh_data_to(fake_config_file_or_dir, fake_home_dir):
     """让 config.json 定位与 DSH_HOME 都落到假目录(纯环境变量, 不侵入代码逻辑)。
 
-    - DSH_AIO_CONFIG 指向假 config.json 文件: 主程序 dsh-console-aio.py 与 dsh_data._config_path()
+    - DSH_AIO_CONFIG 指向假 config.json 文件: 主程序 dsh-console-aio.py 与 core.data._config_path()
       都会优先读它, 从而 load_deployments/save_deployments/主程序 CONFIG 全用假配置(占位符)。
     - DSH_HOME 指向假目录: profiles/sessions/settings 等读假数据。
     返回 (恢复函数)。

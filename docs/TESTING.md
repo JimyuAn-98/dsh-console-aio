@@ -6,11 +6,12 @@
 
 | 层次 | 文件 | 测什么 | 默认是否运行 | 触碰真实资源? |
 |------|------|--------|------------|--------------|
-| 纯单元 | tests/test_dsh_data.py | 数据层纯函数(YAML/路径/备份/会话/Profile/用量/部署/SSH命令等) | 是 | 否(用临时 tmp 数据) |
+| 纯单元 | tests/test_core_data.py | 数据层纯函数(YAML/路径/备份/会话/Profile/用量/部署/SSH命令等) | 是 | 否(用临时 tmp 数据) |
 | 纯单元 | tests/test_tunnel_mgr.py | 隧道管理器纯逻辑(tcp_ok/PID文件/Tunnel命令组装) | 是 | 否(临时目录) |
 | 纯单元 | tests/test_version_page.py | 版本号比较 / 路径定位 | 是 | 否 |
 | 纯单元 | tests/test_dialogs.py | 对话框构造 + 字段/保存逻辑 | 是 | 否(不写真实 config) |
-| 纯单元 | tests/test_dsh_core.py | 业务层: config 派生兜底规则(默认/allow_empty_ports)/TunnelManager 组装/DshService 信号桥契约 | 是 | 否(端口全 0/空, 不起线程) |
+| 纯单元 | tests/test_core.py | 业务层: config 派生兜底规则(默认/allow_empty_ports)/TunnelManager 组装/DshService 信号桥契约 | 是 | 否(端口全 0/空, 不起线程) |
+| 纯单元 | tests/test_core_*.py | 各数据域业务测试(keys/env/ops/profiles/sessions/plugins/deployments/version) + 卡片状态映射(test_card_states) | 是 | 否(monkeypatch + 假 DSH_HOME) |
 | GUI 元素(人工) | tests/test_gui_ui.py | 离屏构造真实 MainWindow, 测页面/导航/按钮接线/日志桥/右栏状态 | 否, 需 -m gui | 否(假 config+假 DSH_HOME+拦截线程; 但构造 MainWindow 本身违反铁律, 故仅人工) |
 | 真实资源(人工) | tests/test_gui_smoke.py | 真实 MainWindow 监控/SSH/端口/启停 dsh 的冒烟 | 否, 需 -m gui | **是, 必须人工执行** |
 
@@ -39,7 +40,7 @@ PySide6 支持离屏(offscreen)运行: 不弹真实窗口, 也能在内存里实
 test_gui_ui.py 就这么做, 并通过 5 道隔离保证不碰真实资源(注意: 该文件按铁律已标记 gui, 仅人工 -m gui 执行):
 
 1. 假 config: 设 DSH_AIO_CONFIG 指向一个假 config.json(占位符 YOUR_*, 无真实服务器/IP),
-   于是主程序 CONFIG 与 dsh_data.load_deployments() 全读假配置。
+   于是主程序 CONFIG 与 core.data.load_deployments() 全读假配置。
 2. 假 DSH_HOME: 设 DSH_HOME 指向临时假目录, 数据页(session/profile/用量等)读假数据。
 3. 拦截真实副作用: 把 MainWindow._start_monitor(真实健康监控线程)与 DshService 子进程通道
    (run_cmd/_run_result_op/_run_core_op —— 页面业务的统一出口, 原 MainWindow._stream_cmd
@@ -71,7 +72,7 @@ tests/fake_env.py 提供假环境构造器, 供纯 UI 测试与 -m gui 人工测
 - make_fake_home(tmp): 构造模拟 ~/.dsh 目录(profiles/sessions/storages/task-board/.agent-presets/settings.yaml)。
 - default_env(tmp): 一键完成「假 config + 假 DSH_HOME + 设好 DSH_AIO_CONFIG/DSH_HOME」, 返回 (cfg, home, restore)。
 
-> DSH_AIO_CONFIG 是新增的环境变量开关: 主程序 dsh-console-aio.py 与 dsh_data._config_path() 在设置时
+> DSH_AIO_CONFIG 是新增的环境变量开关: 主程序 dsh-console-aio.py 与 core.data._config_path() 在设置时
 > 优先读它指向的 config.json(测试隔离用), 未设置时不改变原行为(仍读 exe/源码目录下的 config.json)。
 > 这属于**业务代码的小改动**, 需随本次收尾一并 review/提交。
 
@@ -82,5 +83,5 @@ tests/fake_env.py 提供假环境构造器, 供纯 UI 测试与 -m gui 人工测
    这些必须由人工在可控环境 -m gui 执行并观察, 自动化不代跑。
 3. 新增测试: 若你写会触碰真实资源(网络/进程/端口/真实 config)的用例, 务必加 @pytest.mark.gui,
    并写到 test_gui_smoke.py(或单独 -m gui 文件), 不要混进默认运行的纯测试。
-4. 改动后必做: python -m py_compile dsh_data.py tunnel_mgr.py dsh-console-aio.py + 一次 pytest tests/(安全层)
+4. 改动后必做: python -m py_compile dsh-console-aio.py core/*.py ui/*.py app/*.py tests/*.py + 一次 pytest tests/(安全层)
    + --collect-only 确认方向, AGENTS.md 的冒烟约定不变。

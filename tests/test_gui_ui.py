@@ -154,9 +154,9 @@ class TestNavToPages:
         assert main_win.stack.currentWidget() is not None
 
     def test_page_types(self, main_win, qapp_mod, console):
-        from pyside.pages_sessions import SessionPage
-        from pyside.pages_deployments import DeploymentPage
-        from pyside.pages_version import VersionPage
+        from ui.pages_sessions import SessionPage
+        from ui.pages_deployments import DeploymentPage
+        from ui.pages_version import VersionPage
         expect = {"overview": console.OverviewPage, "tunnels": console.TunnelsPage,
                   "sessions": SessionPage, "deployments": DeploymentPage,
                   "version": VersionPage}

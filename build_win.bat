@@ -37,14 +37,14 @@ cd /d "%~dp0"
 echo [1/2] PyInstaller onefile build (PySide6)...
 "%PYTHON_EXE%" -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name dsh-console-aio ^
-  --hidden-import dsh_data --hidden-import tunnel_mgr ^
-  --hidden-import pyside.dialogs ^
-  --hidden-import pyside.pages_sessions --hidden-import pyside.pages_agents ^
-  --hidden-import pyside.pages_profiles --hidden-import pyside.pages_plugins ^
-  --hidden-import pyside.pages_taskboard --hidden-import pyside.pages_usage ^
-  --hidden-import pyside.pages_llm --hidden-import pyside.pages_ops ^
-  --hidden-import pyside.pages_keys --hidden-import pyside.pages_version ^
-  --hidden-import pyside.pages_deployments ^
+  --hidden-import core --hidden-import core.tunnel_mgr ^
+  --hidden-import ui.dialogs ^
+  --hidden-import ui.pages_sessions --hidden-import ui.pages_agents ^
+  --hidden-import ui.pages_profiles --hidden-import ui.pages_plugins ^
+  --hidden-import ui.pages_taskboard --hidden-import ui.pages_usage ^
+  --hidden-import ui.pages_llm --hidden-import ui.pages_ops ^
+  --hidden-import ui.pages_keys --hidden-import ui.pages_version ^
+  --hidden-import ui.pages_deployments ^
   --add-data "ui/theme.qss;ui" ^
   --add-data "RELEASE_NOTES.md;." ^
   dsh-console-aio.py
@@ -60,7 +60,7 @@ if not exist "%ISCC%" set "ISCC=%LocalAppData%\Programs\Inno Setup 6\ISCC.exe"
 if not exist "%ISCC%" (
     echo [WARN] ISCC.exe not found - installer skipped. Install Inno Setup 6.
 ) else (
-    "%ISCC%" installer.iss
+    "%ISCC%" installer\installer.iss
     if errorlevel 1 (
         echo [ERROR] Installer build failed.
         pause & exit /b 1

@@ -149,19 +149,19 @@ class TestPageNavigation:
         assert isinstance(main_win.stack.currentWidget(), mod.TunnelsPage)
 
     def test_sessions_page_type(self, main_win, qapp_mod):
-        from pyside.pages_sessions import SessionPage
+        from ui.pages_sessions import SessionPage
         main_win._show_page("sessions")
         qapp_mod.processEvents()
         assert isinstance(main_win.stack.currentWidget(), SessionPage)
 
     def test_deployments_page_type(self, main_win, qapp_mod):
-        from pyside.pages_deployments import DeploymentPage
+        from ui.pages_deployments import DeploymentPage
         main_win._show_page("deployments")
         qapp_mod.processEvents()
         assert isinstance(main_win.stack.currentWidget(), DeploymentPage)
 
     def test_version_page_type(self, main_win, qapp_mod):
-        from pyside.pages_version import VersionPage
+        from ui.pages_version import VersionPage
         main_win._show_page("version")
         qapp_mod.processEvents()
         assert isinstance(main_win.stack.currentWidget(), VersionPage)

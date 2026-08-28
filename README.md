@@ -131,7 +131,7 @@
 ### 隧道引擎
 | 模块 | 作用 | 状态 |
 |------|------|------|
-| tunnel_mgr.py | 纯 Python 隧道管理器（forward/reverse, start/persist/stop） | ✅ |
+| core/tunnel_mgr.py | 纯 Python 隧道管理器（forward/reverse, start/persist/stop） | ✅ |
 | dsh-tunnel 卡片 | 在家正向隧道三连（8090/8022/8091） | ✅ 纯 Python |
 | connect-lab-dsh 卡片 | 实验室局域网直连 实验室dsh（本机 3090） | ✅ 纯 Python |
 | dsh-tunnel-reverse 卡片 | 本机 dsh -> 公网服务器 反向隧道（公网服务器:8091 -> 3080） | ✅ 纯 Python |
@@ -179,13 +179,13 @@
 
 ## Roadmap（dsh 控制台进化路线）
 - [x] 配置外置到 config.json（IP/用户/端口/轮询）
-- [x] 全部卡片 Python 化（tunnel_mgr.py + 纯 Python 更新）
+- [x] 全部卡片 Python 化（core/tunnel_mgr.py + 纯 Python 更新）
 - [x] 旧 .ps1 收进 legacy/
 - [x] 一键安装 dsh + 环境检查（更新/安装/卸载引导）
 - [ ] 打包成单文件 exe（PyInstaller）
 - [ ] 配置热重载（保存后无需重启）
 - [ ] 多套拓扑配置切换
-- [x] **dsh 管理菜单**（v2 架构：数据层 dsh_data.py + mgmt_*.py 模块）
+- [x] **dsh 管理菜单**（v2 架构：数据层 dsh_data.py + mgmt_*.py 模块，后迁 PySide6）
 - [x] **会话与工作区管理**：分组浏览 / 归档 / 恢复 / 删除（二次确认）
 - [x] **Agent 模式管理**：preset 浏览与说明
 - [x] **Profile 管理**：列出 / 复制 / 删除
@@ -296,7 +296,7 @@ Pushing a `v*` tag triggers the CI workflow: PyInstaller onefile exe → Inno Se
 - [ ] Package as single-file exe (PyInstaller)
 - [ ] Config hot-reload
 - [ ] Multiple topology profiles
-- [x] dsh management menu (v2: dsh_data.py data layer + mgmt_*.py modules)
+- [x] dsh management menu (v2: dsh_data.py data layer + mgmt_*.py modules, later migrated to PySide6)
 - [x] Session & workspace manager (group browse / archive / restore / delete)
 - [x] Agent preset manager (browse & docs)
 - [x] Profile manager (list / copy / delete)

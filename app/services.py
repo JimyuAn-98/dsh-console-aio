@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # app/services.py - 接口层(可 import PySide): 唯一"起后端线程 + 转结果"的地方。
 #
-# 硬约束(见 docs/UI_LAYERING.md): 后端(dsh_core)与 UI 之间一律走 Qt 信号-槽。
-# 本类持有 QObject + Signal; 后台线程跑 dsh_core 的函数, 把它的 events 回调转发到
+# 硬约束(见 docs/UI_LAYERING.md): 后端(core)与 UI 之间一律走 Qt 信号-槽。
+# 本类持有 QObject + Signal; 后台线程跑 core 的函数, 把它的 events 回调转发到
 # Signal.emit —— Qt 会自动把信号排队到接收者线程(线程安全)。后端线程绝不直接改 UI,
 # UI 只 connect 信号 + 调本类的触发方法。
 
@@ -10,9 +10,9 @@ import threading
 
 from PySide6.QtCore import QObject, Signal
 
-from dsh_core import config as dsh_config
-from dsh_core.dshctl import DshCtl
-from dsh_core.tunnels import TunnelManager
+from core import config as dsh_config
+from core.dshctl import DshCtl
+from core.tunnels import TunnelManager
 
 
 class DshService(QObject):
@@ -125,44 +125,44 @@ class DshService(QObject):
             self.finished.emit(op, not payload.get("err"))
         threading.Thread(target=run, daemon=True).start()
 
-    # core 模块懒加载: 对应 dsh_core/<域>.py 由阶段2 各波次落地, 未落地前本类仍可导入。
+    # core 模块懒加载: 对应 core/<域>.py 由阶段2 各波次落地, 未落地前本类仍可导入。
     def check_console_update(self, op="version-check"):
-        from dsh_core import version as _version
+        from core import version as _version
         self._run_result_op(op, _version.check_latest)
 
     def update_console(self, op="version-update"):
-        from dsh_core import version as _version
+        from core import version as _version
         self._run_result_op(op, _version.download_and_apply, self.base_dir)
 
     def list_ssh_keys(self, op="keys-list"):
-        from dsh_core import keys as _keys
+        from core import keys as _keys
         self._run_result_op(op, _keys.list_keys)
 
     def generate_ssh_key(self, name, op="keys-gen"):
-        from dsh_core import keys as _keys
+        from core import keys as _keys
         self._run_result_op(op, _keys.generate_key, name)
 
     # ---- 阶段2 波2: 写盘类操作(core 懒加载) ----
     # 远程只读红线在页面侧执行(_current_deploy 非 None 时拒绝写操作并中文提示)。
     def backup_dsh_home(self, target, op="ops-backup"):
-        from dsh_core import ops as _ops
+        from core import ops as _ops
         self._run_result_op(op, _ops.backup_dsh_home, target)
 
     def copy_profile(self, src, new, op="profile-copy"):
-        from dsh_core import profiles as _profiles
+        from core import profiles as _profiles
         self._run_result_op(op, _profiles.copy_profile, src, new)
 
     def delete_profile(self, name, op="profile-delete"):
-        from dsh_core import profiles as _profiles
+        from core import profiles as _profiles
         self._run_result_op(op, _profiles.delete_profile, name)
 
     def set_sessions_archived(self, session_ids, op="sessions-archive"):
         # session_ids 为归档后的完整 id 列表(整体替换 workspace.json 的 archivedSessionIds)。
-        from dsh_core import sessions as _sessions
+        from core import sessions as _sessions
         self._run_result_op(op, _sessions.set_archived, session_ids)
 
     def delete_session_group(self, workdir, op="sessions-delete"):
-        from dsh_core import sessions as _sessions
+        from core import sessions as _sessions
         self._run_result_op(op, _sessions.delete_group, workdir)
 
     # ---- 阶段2 波3: 插件/部署域(core 懒加载) + 通用流式命令 ----
@@ -181,29 +181,29 @@ class DshService(QObject):
         threading.Thread(target=run, daemon=True).start()
 
     def load_plugins(self, profile, remote=None, op="plugins-load"):
-        from dsh_core import plugins as _plugins
+        from core import plugins as _plugins
         self._run_result_op(op, _plugins.load_view, profile, remote,
                             self.ctl.d.get("dash_repo") or "")
 
     def toggle_plugin(self, profile, eid, disabled, op="plugins-toggle"):
-        from dsh_core import plugins as _plugins
+        from core import plugins as _plugins
         self._run_result_op(op, _plugins.set_disabled, profile, eid, disabled)
 
     def refresh_deployments(self, deps, op="deploy-refresh"):
-        from dsh_core import deployments as _deployments
+        from core import deployments as _deployments
         self._run_result_op(op, _deployments.snapshot_all, deps)
 
     def test_deployment(self, dep, op="deploy-test"):
-        from dsh_core import deployments as _deployments
+        from core import deployments as _deployments
         self._run_result_op(op, _deployments.test_conn, dep)
 
     def save_deployments(self, depls, op="deploy-save"):
-        from dsh_core import deployments as _deployments
+        from core import deployments as _deployments
         self._run_result_op(op, _deployments.save, depls)
 
-    # ---- 阶段4: 纯读/轻写页统一经 service(dsh_core.data 懒加载) ----
+    # ---- 阶段4: 纯读/轻写页统一经 service(core.data 懒加载) ----
     def _run_core_op(self, op, func, *args):
-        # 通用 core 调用: func 为 dsh_core.data 的纯数据函数(签名不带 events 回调, 与
+        # 通用 core 调用: func 为 core.data 的纯数据函数(签名不带 events 回调, 与
         # _run_result_op 的域函数不同), 返回值原样包装为 {"data":..., "err":...};
         # 异常以恰好一次 result/finished 收场, 不让 UI busy 卡死。
         def run():
@@ -217,24 +217,24 @@ class DshService(QObject):
         threading.Thread(target=run, daemon=True).start()
 
     def list_agent_presets(self, remote=None, op="agents-list"):
-        from dsh_core import data as _data
+        from core import data as _data
         self._run_core_op(op, _data.list_agent_presets, remote)
 
     def read_taskboard(self, remote=None, op="taskboard-read"):
-        from dsh_core import data as _data
+        from core import data as _data
         self._run_core_op(op, _data.read_taskboard, remote)
 
     def read_usage_stats(self, remote=None, op="usage-read"):
-        from dsh_core import data as _data
+        from core import data as _data
         self._run_core_op(op, _data.usage_stats, remote)
 
     def read_settings(self, remote=None, op="llm-read"):
-        from dsh_core import data as _data
+        from core import data as _data
         self._run_core_op(op, _data.read_settings, remote)
 
     def write_settings(self, data, op="llm-save"):
         # 写 settings.yaml(数据层写前 .bak); 写业务唯一出口, 页面组装好完整 data 传入。
-        from dsh_core import data as _data
+        from core import data as _data
         self._run_core_op(op, _data.write_settings, data)
 
     # ---- 构造 ----

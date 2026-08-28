@@ -19,7 +19,7 @@ import pytest
 # 全局无头: 任何 GUI 相关代码在离屏平台下运行, 避免弹出真实窗口。
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-# 项目根目录加入 sys.path(确保 import dsh_data / tunnel_mgr 可达)
+# 项目根目录加入 sys.path(确保 import core.data / core.tunnel_mgr 可达)
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)

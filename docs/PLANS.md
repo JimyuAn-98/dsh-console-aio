@@ -188,7 +188,7 @@
 5. 主题 + LLM/模型配置 → mgmt_theme.py + mgmt_llm.py + mgmt_usage.py
 6. 备份/迁移 + 凭据提示 → mgmt_ops.py
 
-架构: dsh_data.py 数据层(零依赖最小YAML解析器/写前备份) + 主程序顶部 dsh 管理菜单动态加载, 见 docs/ARCHITECTURE.md
+架构: core/data.py 数据层(零依赖最小YAML解析器/写前备份) + 主程序顶部 dsh 管理菜单动态加载, 见 docs/ARCHITECTURE.md
 
 ---
 
@@ -201,7 +201,7 @@
 ### 调研结论
 - dsh-desktop: 把 dsh web + 插件系统封装成桌面应用(单机), 无多部署管理。
 - 我们的 SSH 隧道架构已打通多机网络层(现成基础设施)。
-- dsh_data.py 是纯函数路径操作, 可加"远程抽象"复用全部数据域接口。
+- core/data.py 是纯函数路径操作, 可加"远程抽象"复用全部数据域接口。
 
 ### 架构设计(见 docs/ARCHITECTURE.md 第 5 节)
 - DshRemote 抽象: 本地模式=直接文件系统; 远程模式=SSH 执行只读命令 + 文件拉取(cat)。
@@ -234,8 +234,8 @@
 
 ## 10. 自动化测试套件（pytest）[2026-08-28 加入]
 
-- `tests/` 提供 pytest 测试: test_dsh_data(数据层) / test_tunnel_mgr(隧道) / test_version_page(版本比较) /
-  test_dialogs(对话框) / test_dsh_core(业务层: config 派生/隧道组装/信号桥) / test_gui_ui(纯 UI) /
+- `tests/` 提供 pytest 测试: test_core.data(数据层) / test_core.tunnel_mgr(隧道) / test_version_page(版本比较) /
+  test_dialogs(对话框) / test_core(业务层: config 派生/隧道组装/信号桥) / test_gui_ui(纯 UI) /
   test_gui_smoke(GUI 冒烟)。运行: `python -m pytest tests/`。
 - **安全边界**(新增): 默认 `-m "not gui"`, 只执行纯单元 + 纯 UI 测试(隔离 tmp 数据/假配置)。
   涉及真实 MainWindow 监控线程 / SSH / 端口 / 进程的 GUI 冒烟(test_gui_smoke)默认跳过,
@@ -246,18 +246,18 @@
 
 ## 11. UI 前后端分层重构 [进行中·阶段0 完成 2026-08-28]
 
-- **目标**: 经典 Qt 分层 —— 纯 Python 业务层(dsh_core, 严禁 import PySide) + 信号桥接口层
+- **目标**: 经典 Qt 分层 —— 纯 Python 业务层(core, 严禁 import PySide) + 信号桥接口层
   (app/services.DshService) + 只做展示/订阅的 UI 层。后端->UI 一律 Qt 信号-槽(硬约束)。
 - 设计与迁移计划见 docs/UI_LAYERING.md; 决策记录见
   .agents/notes/implemented/architecture/2026-08-28-ui-layering-signal-bridge.md。
-- **阶段0 已完成**: dsh_core(config/dshctl/tunnels) + DshService 五信号桥;
+- **阶段0 已完成**: core(config/dshctl/tunnels) + DshService 五信号桥;
   隧道页/主窗口监控从内联业务改走 service(_run_dsh/_dsh_start/_dsh_stop/_run_python_tunnel/
   _start_persist/_stop_py_tunnel/_build_tunnel_obj/_probe 三件套全部删除);
   config.derived 增加 allow_empty_ports 隔离分支(测试用假配置不再被兜底回真实端口)。
 - **后续阶段**: 阶段2 全部完成(波0 result 信号 + 波1 version/keys + 波2 ops/profiles/
-  sessions + 波3 plugins/deployments), 阶段3 完成(dialogs 业务下沉 dsh_core/env.py,
-  三份 _stream_cmd 归一)。**剩余 = 阶段4**: dsh_data.py 归并进 dsh_core, 页面纯读统一
-  经 service(agents/taskboard/usage/llm 四个纯读页随阶段4)。分波依据 pyside 全量审计
+  sessions + 波3 plugins/deployments), 阶段3 完成(dialogs 业务下沉 core/env.py,
+  三份 _stream_cmd 归一), 阶段4 完成(2026-08-29: dsh_data.py 归并 core/data.py,
+  四个纯读页 agents/taskboard/usage/llm 统一经 service)。分波依据 ui 全量审计
   (2026-08-28, subagent 产出)。
-- **验证边界**: dsh_core 可独立纯单元测试(tests/test_dsh_core.py, 零真实资源);
+- **验证边界**: core 可独立纯单元测试(tests/test_core.py, 零真实资源);
   GUI 交互(隧道启停/监控/3080 无恙)由用户人工在 GUI 验证, 绝不自动跑构造 MainWindow 的测试。
