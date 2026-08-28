@@ -33,6 +33,10 @@ from fake_env import default_env
 
 pytest.importorskip("PySide6")
 
+# 本文件构造真实 MainWindow 与全部页面 —— 按铁律(HANDOFF.md)不得默认自动运行,
+# 仅 `-m gui` 人工执行(与 test_gui_smoke.py 同等待遇)。
+pytestmark = pytest.mark.gui
+
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 被拦截(未真正启动)的线程对象登记处: 哨兵测试据此断言线程拦截生效

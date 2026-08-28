@@ -1,6 +1,6 @@
 # 自动化测试（pytest）说明
 
-本仓库用 pytest 做自动化测试, 分两个边界清晰的层次。**默认只跑「纯单元 / 纯 UI」层, 绝不触碰正在运行的 dsh(端口 3080)。**
+本仓库用 pytest 做自动化测试, 分两个边界清晰的层次。**默认只跑「纯单元」层; 任何构造 MainWindow 的测试(含 test_gui_ui.py)一律 `-m gui` 人工执行, 绝不触碰正在运行的 dsh(端口 3080)。**
 
 ## 一、两层测试
 
@@ -11,29 +11,32 @@
 | 纯单元 | tests/test_version_page.py | 版本号比较 / 路径定位 | 是 | 否 |
 | 纯单元 | tests/test_dialogs.py | 对话框构造 + 字段/保存逻辑 | 是 | 否(不写真实 config) |
 | 纯单元 | tests/test_dsh_core.py | 业务层: config 派生兜底规则(默认/allow_empty_ports)/TunnelManager 组装/DshService 信号桥契约 | 是 | 否(端口全 0/空, 不起线程) |
-| 纯 UI  | tests/test_gui_ui.py | 离屏构造真实 MainWindow, 测页面/导航/按钮接线/日志桥/右栏状态 | 是 | 否(假 config+假 DSH_HOME+拦截线程) |
+| GUI 元素(人工) | tests/test_gui_ui.py | 离屏构造真实 MainWindow, 测页面/导航/按钮接线/日志桥/右栏状态 | 否, 需 -m gui | 否(假 config+假 DSH_HOME+拦截线程; 但构造 MainWindow 本身违反铁律, 故仅人工) |
 | 真实资源(人工) | tests/test_gui_smoke.py | 真实 MainWindow 监控/SSH/端口/启停 dsh 的冒烟 | 否, 需 -m gui | **是, 必须人工执行** |
 
 ## 二、怎么运行
 
 ```bash
-# 1) 只跑安全的纯单元 + 纯 UI 测试(推荐, 默认)
+# 1) 只跑安全的纯单元测试(推荐, 默认)
 python -m pytest tests/
 
 # 2) 只看收集到的用例数(不执行, 不碰真实资源)
 python -m pytest tests/ --collect-only -q
 
-# 3) 手动执行真实资源 GUI 冒烟(人工把关, 见下)
+# 3) 手动执行 GUI 元素测试(构造 MainWindow, 人工把关, 见下)
+python -m pytest tests/test_gui_ui.py -m gui
+
+# 4) 手动执行真实资源 GUI 冒烟(人工把关, 见下)
 python -m pytest tests/test_gui_smoke.py -m gui
 ```
 
-> 关键: 默认 -m "not gui"(见 pytest.ini), 所以 test_gui_smoke.py 的 40 个用例默认被跳过,
-> 只有显式 -m gui 才执行。**切勿在 dsh(端口 3080)正在运行时自动跑真实资源测试。**
+> 关键: 默认 -m "not gui"(见 pytest.ini), 所以 test_gui_smoke.py 与 test_gui_ui.py 默认被跳过,
+> 只有显式 -m gui 才执行。**切勿在 dsh(端口 3080)正在运行时自动跑构造 MainWindow / 真实资源的测试。**
 
 ## 三、不打开真实 GUI 也能测 GUI 元素——原理(纯 UI 层)
 
 PySide6 支持离屏(offscreen)运行: 不弹真实窗口, 也能在内存里实例化真实的 MainWindow 和页面控件。
-test_gui_ui.py 就这么做, 并通过 5 道隔离保证不碰真实资源:
+test_gui_ui.py 就这么做, 并通过 5 道隔离保证不碰真实资源(注意: 该文件按铁律已标记 gui, 仅人工 -m gui 执行):
 
 1. 假 config: 设 DSH_AIO_CONFIG 指向一个假 config.json(占位符 YOUR_*, 无真实服务器/IP),
    于是主程序 CONFIG 与 dsh_data.load_deployments() 全读假配置。
