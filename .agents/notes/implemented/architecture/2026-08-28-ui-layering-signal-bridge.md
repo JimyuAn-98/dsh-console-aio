@@ -86,3 +86,15 @@ pages_* 直接 import subprocess 干业务), 业务不可独立测试、与 UI �
   数据层从来就没有写函数) —— core 信封直写(保留未知顶层 key, 写前 .bak)修复;
   ② profiles 列表线程直接 _data.emit 未用 safe_emit; ③ 远程部署下"读远程写本机"
   的语义错误 —— 统一远程只读红线(页面侧 _remote 非 None 拒绝写操作并中文提示)。
+- **波3+阶段3(2026-08-29, 主 agent 直写)**: 用户拍板平台不稳时不再派 subagent。
+  波3: plugins(deployments) 域下沉; 新增 service.run_cmd 通用流式命令通道(逐行经
+  log 信号, 完成 finished), 页面全面解除 app._stream_cmd/app.DASH_REPO 依赖;
+  deployments 的"每部署一线程+代数/计数"编排收进 core 单线程串行(部署数少, 串行
+  更简单且可单测)。阶段3: dialogs 子进程业务下沉 dsh_core/env.py; 决策"线程归 UI
+  对话框所有, 业务全在 core"(对话框是模态短命窗体, 逐行经 service 信号转发收益低;
+  设计文档预见了'动态表单类保留一部分'); EnvDialog 双路径: 有主窗口走 service.run_cmd,
+  独立场景 run_capture 兜底; 三份 _stream_cmd 实现归一为 dshctl 一份。
+- **终止状态**: pyside/ 页面与对话框层零 subprocess/urllib/zipfile/shutil 直接业务;
+  dsh_core 11 个模块(config/dshctl/tunnels/version/keys/ops/profiles/sessions/env/
+  plugins/deployments)全部纯 Python 零 Qt, 纯单元 290 例。剩余=阶段4(dsh_data 归并
+  进 dsh_core + 四个纯读页统一经 service)。

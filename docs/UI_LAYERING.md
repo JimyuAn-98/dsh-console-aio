@@ -77,9 +77,19 @@
         set_sessions_archived/delete_session_group; 统一"远程只读红线"(远程部署下写操作
         拒绝并中文提示); 修复两个存量 bug: sessions 归档调用不存在的 dsh_data.write_workspace
         (归档/恢复自迁移起失效, core 信封直写修复)、profiles 线程未用 safe_emit。
-        纯读仍留页面直连(线程+safe_emit), 阶段4 收敛。余下: 波3 plugins+deployments
-        (解除 app._stream_cmd 依赖) -> 波4 dialogs(env/install, 三份 _stream_cmd 归一)
-        -> 波5 纯读页留阶段4。
+        纯读仍留页面直连(线程+safe_emit), 阶段4 收敛。
+        **[波3 已完成 2026-08-29]**: plugins(dsh_core/plugins.py: 列表汇总/宿主防线/patch 写;
+        service.load_plugins/toggle_plugin + 通用 run_cmd)与 deployments(dsh_core/
+        deployments.py: N 线程编排收进单线程串行快照, result("deploy-snap") 逐行回包)。
+        页面全面解除对 app._stream_cmd / app.DASH_REPO 的依赖(service.run_cmd/ctl.d)。
+        **[阶段3/波4 已完成 2026-08-29]**: dialogs 子进程业务下沉 dsh_core/env.py
+        (SSH 测试/版本探测/安装流/工具命令)与 dsh_core/config.save_config; 三份
+        _stream_cmd 归一为 dshctl.stream_cmd; InstallDialog 线程只转 events->信号,
+        EnvDialog 有主窗口走 service.run_cmd, 无主窗口保留 run_capture 兜底。
+        pyside/ 页面与对话框层已无任何 subprocess/urllib/zipfile/shutil/threading 直接
+        子进程业务(纯读线程与对话框 events 转发线程除外, 阶段4 收敛)。
+        **[剩余 = 阶段4]**: dsh_data.py 归并进 dsh_core(config/ssh/data/stats),
+        页面纯读统一经 service; 波5 纯读页(agents/taskboard/usage/llm)随阶段4。
 - 阶段3: dialogs.py 评估是否抽业务(动态表单类可能保留一部分)
 - 阶段4: 收敛 dsh_data.py 到 dsh_core/(config/ssh/data/stats), 页面统一经 service 访问。
 - 每阶段: 业务层可加纯单元测试(不构造 MainWindow, 安全); GUI 交互验证由人工执行。

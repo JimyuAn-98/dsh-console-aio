@@ -35,6 +35,14 @@
 - **修复存量 bug**：会话页"归档/恢复"调用不存在的 `dsh_data.write_workspace`（AttributeError，该功能自 PySide6 迁移起即失效），core 改为信封直写并保留 workspace.json 未知顶层字段、写前 .bak；Profile 页列表线程未用 safe_emit（页面销毁竞态 RuntimeError）
 - 页面层不再 import shutil；新增三页纯单元测试（含越界拒绝零副作用断言）
 
+### UI 前后端分层阶段2 波3 + 阶段3（插件/部署/对话框，详见 docs/UI_LAYERING.md）
+
+- **插件管理页下沉 `dsh_core/plugins.py`**：列表汇总（bundle 基线 + cordis.patch.yml 叠加）、宿主基础设施防线（core 不信任 UI 预检）、patch 层停用/启用走 service；安装/卸载走通用 `service.run_cmd` 流式通道
+- **部署管理页下沉 `dsh_core/deployments.py`**：刷新总览的"每部署一线程 + 代数/计数丢弃过期回调"编排收进 core 单线程串行，逐行经 `result("deploy-snap")` 回包；测试连接/保存走 service
+- **页面全面解除对 `app._stream_cmd` / `app.DASH_REPO` 的依赖**（新增 `service.run_cmd` 通用流式命令通道，dash_repo 取 service 配置派生）
+- **阶段3：对话框子进程业务下沉 `dsh_core/env.py`**：SSH 免密测试、工具版本探测、dsh 一键安装流（预检→clone→install→build→写 config）、pnpm PATH 注入；**三份重复的 `_stream_cmd` 实现归一为 `dshctl.stream_cmd` 一份**；`dsh_core/config` 新增 `save_config`（DSH_AIO_CONFIG 感知 + 写前 .bak）；无主窗口的独立对话框场景保留捕获式兜底
+- 新增 44 例纯单元（plugins 13 / deployments 9 / env 22），业务层累计 290 例全绿
+
 ## v0.4.0 (未发布)
 
 
