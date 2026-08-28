@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
-# 插件管理页(PySide6 迁移版)。
+# 插件管理页(UI 层): 只做展示/预检/确认框/busy 管理, 业务在 dsh_core/plugins.py(纯 Python)。
 # 已装插件真实来源 = profile/package.json 的 dsh.profile.bundles(cordis.yml 只读参考,
-# 用户可写层是 cordis.patch.yml)。停用/启用只写 cordis.patch.yml(内部先 .bak 备份)。
-# 安装/卸载不自实现安装逻辑, 走官方命令 dsh plugin --profile <name> add|remove <pkg>,
-# 由主窗口 app._stream_cmd 在 DASH_REPO 目录流式执行并打主日志。
-# 部署联动: 当前部署(host 非空)构造 DshRemote, 只读操作走远程; 写 patch 仍写本机(与旧版一致)。
-# 布局: 顶部选 profile; 中部左表(名称/来源/描述/状态) + 右详情(QPlainTextEdit 只读, 显示 src 区);
-# 操作(安装/卸载/禁用/启用)均针对选中条目, 受保护条目拒绝操作。
-# 后台线程做 IO/子进程(dsh_data 读取、load_entry_id_map、_stream_cmd) ->
-# Qt Signal 回主线程更新控件, worker 用 self.safe_emit 防页面销毁竞态, 不直接改 UI。
+# 用户可写层是 cordis.patch.yml)。停用/启用写入 cordis.patch.yml(内部先 .bak 备份);
+# 安装/卸载走官方命令 dsh plugin --profile <name> add|remove <pkg>, 经 service.run_cmd
+# 在 dsh 仓库目录流式执行(逐行输出经 service.log 回主日志) —— 页面不再依赖 app._stream_cmd。
+# 列表加载走 service.load_plugins(entries + name->真实 entry id 映射一并回包)。
+# 远程只读红线: 远程部署(self._remote 非 None)下安装/卸载/停用/启用一律拒绝 ——
+# 旧版远程读列表却写本机 patch / 在本机跑安装命令, 语义错误, 已封死。
+# 列表读取(Profile 下拉)暂留页面直连线程(纯读过渡态, 阶段4 收敛); 其余全走 service 信号:
+# 接收者是页面自身, 页面销毁 Qt 自动断开; log/status 不在页面 connect(主窗口级已接)。
 
 import os
-import re
 import threading
 
 import dsh_data
+from dsh_core import plugins as core_plugins
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -22,69 +22,6 @@ from PySide6.QtWidgets import (
     QPushButton, QHeaderView, QMessageBox, QComboBox, QPlainTextEdit)
 
 from pyside.base import BasePage
-
-# 宿主基础设施 id 前缀/名单: 停用会破坏插件链本身, 拒绝切换。
-# 沿用 dsh-market 的防护思路(前缀匹配, 宁可多拦)。
-_PROTECTED_IDS = re.compile(
-    r"^(cordis:|@deepseek-ai/(cordis-plugin-|dsh-host-|dsh-client-|dsh-web|"
-    r"dsh-settings|dsh-credentials|dsh-session|dsh-storage|dsh-typert|"
-    r"dsh-api-remotes|dsh-tools|dsh-system-prompt|dsh-agent|dsh-llm|dsh-persona|"
-    r"dsh-scope|dsh-launch-environment|dsh-shell|dsh-subprocess|dsh-fs|"
-    r"dsh-sandbox|dsh-jobs|dsh-skill|dsh-goal|dsh-workflow|dsh-subagent|"
-    r"dsh-workspace|dsh-user-approval|dsh-user-questions|dsh-commands|dsh-hook|"
-    r"dsh-spill|dsh-guard|dsh-tool-call-timeout-policy|dsh-repeat-tool-reminder))"
-)
-
-
-def _merge_entries(profile, remote=None):
-    # 汇总插件列表: 基线 = read_profile_package 的 bundles(已装插件), 版本取 dependencies;
-    # cordis.patch.yml 叠加 disabled 标记 / insert 新增; 返回 entry dict 列表。
-    pkg = dsh_data.read_profile_package(profile, remote=remote)
-    patch_rows = dsh_data.read_cordis_patch(profile, remote=remote) or []
-    deps = pkg.get("dependencies") or {}
-    out = []
-    index = {}
-    for bundle in pkg.get("bundles") or []:
-        # bundle 行: id/name 就是 bundle 名(patch 里 - id: X 的 X 也是 bundle 名, 直接可覆盖)
-        name = str(bundle)
-        row = {"id": name, "name": name,
-               "version": deps.get(name, ""), "_src": "bundle"}
-        out.append(row)
-        index.setdefault(name, row)
-    for e in patch_rows:
-        if not isinstance(e, dict):
-            continue
-        if isinstance(e.get("insert"), list):
-            # insert 行: patch 新增的 loader entry(如 dsh-market 的 id=dsh-market)
-            for sub in e["insert"]:
-                if isinstance(sub, dict) and (sub.get("id") or sub.get("name")):
-                    eid = sub.get("id") or sub.get("name")
-                    if eid in index:
-                        continue    # bundles 基线已有同名, 不重复列出
-                    row = dict(sub)
-                    row["_src"] = "patch"
-                    row.setdefault("version", deps.get(sub.get("name") or eid, ""))
-                    out.append(row)
-                    index[eid] = row
-            continue
-        eid = e.get("id")
-        if not eid:
-            continue
-        if eid in index:
-            # patch 覆盖同名 bundle 行(disabled 标记等)
-            index[eid].update({k: v for k, v in e.items() if k != "_src"})
-            index[eid]["_src"] = "patch"
-            if not index[eid].get("version"):
-                index[eid]["version"] = deps.get(eid, "")
-        else:
-            # patch 里的其它行(如禁用不在 bundles 中的插件)也展示
-            row = dict(e)
-            row["_src"] = "patch"
-            row.setdefault("name", eid)
-            row.setdefault("version", deps.get(eid, ""))
-            out.append(row)
-            index[eid] = row
-    return out
 
 
 def _entry_src_text(e):
@@ -101,13 +38,12 @@ def _entry_src_text(e):
     return "\n".join(lines)
 
 
+_REMOTE_READONLY_MSG = "远程部署下暂不支持写操作（远程只读），请切换回本机部署"
+
+
 class PluginPage(BasePage):
     # 插件管理: BasePage 范式, app 为 MainWindow。
-    _profiles = Signal(object, str)        # (profiles, err) Profile 列表结果
-    _refresh_done = Signal(object, str)    # (entries, err) 插件列表结果
-    _id_map_loaded = Signal(object)        # (mapping) name->真实 entry id 映射
-    _stream_done = Signal(bool)            # (ok) dsh plugin 命令流式执行结果
-    _patch_done = Signal(str, str)         # (msg, err) patch 写操作结果
+    _profiles = Signal(object, str)        # (profiles, err) Profile 列表结果(纯读线程)
 
     def __init__(self, app, parent=None):
         self._remote = None
@@ -115,15 +51,14 @@ class PluginPage(BasePage):
         if _dep and _dep.get("host"):
             self._remote = dsh_data.DshRemote(_dep)
         self._entries = []      # 与表格行一一对应的 entry dict
-        self._id_map = {}       # name(包名)->真实 entry id(来自 dsh --dump-config)
+        self._id_map = {}       # name(包名)->真实 entry id(来自 dsh --dump-config, service 回包)
         self._busy = False
+        self._pending = None    # 正在等待的 service op
         self._last_op_msg = None
         super().__init__(app, parent)
         self._profiles.connect(self._apply_profiles)
-        self._refresh_done.connect(self._apply_refresh)
-        self._id_map_loaded.connect(self._apply_id_map)
-        self._stream_done.connect(self._after_stream)
-        self._patch_done.connect(self._after_patch)
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._load_profiles()
 
     def _build(self):
@@ -226,7 +161,11 @@ class PluginPage(BasePage):
         v.addWidget(table)
         return card
 
-    # ── Profile / 列表 ────────────────────────────────
+    def _dash_repo(self):
+        # dsh plugin/dump-config 命令必须在 dsh 仓库目录执行; 取 service 的 config 派生值
+        return self.app.service.ctl.d.get("dash_repo") or ""
+
+    # ── Profile 列表(纯读过渡态: 页面线程 + safe_emit) ──
     def _load_profiles(self):
         # 只列有 cordis.yml 或 cordis.patch.yml 的 profile; 读取是 IO, 放后台线程。
         self._set_busy(True)
@@ -265,32 +204,15 @@ class PluginPage(BasePage):
             self._entries = []
             self._set_status("未找到可用 profile(~/.dsh/profiles 下没有 cordis.yml / cordis.patch.yml)")
 
+    # ── 列表加载(service: entries + id 映射一并回包) ──
     def _refresh(self):
         profile = self._profile_cb.currentText().strip()
         if not profile:
             return
         self._set_busy(True)
+        self._pending = "plugins-load"
         self._set_status("正在读取插件列表...")
-        dash_repo = getattr(self.app, "DASH_REPO", None)
-        remote = self._remote
-
-        def worker():
-            err = None
-            entries = []
-            try:
-                entries = _merge_entries(profile, remote=remote)
-            except Exception as e:
-                err = str(e)
-            if not remote:
-                # 构建 name->真实 entry id 映射(dump-config 是子进程, 较慢, 后台跑)
-                try:
-                    m = dsh_data.load_entry_id_map(profile, dash_repo)
-                    self.safe_emit(self._id_map_loaded, m)
-                except Exception:
-                    pass    # 映射失败只影响停用/启用退化为用 bundle 名, 不阻断列表
-            self.safe_emit(self._refresh_done, entries, err)
-
-        threading.Thread(target=worker, daemon=True).start()
+        self.app.service.load_plugins(profile, self._remote)
 
     def _apply_refresh(self, entries, err):
         self._set_busy(False)
@@ -316,24 +238,27 @@ class PluginPage(BasePage):
         else:
             self._set_status("共 %d 个插件" % len(entries))
 
-    def _apply_id_map(self, mapping):
-        self._id_map = mapping or {}
+    # ── service 信号槽(接收者=本页, 销毁自动断开) ──
+    def _on_result(self, op, payload):
+        if op == "plugins-load":
+            self._pending = None
+            self._id_map = payload.get("id_map") or {}
+            self._apply_refresh(payload.get("entries") or [], payload.get("err", ""))
+        elif op == "plugins-toggle":
+            self._pending = None
+            self._after_toggle(payload)
 
-    def _selected_entry(self):
-        # 当前表格选中行对应的 entry dict; 未选中返回 None
-        rows = self._table.selectionModel().selectedRows()
-        if not rows:
-            return None
-        idx = rows[0].row()
-        return self._entries[idx] if 0 <= idx < len(self._entries) else None
+    def _on_finished(self, op, ok):
+        if op == "plugins-cmd":
+            # run_cmd 只有 finished(无 result): 流式输出已在主日志区, 完成后刷新列表
+            self._pending = None
+            self._after_stream(ok)
+        elif op == self._pending:
+            # 兜底: result 槽漏执行导致 busy 悬挂时解除
+            self._pending = None
+            self._set_busy(False)
 
-    def _on_select(self):
-        # 选中条目时右侧显示 src 区, 并控制操作按钮
-        e = self._selected_entry()
-        self._detail_text.setPlainText(_entry_src_text(e) if e else "")
-        self._refresh_btns()
-
-    # ── 安装 / 卸载(官方命令, 针对选中条目) ───────────
+    # ── 安装 / 卸载(官方命令, 经 service.run_cmd 流式执行) ──
     def _install(self):
         e = self._selected_entry()
         if e is None:
@@ -344,7 +269,10 @@ class PluginPage(BasePage):
         pkg = e.get("name") or eid
         if not profile or not pkg:
             return
-        if self._is_protected(eid):
+        if self._remote is not None:
+            QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
+            return
+        if core_plugins.protected(eid):
             QMessageBox.warning(self, "受保护", "这是 dsh 宿主基础插件，不允许安装。")
             return
         cmd = dsh_data.plugin_cmd(profile, "add", pkg)
@@ -362,7 +290,10 @@ class PluginPage(BasePage):
         pkg = e.get("name") or eid
         if not profile or not pkg:
             return
-        if self._is_protected(eid):
+        if self._remote is not None:
+            QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
+            return
+        if core_plugins.protected(eid):
             QMessageBox.warning(self, "受保护", "这是 dsh 宿主基础插件，不允许卸载。")
             return
         cmd = dsh_data.plugin_cmd(profile, "remove", pkg)
@@ -372,32 +303,18 @@ class PluginPage(BasePage):
         self._run_stream(cmd, "卸载插件 " + pkg)
 
     def _run_stream(self, cmd, desc):
-        # 后台线程流式执行官方命令(经主窗口 _stream_cmd, 在 DASH_REPO 目录), 完成后回主线程刷新。
+        # 官方命令经 service.run_cmd 在 dsh 仓库目录流式执行(逐行打主日志), 完成后回 finished。
         self._set_busy(True)
+        self._pending = "plugins-cmd"
         self._set_status("执行中: " + " ".join(cmd))
-        dash_repo = getattr(self.app, "DASH_REPO", None)
-        app = self.app
-
-        def worker():
-            ok = False
-            try:
-                app.loge("[插件] " + desc + " 开始: " + " ".join(cmd), "warn")
-                # dsh plugin 命令必须在 dsh 仓库目录执行(pnpm dsh ...)
-                ok = app._stream_cmd(cmd, cwd=dash_repo)
-            except Exception as ex:
-                try:
-                    app.loge("  [插件] 执行异常: " + str(ex), "err")
-                except Exception:
-                    pass    # 主窗口可能已销毁, 日志失败不阻断
-            self.safe_emit(self._stream_done, ok)
-
-        threading.Thread(target=worker, daemon=True).start()
+        self.app.loge("[插件] " + desc + " 开始: " + " ".join(cmd), "warn")
+        self.app.service.run_cmd(cmd, cwd=self._dash_repo(), op="plugins-cmd")
 
     def _after_stream(self, ok):
         self._last_op_msg = "已" + ("完成" if ok else "失败") + "(详见主界面日志区)"
         self._refresh()
 
-    # ── 禁用 / 启用(patch 层) ─────────────────────────
+    # ── 禁用 / 启用(patch 层, service 信号桥) ──
     def _disable(self):
         e = self._selected_entry()
         if e is None:
@@ -407,7 +324,10 @@ class PluginPage(BasePage):
         name = e.get("name") or eid
         if not profile or not eid:
             return
-        if self._is_protected(eid):
+        if self._remote is not None:
+            QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
+            return
+        if core_plugins.protected(eid):
             QMessageBox.warning(self, "受保护", "这是 dsh 宿主基础插件，禁用会破坏插件链本身，已拒绝。")
             return
         if e.get("disabled"):
@@ -429,6 +349,9 @@ class PluginPage(BasePage):
         name = e.get("name") or eid
         if not profile or not eid:
             return
+        if self._remote is not None:
+            QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
+            return
         if not e.get("disabled"):
             QMessageBox.information(self, "未停用", "「%s」当前未停用，无需启用。" % name)
             return
@@ -440,48 +363,19 @@ class PluginPage(BasePage):
         self._set_disabled(profile, eid, False)
 
     def _set_disabled(self, profile, eid, disabled):
-        # 读 patch -> 增/改 disabled 标记 -> write_cordis_patch(内部先 .bak 备份)。
-        # 禁用: 无同名行则追加 id + disabled:true 行; 有则原地置 True。
-        # 启用: 移除该行的 disabled 字段; 若只剩 id 则整行删除, 保持 patch 干净。
-        # 关键: 必须用真实 entry id(dump-config 映射), 不能用 bundle 名(如 dshmarket->dsh-market)
+        # 必须用真实 entry id(dump-config 映射), 不能用 bundle 名(如 dshmarket->dsh-market);
+        # 宿主基础设施防线在 core 再做一次(不信任 UI 预检)。
         eid = self._id_map.get(eid, eid)
-        remote = self._remote
         self._set_busy(True)
+        self._pending = "plugins-toggle"
+        self._set_status("正在写入 cordis.patch.yml ...")
+        self.app.service.toggle_plugin(profile, eid, disabled)
 
-        def worker():
-            err = None
-            try:
-                patch = dsh_data.read_cordis_patch(profile, remote=remote) or []
-                new_rows = []
-                touched = False
-                for row in patch:
-                    if not isinstance(row, dict) or row.get("id") != eid:
-                        new_rows.append(row)
-                        continue
-                    touched = True
-                    row2 = dict(row)
-                    if disabled:
-                        row2["disabled"] = True
-                        new_rows.append(row2)
-                    else:
-                        row2.pop("disabled", None)
-                        if len(row2) > 1:
-                            new_rows.append(row2)
-                        # 只剩 id 的裸行直接删除
-                if disabled and not touched:
-                    new_rows.append({"id": eid, "disabled": True})
-                dsh_data.write_cordis_patch(profile, new_rows)
-            except OSError as ex:
-                err = "无法写 cordis.patch.yml：" + str(ex)
-            except Exception as ex:
-                err = "读取/处理 cordis.patch.yml 失败：" + str(ex)
-            msg = "已" + ("停用" if disabled else "启用") + " " + eid + " (cordis.patch.yml)"
-            self.safe_emit(self._patch_done, msg, err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _after_patch(self, msg, err):
+    def _after_toggle(self, payload):
+        msg = payload.get("msg", "")
+        err = payload.get("err", "")
         if err:
+            self._set_busy(False)
             QMessageBox.critical(self, "操作失败", err)
             self._set_status("操作失败: " + err)
             self.app.loge("[插件] " + err, "err")
@@ -491,10 +385,20 @@ class PluginPage(BasePage):
         self._last_op_msg = msg + "（已刷新）"
         self._refresh()
 
-    # ── 其它 ──────────────────────────────────────────
-    def _is_protected(self, eid):
-        # 宿主基础设施行拒绝安装/禁用/卸载
-        return bool(eid and _PROTECTED_IDS.match(str(eid)))
+    # ── 其它 ──
+    def _selected_entry(self):
+        # 当前表格选中行对应的 entry dict; 未选中返回 None
+        rows = self._table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        idx = rows[0].row()
+        return self._entries[idx] if 0 <= idx < len(self._entries) else None
+
+    def _on_select(self):
+        # 选中条目时右侧显示 src 区, 并控制操作按钮
+        e = self._selected_entry()
+        self._detail_text.setPlainText(_entry_src_text(e) if e else "")
+        self._refresh_btns()
 
     def _open_patch(self):
         profile = self._profile_cb.currentText().strip()
@@ -514,7 +418,7 @@ class PluginPage(BasePage):
         except Exception as ex:
             QMessageBox.critical(self, "无法打开", str(ex))
 
-    # ── 状态 / 按钮 ───────────────────────────────────
+    # ── 状态 / 按钮 ──
     def _refresh_btns(self):
         sel = self._selected_entry() is not None
         self._btn_refresh.setEnabled(not self._busy)

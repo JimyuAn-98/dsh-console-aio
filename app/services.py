@@ -165,6 +165,43 @@ class DshService(QObject):
         from dsh_core import sessions as _sessions
         self._run_result_op(op, _sessions.delete_group, workdir)
 
+    # ---- 阶段2 波3: 插件/部署域(core 懒加载) + 通用流式命令 ----
+    def run_cmd(self, cmd, cwd=None, env=None, op="run-cmd"):
+        # 通用流式命令(dshctl.stream_cmd 的 service 入口): 逐行输出经 log 信号回主日志,
+        # 完成 finished(op, ok)。插件安装/卸载、环境工具命令等共用, 是页面脱开
+        # app._stream_cmd 依赖的正式通道。
+        ev = self._events()
+
+        def run():
+            try:
+                ok = self.ctl.stream_cmd(cmd, cwd=cwd, env=env, events=ev)
+            except Exception as e:
+                ev("log", ("[%s] 异常: %s" % (op, e), "err"))
+                ok = False
+            self.finished.emit(op, bool(ok))
+        threading.Thread(target=run, daemon=True).start()
+
+    def load_plugins(self, profile, remote=None, op="plugins-load"):
+        from dsh_core import plugins as _plugins
+        self._run_result_op(op, _plugins.load_view, profile, remote,
+                            self.ctl.d.get("dash_repo") or "")
+
+    def toggle_plugin(self, profile, eid, disabled, op="plugins-toggle"):
+        from dsh_core import plugins as _plugins
+        self._run_result_op(op, _plugins.set_disabled, profile, eid, disabled)
+
+    def refresh_deployments(self, deps, op="deploy-refresh"):
+        from dsh_core import deployments as _deployments
+        self._run_result_op(op, _deployments.snapshot_all, deps)
+
+    def test_deployment(self, dep, op="deploy-test"):
+        from dsh_core import deployments as _deployments
+        self._run_result_op(op, _deployments.test_conn, dep)
+
+    def save_deployments(self, depls, op="deploy-save"):
+        from dsh_core import deployments as _deployments
+        self._run_result_op(op, _deployments.save, depls)
+
     # ---- 构造 ----
     @classmethod
     def from_env(cls, base_dir=None, parent=None):
