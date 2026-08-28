@@ -514,8 +514,8 @@ class TestDeployments:
     def test_load_deployments_with_data(self, tmp_path):
         """有 deployments 数组时正确读取。"""
         from dsh_data import load_deployments
-        import dsh_data as dd
-        # 临时覆盖 __file__ 路径
+        import dsh_core.data as dd
+        # 临时覆盖 __file__ 路径(阶段4 后 _config_path 在 dsh_core.data, 按其 __file__ 定位)
         cfg = {"deployments": [
             {"name": "lab", "host": "192.168.1.100", "user": "admin", "port": 22}
         ]}
@@ -523,7 +523,7 @@ class TestDeployments:
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f)
         old = dd.__file__
-        dd.__file__ = os.path.join(str(tmp_path), "dsh_data.py")
+        dd.__file__ = os.path.join(str(tmp_path), "data.py")
         try:
             result = load_deployments()
             assert len(result) == 1
@@ -533,12 +533,12 @@ class TestDeployments:
 
     def test_save_and_load_deployments(self, tmp_path):
         from dsh_data import save_deployments, load_deployments
-        import dsh_data as dd
+        import dsh_core.data as dd
         cfg_path = os.path.join(str(tmp_path), "config.json")
         with open(cfg_path, "w") as f:
             json.dump({}, f)
         old = dd.__file__
-        dd.__file__ = os.path.join(str(tmp_path), "dsh_data.py")
+        dd.__file__ = os.path.join(str(tmp_path), "data.py")
         try:
             depls = [{"name": "test", "host": "1.2.3.4", "user": "u", "port": 22}]
             save_deployments(depls)

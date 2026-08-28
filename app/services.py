@@ -202,6 +202,43 @@ class DshService(QObject):
         from dsh_core import deployments as _deployments
         self._run_result_op(op, _deployments.save, depls)
 
+    # ---- 阶段4: 纯读/轻写页统一经 service(dsh_core.data 懒加载) ----
+    def _run_core_op(self, op, func, *args):
+        # 通用 core 调用: core 纯函数返回任意类型原始数据, 包装为 {"data":..., "err":...};
+        # core 异常以恰好一次 result/finished 收场, 不让 UI busy 卡死。
+        ev = self._events()
+
+        def run():
+            try:
+                payload = {"data": func(ev, *args), "err": ""}
+            except Exception as e:
+                ev("log", ("[%s] 异常: %s" % (op, e), "err"))
+                payload = {"data": None, "err": str(e)}
+            self.result.emit(op, payload)
+            self.finished.emit(op, not payload["err"])
+        threading.Thread(target=run, daemon=True).start()
+
+    def list_agent_presets(self, remote=None, op="agents-list"):
+        from dsh_core import data as _data
+        self._run_core_op(op, _data.list_agent_presets, remote)
+
+    def read_taskboard(self, remote=None, op="taskboard-read"):
+        from dsh_core import data as _data
+        self._run_core_op(op, _data.read_taskboard, remote)
+
+    def read_usage_stats(self, remote=None, op="usage-read"):
+        from dsh_core import data as _data
+        self._run_core_op(op, _data.usage_stats, remote)
+
+    def read_settings(self, remote=None, op="llm-read"):
+        from dsh_core import data as _data
+        self._run_core_op(op, _data.read_settings, remote)
+
+    def write_settings(self, data, op="llm-save"):
+        # 写 settings.yaml(数据层写前 .bak); 写业务唯一出口, 页面组装好完整 data 传入。
+        from dsh_core import data as _data
+        self._run_core_op(op, _data.write_settings, data)
+
     # ---- 构造 ----
     @classmethod
     def from_env(cls, base_dir=None, parent=None):
