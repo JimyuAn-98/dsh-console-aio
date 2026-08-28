@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
-# 任务看板页(PySide6 迁移版): 只读展示 + 刷新, 不提供任何写操作。
+# 任务看板页(UI 层): 只读展示 + 刷新, 不提供任何写操作。
 # 定时任务编辑属高级操作, 请使用 dsh web。
-# 后台线程读 dsh_data.read_taskboard -> Qt Signal 回主线程重建看板, 绝不直接改 UI。
+# 读取走 service.read_taskboard(remote) 信号桥(result "taskboard-read" 回包,
+# 接收者是页面自身, 页面销毁 Qt 自动断开); log/status 不在页面 connect(主窗口级已接)。
 
 import datetime
-import threading
 
-import dsh_data
-from PySide6.QtCore import Signal
+from dsh_core import data as core_data
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea,
     QVBoxLayout, QWidget)
@@ -28,16 +27,17 @@ def _fmt_ts(v):
 
 class TaskboardPage(BasePage):
     # 任务看板: 调度器信息 + 按状态分列的任务卡片。app 为 MainWindow。
-    _data = Signal(object, str)     # (read_taskboard 结果 dict, err)
 
     def __init__(self, app, parent=None):
         # 部署联动: 当前部署(host 非空)构造 DshRemote, 只读操作走远程; None=本机
         self._remote = None
         _dep = getattr(app, "_current_deploy", None)
         if _dep and _dep.get("host"):
-            self._remote = dsh_data.DshRemote(_dep)
+            self._remote = core_data.DshRemote(_dep)
+        self._pending = None
         super().__init__(app, parent)
-        self._data.connect(self._apply_data)
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._refresh()
 
     def _build(self):
@@ -89,24 +89,27 @@ class TaskboardPage(BasePage):
         self._status_lbl = QLabel("就绪", objectName="statusBar")
         root.addWidget(self._status_lbl)
 
+    # ── 读取(service 信号桥) ──
     def _refresh(self):
-        # 读取 task-board 两个小 json(本地读文件, 远程经 ssh), 放后台线程
+        # 读取 task-board 两个小 json(本地读文件, 远程经 ssh), 业务在 dsh_core.data
         self._set_status("正在读取任务看板...")
         self._btn_refresh.setEnabled(False)
+        self._pending = "taskboard-read"
+        self.app.service.read_taskboard(self._remote)
 
-        def worker():
-            err = None
-            data = None
-            try:
-                data = dsh_data.read_taskboard(remote=self._remote)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._data, data or {}, err)
+    def _on_result(self, op, payload):
+        if op == "taskboard-read":
+            self._pending = None
+            self._btn_refresh.setEnabled(True)
+            self._apply_data(payload.get("data") or {}, payload.get("err", ""))
 
-        threading.Thread(target=worker, daemon=True).start()
+    def _on_finished(self, op, ok):
+        # 兜底: result 槽漏执行导致 busy 悬挂时解除
+        if op == self._pending:
+            self._pending = None
+            self._btn_refresh.setEnabled(True)
 
     def _apply_data(self, data, err):
-        self._btn_refresh.setEnabled(True)
         if err:
             self._set_status("读取失败: " + err)
             self.app.loge("[任务看板] 读取失败: " + err, "err")

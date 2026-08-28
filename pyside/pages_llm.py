@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
-# LLM / 模型配置页(PySide6 迁移版)。
+# LLM / 模型配置页(UI 层)。
 # 数据: ~/.dsh/settings.yaml 的 agent-default-model(读写) 与 llm-pi-ai.providers(只读)。
+# 读取走 service.read_settings(remote)、保存走 service.write_settings(写前 .bak)
+# —— result("llm-read"/"llm-save") 回包, 接收者是页面自身, 页面销毁 Qt 自动断开;
+# log/status 不在页面 connect(主窗口级已接一次)。
 # 密钥安全: apiKeyEnv 只引用环境变量名, 本页不读取/不写入/不展示密钥明文(仅 os.environ 存在性判断)。
 # 部署联动: 当前部署(host 非空)构造 DshRemote, 读操作走远程; 写配置仍写本机(与旧版一致)。
-# 后台线程做配置读取/写入 IO -> Qt Signal 回主线程更新控件, 不直接改 UI。
 
 import os
-import threading
 
-import dsh_data
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
+
+from dsh_core import data as core_data
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QFrame, QComboBox,
     QTableWidget, QTableWidgetItem, QPushButton, QHeaderView, QMessageBox)
@@ -63,18 +65,18 @@ def _env_txt(env):
 
 class LlmPage(BasePage):
     # LLM / 模型配置: BasePage 范式, app 为 MainWindow。
-    _data = Signal(object, str)            # (settings, err) 配置读取结果
-    _save_done = Signal(object, str, str)  # (settings, msg, err) 保存结果
 
     def __init__(self, app, parent=None):
         self._remote = None
         _dep = getattr(app, "_current_deploy", None)
         if _dep and _dep.get("host"):
-            self._remote = dsh_data.DshRemote(_dep)
+            self._remote = core_data.DshRemote(_dep)
         self._settings = {}
+        self._pending = None
+        self._pending_settings = None
         super().__init__(app, parent)
-        self._data.connect(self._apply_data)
-        self._save_done.connect(self._after_save)
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._reload()
 
     def _build(self):
@@ -154,21 +156,27 @@ class LlmPage(BasePage):
         return t
 
     def _reload(self):
-        # 重新读取 settings.yaml(可能被外部修改)并刷新界面; 读 IO 放后台线程
+        # 重新读取 settings.yaml(可能被外部修改)并刷新界面; 业务在 dsh_core.data
         self._set_btns(False)
         self._set_status("正在读取配置...")
+        self._pending = "llm-read"
+        self.app.service.read_settings(self._remote)
 
-        def worker():
-            err = None
-            settings = None
-            try:
-                settings = dsh_data.read_settings(remote=self._remote)
-            except Exception as e:
-                err = str(e)
-            settings = settings if isinstance(settings, dict) else {}
-            self.safe_emit(self._data, settings, err)
+    def _on_result(self, op, payload):
+        if op == "llm-read":
+            self._pending = None
+            settings = payload.get("data")
+            self._apply_data(settings if isinstance(settings, dict) else {},
+                             payload.get("err", ""))
+        elif op == "llm-save":
+            self._pending = None
+            self._after_save(self._pending_settings or {}, payload.get("err", ""))
 
-        threading.Thread(target=worker, daemon=True).start()
+    def _on_finished(self, op, ok):
+        # 兜底: result 槽漏执行导致 busy 悬挂时解除
+        if op == self._pending:
+            self._pending = None
+            self._set_btns(True)
 
     def _apply_data(self, settings, err):
         self._settings = settings
@@ -265,28 +273,22 @@ class LlmPage(BasePage):
             return
         self._set_btns(False)
         self._set_status("正在保存配置...")
+        # 组装完整 settings(页面持有当前副本), 写盘业务在 dsh_core.data(写前 .bak)
+        new_settings = dict(self._settings)
+        new_settings["agent-default-model"] = {
+            "provider": provider, "model": model, "reasoningEffort": effort}
+        self._pending_settings = new_settings
+        self._pending = "llm-save"
+        self.app.service.write_settings(new_settings)
 
-        def worker():
-            err = None
-            msg = "默认模型已改为 %s / %s" % (provider, model)
-            new_settings = dict(self._settings)
-            try:
-                new_settings["agent-default-model"] = {
-                    "provider": provider, "model": model, "reasoningEffort": effort}
-                dsh_data.write_settings(new_settings)
-            except Exception as e:
-                msg, err = "保存失败", str(e)
-            self.safe_emit(self._save_done, new_settings, msg, err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _after_save(self, settings, msg, err):
+    def _after_save(self, settings, err):
         self._set_btns(True)
         if err:
             self._set_status("保存失败: " + err)
             self.app.loge("[LLM] 保存失败: " + err, "err")
             QMessageBox.critical(self, "保存失败", "写入 settings.yaml 失败：%s" % err)
             return
+        msg = self._pending_msg()
         self._settings = settings
         self._load_current()
         self._fill_providers()
@@ -295,6 +297,10 @@ class LlmPage(BasePage):
         QMessageBox.information(
             self, "已保存",
             "默认模型已写入 settings.yaml（已自动备份 .bak）。\n重启 dsh web 生效。")
+
+    def _pending_msg(self):
+        adm = (self._pending_settings or {}).get("agent-default-model") or {}
+        return "默认模型已改为 %s / %s" % (adm.get("provider") or "?", adm.get("model") or "?")
 
     def _set_btns(self, on):
         for b in (self._btn_save, self._btn_reload):

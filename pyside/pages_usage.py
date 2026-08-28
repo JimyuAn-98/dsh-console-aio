@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-# 模型用量统计页(PySide6 迁移版)。
+# 模型用量统计页(UI 层)。
 # 只读统计: 解压扫描 ~/.dsh/sessions 下全部 session.jsonl.zstd, 聚合 token 用量(远程部署暂不支持)。
 # 价格表为内置估算单价(元/百万 token), 仅内存修改 DEFAULT_PRICES, 不写回任何文件。
-# 扫描较慢, 一律后台线程执行 -> Qt Signal 回主线程更新表格, 不直接改 UI(线程安全)。
+# 统计走 service.read_usage_stats 信号桥(result "usage-read" 回包, 接收者是页面自身,
+# 页面销毁 Qt 自动断开); log/status 不在页面 connect(主窗口级已接)。
 
-import threading
+from PySide6.QtCore import Qt
 
-import dsh_data
-from PySide6.QtCore import Qt, Signal
+from dsh_core import data as core_data
 from PySide6.QtWidgets import (
     QDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
@@ -42,8 +42,8 @@ def _num(v):
 
 
 def _cost_text(model, inp, out, cache=0):
-    # 估算费用: 按 dsh_data.estimate_cost(内置单价, 区分缓存与高峰/空闲); 未定价返回占位
-    cost = dsh_data.estimate_cost(model, inp, out, cache)
+    # 估算费用: 按 core_data.estimate_cost(内置单价, 区分缓存与高峰/空闲); 未定价返回占位
+    cost = core_data.estimate_cost(model, inp, out, cache)
     if cost is None:
         return "未定价"
     return "%.2f 元" % cost
@@ -51,18 +51,19 @@ def _cost_text(model, inp, out, cache=0):
 
 class UsagePage(BasePage):
     # 模型用量统计: BasePage 范式, app 为 MainWindow。
-    _data = Signal(object, str)     # (usage_stats 结果 dict, err)
 
     def __init__(self, app, parent=None):
         # 部署联动: 当前部署(host 非空)构造 DshRemote; 用量统计对远程明确报不支持
         self._remote = None
         _dep = getattr(app, "_current_deploy", None)
         if _dep and _dep.get("host"):
-            self._remote = dsh_data.DshRemote(_dep)
+            self._remote = core_data.DshRemote(_dep)
         self._stats = None          # 最近一次 usage_stats() 结果(供价格修改后重算费用)
         self._busy = False
+        self._pending = None
         super().__init__(app, parent)
-        self._data.connect(self._apply_data)
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._refresh()
 
     def _build(self):
@@ -137,23 +138,26 @@ class UsagePage(BasePage):
         return card
 
     def _refresh(self):
-        # 后台线程解压扫描 session 文件, 完成后经 Signal 回主线程更新
+        # 解压扫描 session 文件(core 业务), 结果经 result("usage-read") 回主线程更新
         if self._busy:
             return
         self._busy = True
+        self._pending = "usage-read"
         self._status_lbl.setText("正在统计…")
         self._set_btns(False)
+        self.app.service.read_usage_stats(self._remote)
 
-        def worker():
-            res = None
-            err = None
-            try:
-                res = dsh_data.usage_stats(remote=self._remote)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._data, res, err)
+    def _on_result(self, op, payload):
+        if op == "usage-read":
+            self._pending = None
+            self._apply_data(payload.get("data"), payload.get("err", ""))
 
-        threading.Thread(target=worker, daemon=True).start()
+    def _on_finished(self, op, ok):
+        # 兜底: result 槽漏执行导致 busy 悬挂时解除
+        if op == self._pending:
+            self._pending = None
+            self._busy = False
+            self._set_btns(True)
 
     def _apply_data(self, res, err):
         self._busy = False
@@ -215,7 +219,7 @@ class UsagePage(BasePage):
 
     def _edit_prices(self):
         # 价格表编辑: 内置价格 + 统计中出现但未定价的模型
-        models = list(dsh_data.DEFAULT_PRICES.keys())
+        models = list(core_data.DEFAULT_PRICES.keys())
         if self._stats and isinstance(self._stats.get("models"), dict):
             for m in self._stats["models"]:
                 if m not in models:
@@ -236,7 +240,7 @@ class UsagePage(BasePage):
 
 
 class UsagePriceDialog(QDialog):
-    # 价格编辑对话框: 修改 dsh_data.DEFAULT_PRICES(仅内存, 不写文件)。
+    # 价格编辑对话框: 修改 core_data.DEFAULT_PRICES(仅内存, 不写文件)。
     # 结构: {in_cached/in_miss/out: [空闲, 高峰]}, 元/百万 token。
 
     def __init__(self, parent, models):
@@ -261,7 +265,7 @@ class UsagePriceDialog(QDialog):
         wrap.addLayout(grid)
 
         for i, name in enumerate(models):
-            p = dsh_data.DEFAULT_PRICES.get(name)
+            p = core_data.DEFAULT_PRICES.get(name)
             p = p if isinstance(p, dict) else {}
 
             def pair(k, d):
@@ -324,5 +328,5 @@ class UsagePriceDialog(QDialog):
             updates[name] = {"in_cached": [nv[0], nv[1]], "in_miss": [nv[2], nv[3]],
                              "out": [nv[4], nv[5]]}
         for name, p in updates.items():
-            dsh_data.DEFAULT_PRICES[name] = p
+            core_data.DEFAULT_PRICES[name] = p
         self.accept()

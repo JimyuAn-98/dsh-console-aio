@@ -204,15 +204,14 @@ class DshService(QObject):
 
     # ---- 阶段4: 纯读/轻写页统一经 service(dsh_core.data 懒加载) ----
     def _run_core_op(self, op, func, *args):
-        # 通用 core 调用: core 纯函数返回任意类型原始数据, 包装为 {"data":..., "err":...};
-        # core 异常以恰好一次 result/finished 收场, 不让 UI busy 卡死。
-        ev = self._events()
-
+        # 通用 core 调用: func 为 dsh_core.data 的纯数据函数(签名不带 events 回调, 与
+        # _run_result_op 的域函数不同), 返回值原样包装为 {"data":..., "err":...};
+        # 异常以恰好一次 result/finished 收场, 不让 UI busy 卡死。
         def run():
             try:
-                payload = {"data": func(ev, *args), "err": ""}
+                payload = {"data": func(*args), "err": ""}
             except Exception as e:
-                ev("log", ("[%s] 异常: %s" % (op, e), "err"))
+                self.log.emit("[%s] 异常: %s" % (op, e), "err")
                 payload = {"data": None, "err": str(e)}
             self.result.emit(op, payload)
             self.finished.emit(op, not payload["err"])

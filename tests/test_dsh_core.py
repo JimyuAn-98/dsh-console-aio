@@ -193,6 +193,71 @@ class TestServiceSignalBridge:
         assert svc.tunnels._py_persist == {}
         assert svc.ctl.d["forward_ports"] == [8090, 8022, 8091]
 
+    def test_service_read_op_wraps_result(self, tmp_path, monkeypatch, qapp):
+        # 阶段4 纯读统一通道: _run_core_op 把 core 任意返回值包装为 {"data","err"},
+        # 工作线程 emit 需 processEvents 驱动事件循环投递。core 函数被拦截(不碰真实 ~/.dsh)。
+        pytest.importorskip("PySide6")
+        import dsh_core.data as core_data
+        from app.services import DshService
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps(dict(EMPTY_PORTS_CFG), ensure_ascii=False),
+                       encoding="utf-8")
+        svc = DshService(base_dir=str(tmp_path), config_path=str(cfg))
+        monkeypatch.setattr(core_data, "read_taskboard",
+                            lambda remote=None: {"ledger": {"tasks": []}})
+        got = []
+        svc.result.connect(lambda op, payload: got.append((op, payload)))
+        svc.read_taskboard()
+        deadline = time.time() + 5
+        while not got and time.time() < deadline:
+            qapp.processEvents()
+            time.sleep(0.05)
+        assert got and got[0][0] == "taskboard-read"
+        assert got[0][1]["data"] == {"ledger": {"tasks": []}}
+        assert got[0][1]["err"] == ""
+
+    def test_service_read_op_error_payload(self, tmp_path, monkeypatch, qapp):
+        # core 函数抛异常时: {"data": None, "err": 中文/原始信息}, 不向外抛、不卡 UI。
+        pytest.importorskip("PySide6")
+        import dsh_core.data as core_data
+        from app.services import DshService
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps(dict(EMPTY_PORTS_CFG), ensure_ascii=False),
+                       encoding="utf-8")
+        svc = DshService(base_dir=str(tmp_path), config_path=str(cfg))
+
+        def boom(remote=None):
+            raise OSError("disk gone")
+
+        monkeypatch.setattr(core_data, "read_taskboard", boom)
+        got = []
+        svc.result.connect(lambda op, payload: got.append((op, payload)))
+        svc.read_taskboard()
+        deadline = time.time() + 5
+        while not got and time.time() < deadline:
+            qapp.processEvents()
+            time.sleep(0.05)
+        assert got and got[0][1]["data"] is None
+        assert "disk gone" in got[0][1]["err"]
+
+
+class TestDshDataShim:
+    # 阶段4: 仓库根 dsh_data.py 是 dsh_core.data 的兼容 shim —— 同一对象,
+    # 原地修改(DEFAULT_PRICES)跨命名空间共享。
+    def test_shim_binds_same_module_objects(self):
+        import dsh_data
+        import dsh_core.data as core_data
+        assert dsh_data.DshRemote is core_data.DshRemote
+        assert dsh_data.DEFAULT_PRICES is core_data.DEFAULT_PRICES
+        assert dsh_data.load_deployments is core_data.load_deployments
+
+    def test_shim_exports_private_helpers(self):
+        # tests/ 与历史调用方引用过私有 YAML/SSH 助手, shim 必须显式带上
+        import dsh_data
+        for name in ("_dump_yaml", "_dump_scalar", "_parse_yaml_block",
+                     "_ssh_base", "_ssh_run", "_config_path"):
+            assert hasattr(dsh_data, name), name
+
 
 class TestDshCtlUpdate:
     # update_dsh 步骤编排契约: 全程 monkeypatch 掉真实子进程(stop/start/stream_cmd),

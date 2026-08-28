@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-# Agent 模式管理页(PySide6 迁移版): 只读浏览 .agent-presets 各模式并展示 preset.yml。
-# 数据来自 dsh_data.list_agent_presets(remote) / dsh_data.read_yaml(), 不做任何写入。
-# 部署联动: 当前部署(host 非空)构造 DshRemote, 列表走远程; 详情读取与目录打开为本机操作(旧版行为)。
-# 后台线程做 IO -> Qt Signal(safe_emit) 回主线程更新控件, 不直接改 UI。
+# Agent 模式管理页(UI 层): 只读浏览 .agent-presets 各模式并展示 preset.yml。
+# 列表读取走 service.list_agent_presets(remote) 信号桥(result "agents-list" 回包);
+# preset.yml 详情是本机小文件, 同步直读 dsh_core.data.read_yaml(纯读过渡态约定)。
+# 部署联动: 当前部署(host 非空)构造 DshRemote, 列表走远程; 目录打开为本机操作。
+# 不做任何写入。log/status 不在页面 connect(主窗口级已接一次)。
 
 import os
-import threading
 
-import dsh_data
-from PySide6.QtCore import Qt, Signal
+from dsh_core import data as core_data
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem,
@@ -57,7 +57,7 @@ def _fmt_yaml(data, indent=0):
                         for kk, vv in items[1:]:
                             if isinstance(vv, (dict, list)):
                                 lines.append(pad + "    " + str(kk) + ":")
-                                lines.extend(_fmt_yaml(vv, indent + 2))
+                                lines.extend(_fmt_yaml(vv, indent + 1))
                             else:
                                 lines.append(pad + "    " + str(kk) + ": " + _fmt_scalar(vv))
                     else:
@@ -92,18 +92,17 @@ def _fmt_yaml(data, indent=0):
 
 class AgentPage(BasePage):
     # Agent 模式管理: BasePage 范式, app 为 MainWindow。
-    _data = Signal(object, str)            # (presets, err) 列表刷新结果
-    _detail = Signal(str, str, str)        # (name, text, err) preset.yml 详情结果
 
     def __init__(self, app, parent=None):
         self._remote = None
         _dep = getattr(app, "_current_deploy", None)
         if _dep and _dep.get("host"):
-            self._remote = dsh_data.DshRemote(_dep)
+            self._remote = core_data.DshRemote(_dep)
         self._presets = []
+        self._pending = None
         super().__init__(app, parent)
-        self._data.connect(self._apply_data)
-        self._detail.connect(self._apply_detail)
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._refresh()
 
     def _build(self):
@@ -168,7 +167,6 @@ class AgentPage(BasePage):
             t.setColumnWidth(i, wd)
             if a == "center":
                 t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignCenter)
-        t.setSelectionMode(QTableWidget.SingleSelection)
         return t
 
     def _wrap_table(self, caption, table):
@@ -180,20 +178,23 @@ class AgentPage(BasePage):
         v.addWidget(table)
         return card
 
+    # ── 列表(service 信号桥) ──
     def _refresh(self):
         self._set_status("正在读取 Agent 模式列表...")
         self._set_btns(False)
+        self._pending = "agents-list"
+        self.app.service.list_agent_presets(self._remote)
 
-        def worker():
-            err = None
-            presets = None
-            try:
-                presets = dsh_data.list_agent_presets(remote=self._remote)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._data, presets or [], err)
+    def _on_result(self, op, payload):
+        if op == "agents-list":
+            self._pending = None
+            self._apply_data(payload.get("data") or [], payload.get("err", ""))
 
-        threading.Thread(target=worker, daemon=True).start()
+    def _on_finished(self, op, ok):
+        # 兜底: result 槽漏执行导致 busy 悬挂时解除
+        if op == self._pending:
+            self._pending = None
+            self._set_btns(True)
 
     def _apply_data(self, presets, err):
         self._set_btns(True)
@@ -211,6 +212,7 @@ class AgentPage(BasePage):
         else:
             self._set_status("已加载 %d 个 Agent 模式" % len(presets))
 
+    # ── 详情(本机小文件, 同步直读; 无过期回包问题) ──
     def _on_select(self):
         rows = self._table.selectionModel().selectedRows()
         if not rows:
@@ -225,33 +227,16 @@ class AgentPage(BasePage):
             return
         self._info_lbl.setText("模式: %s   ·   描述: %s   ·   文件数: %d"
                                % (name, preset["desc"] or "—", preset["files"]))
-        self._detail_text.setPlainText("正在读取 preset.yml ...")
-        self._load_detail(name)
-
-    def _load_detail(self, name):
-        # 读 preset.yml 属 IO, 放后台线程; 结果带 name, 过期结果在 _apply_detail 丢弃。
-        pp = os.path.join(dsh_data.dsh_home(), ".agent-presets", name, "preset.yml")
-
-        def worker():
-            err = None
-            text = ""
-            try:
-                data = dsh_data.read_yaml(pp)
-                if data is None:
-                    text = "(preset.yml 不存在或为空)"
-                else:
-                    text = "\n".join(_fmt_yaml(data))
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._detail, name, text, err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _apply_detail(self, name, text, err):
-        rows = self._table.selectionModel().selectedRows()
-        cur = self._table.item(rows[0].row(), 0).text() if rows else None
-        if cur != name:
-            return  # 详情结果对应的选择已切换, 丢弃过期数据
+        pp = os.path.join(core_data.dsh_home(), ".agent-presets", name, "preset.yml")
+        try:
+            data = core_data.read_yaml(pp)
+            if data is None:
+                text = "(preset.yml 不存在或为空)"
+            else:
+                text = "\n".join(_fmt_yaml(data))
+            err = ""
+        except Exception as e:
+            text, err = "", str(e)
         if err:
             self._detail_text.setPlainText("读取失败: " + err)
             self._set_status("读取 preset.yml 失败: " + err)
@@ -264,7 +249,7 @@ class AgentPage(BasePage):
         self._detail_text.setPlainText("请在左侧选择一个模式")
 
     def _open_dir(self):
-        base = os.path.join(dsh_data.dsh_home(), ".agent-presets")
+        base = os.path.join(core_data.dsh_home(), ".agent-presets")
         if not os.path.isdir(base):
             QMessageBox.information(self, "目录不存在",
                                     "尚未创建任何 Agent 模式（%s）" % base)
