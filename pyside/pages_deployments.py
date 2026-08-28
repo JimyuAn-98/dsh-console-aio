@@ -1,21 +1,23 @@
 # -*- coding: utf-8 -*-
-# 部署管理页(PySide6 迁移版): 上半区部署列表(本机 + config.json deployments),
-# 下半区选中部署的只读快照详情。部署信息只写本地 config.json(gitignored),
-# 远程操作为只读(echo/快照), 写操作(安装/升级/配置)留待后续版本。
-# 数据层接口: dsh_data.load_deployments() / save_deployments() / DshRemote / deployment_snapshot()。
-# 后台线程做 IO/SSH 子进程 -> Qt Signal 回主线程更新表格, 绝不直接改 UI(线程安全)。
-# 注意: DshRemote 走 ssh BatchMode(免密), 不收集/保存密码明文(AGENTS.md 安全约定)。
-
-import threading
+# 部署管理页(UI 层): 上半区部署列表(本机 + config.json deployments), 下半区只读快照详情。
+# 业务在 dsh_core/deployments.py(纯 Python): 刷新总览/测试连接/保存走 service 信号桥 ——
+#   刷新总览: service.refresh_deployments([None] + deployments) 单线程串行快照, 每完成一个
+#   经 result("deploy-snap", {"idx","snap"}) 回包(替代旧"每部署一线程+代数/计数"编排);
+#   测试连接: result("deploy-test", {"host","msg","err"}); 保存: result("deploy-save", {...})。
+#   接收者是页面自身, 页面销毁 Qt 自动断开; log/status 不在页面 connect(主窗口级已接)。
+# 部署列表读取(config.json 本地小 IO)同步直调 dsh_data.load_deployments(纯读过渡态)。
+# 部署信息只写本地 config.json(gitignored); 远程操作只读; 写操作留待后续版本。
+# DshRemote 走 ssh BatchMode(免密), 不收集/保存密码明文(AGENTS.md 安全约定)。
 
 import dsh_data
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem,
     QPushButton, QHeaderView, QMessageBox, QDialog, QLineEdit, QFormLayout,
     QGridLayout)
 
+from dsh_core import deployments as core_deployments
 from pyside.base import BasePage
 
 
@@ -116,10 +118,6 @@ class DeploymentPage(BasePage):
     # 部署管理页: 本机 + config.json deployments 的多部署只读总览。
     # BasePage 范式, 构造签名 (app, parent=None), app 为 MainWindow。
     # 部署联动: 进入本页前 app._current_deploy 若选中远程, 载入后预选该行。
-    _data = Signal(object, str)          # (deployments, err) 列表刷新结果
-    _snap = Signal(int, object)          # (row_index, snap) 单行快照结果
-    _test_done = Signal(str, str, str)   # (host, msg, err) 测试连接结果
-    _save_done = Signal(str, str)        # (msg, err) 增删保存结果
 
     # 详情区字段: (快照键, 界面名)
     _FIELDS = (
@@ -138,7 +136,9 @@ class DeploymentPage(BasePage):
         self._deployments = []
         self._rows = []          # [{deployment, snap, dep_index, gen}], 与表格行一一对应
         self._gen = 0            # 列表重建代数, 用于丢弃过期快照回调
-        self._pending = 0        # 刷新总览的进行中线程数
+        self._refreshing = False
+        self._pending = 0        # 刷新总览的未回包行数
+        self._pending_op = None  # 正在等待的 service op: "deploy-test" / "deploy-save"
         self._last_op_msg = None
         self._preselect = getattr(app, "_current_deploy", None)
         self._table = None
@@ -149,10 +149,8 @@ class DeploymentPage(BasePage):
         self._status_lbl = None
         self._detail_lbls = {}
         super().__init__(app, parent)
-        self._data.connect(self._apply_data)
-        self._snap.connect(self._apply_snapshot)
-        self._test_done.connect(self._after_test)
-        self._save_done.connect(self._after_save)
+        self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         self._load()
 
     # ── UI 构建 ──────────────────────────────
@@ -243,23 +241,15 @@ class DeploymentPage(BasePage):
         v.addWidget(table)
         return card
 
-    # ── 数据加载与列表渲染 ──────────────────────
+    # ── 数据加载与列表渲染(本地小 IO 同步直调) ──
     def _load(self):
-        # 读 config.json 的 deployments(IO 放后台线程); "本机"始终作为第一行
+        # 读 config.json 的 deployments(本地小 IO 同步直调); "本机"始终作为第一行
         self._set_status("正在读取部署列表...")
-
-        def worker():
-            err = None
-            depls = None
-            try:
-                depls = dsh_data.load_deployments() or []
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._data, depls or [], err)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _apply_data(self, depls, err):
+        try:
+            depls = dsh_data.load_deployments() or []
+            err = ""
+        except Exception as e:
+            depls, err = [], str(e)
         self._deployments = depls
         self._render_rows()
         if err:
@@ -277,7 +267,7 @@ class DeploymentPage(BasePage):
             return
         self._table.setRowCount(0)
         self._gen += 1
-        self._pending = 0   # 列表重建后旧刷新线程的过期回调不再计数
+        self._pending = 0   # 列表重建后旧刷新的过期回包不再计数
         if self._refresh_btn is not None:
             self._refresh_btn.setEnabled(True)
         self._rows = []
@@ -376,9 +366,9 @@ class DeploymentPage(BasePage):
             if key in self._detail_lbls:
                 self._detail_lbls[key].setText(text)
 
-    # ── 添加 / 删除 ────────────────────────────
+    # ── 添加 / 删除(写 config.json 走 service 信号桥) ──
     def _add_deployment(self):
-        # 小对话框收集字段 -> save_deployments(数据层自动备份)
+        # 小对话框收集字段 -> service.save_deployments(数据层自动备份)
         dlg = _AddDeployDialog(self._deployments, self)
         if dlg.exec() != QDialog.Accepted or not dlg.result:
             return
@@ -404,22 +394,73 @@ class DeploymentPage(BasePage):
         self._save_and_reload("已删除部署记录")
 
     def _save_and_reload(self, msg):
-        # 写回 config.json(数据层自动 .bak 备份); 本地 IO 放后台线程
-        depls = list(self._deployments)
+        # 写回 config.json 走 service(数据层自动 .bak); 结果经 result("deploy-save") 回包
+        self._pending_op = "deploy-save"
+        self._save_msg = msg
         self._set_btns(False)
+        self._set_status("正在保存部署列表...")
+        self.app.service.save_deployments(list(self._deployments))
 
-        def worker():
-            err = None
-            try:
-                dsh_data.save_deployments(depls)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._save_done, msg, err)
+    # ── 测试连接(service 信号桥) ──
+    def _test_connection(self):
+        # 对选中远程部署 ssh 执行 "echo ok"(core); 本机行不可测(按钮已禁用)
+        row = self._selected_row()
+        if row is None or row["deployment"] is None:
+            return
+        dep = row["deployment"]
+        host = dep.get("host") or "-"
+        self._pending_op = "deploy-test"
+        self._set_btns(False)
+        self._set_status("正在测试 %s ..." % host)
+        self.app.set_status("正在测试部署 %s ..." % host)
+        self.app.service.test_deployment(dep)
 
-        threading.Thread(target=worker, daemon=True).start()
+    # ── 刷新总览(service 单线程串行快照) ──
+    def _refresh_all(self):
+        # 对每个部署(含本机)快照: core 串行执行, 每完成一个 result("deploy-snap") 回包
+        if self._refreshing or self._pending > 0:
+            return
+        deps = [None] + list(self._deployments)
+        self._refreshing = True
+        self._pending = len(deps)
+        if self._refresh_btn is not None:
+            self._refresh_btn.setEnabled(False)
+        self._set_btns(False)
+        self._set_status("正在刷新 %d 个部署 ..." % self._pending)
+        self.app.set_status("正在刷新 %d 个部署 ..." % self._pending)
+        self.app.service.refresh_deployments(deps)
+
+    # ── service 信号槽(接收者=本页, 销毁自动断开) ──
+    def _on_result(self, op, payload):
+        if op == "deploy-snap":
+            self._apply_snapshot(payload.get("idx"), payload.get("snap"))
+        elif op == "deploy-test":
+            self._pending_op = None
+            self._set_btns(True)
+            self._after_test(payload.get("host", ""), payload.get("msg", ""),
+                             payload.get("err", ""))
+        elif op == "deploy-save":
+            self._pending_op = None
+            self._set_btns(True)
+            self._after_save(self._save_msg, payload.get("err", ""))
+
+    def _on_finished(self, op, ok):
+        # 刷新总览整批收尾(每行回包已由 _apply_snapshot 计数); 其余 op 作 busy 兜底
+        if op == "deploy-refresh":
+            self._refreshing = False
+            if self._pending > 0:
+                # 理论上 result 已逐行清零; 兜底防止计数错漏导致按钮永禁
+                self._pending = 0
+                if self._refresh_btn is not None:
+                    self._refresh_btn.setEnabled(True)
+                self._set_btns(True)
+                self._set_status("总览刷新完成")
+                self.app.set_status("部署总览刷新完成")
+        elif op == self._pending_op:
+            self._pending_op = None
+            self._set_btns(True)
 
     def _after_save(self, msg, err):
-        self._set_btns(True)
         if err:
             self._set_status("保存失败: " + err)
             self.app.loge("[部署管理] 写入 config.json 失败: " + err, "err")
@@ -428,31 +469,6 @@ class DeploymentPage(BasePage):
         self.app.loge("[部署管理] " + msg, "ok")
         self._last_op_msg = msg
         self._load()
-
-    # ── 测试连接 ───────────────────────────────
-    def _test_connection(self):
-        # 对选中远程部署 ssh 执行 "echo ok"(DshRemote.exec); 本机行不可测(按钮已禁用)
-        row = self._selected_row()
-        if row is None or row["deployment"] is None:
-            return
-        dep = row["deployment"]
-        host = dep.get("host") or "-"
-        self._set_status("正在测试 %s ..." % host)
-        self.app.set_status("正在测试部署 %s ..." % host)
-
-        def worker():
-            # 远程 ssh 子进程在后台线程跑; 结果经 safe_emit 回主线程
-            msg = None
-            err = None
-            try:
-                remote = dsh_data.DshRemote(dep)
-                remote.exec("echo ok")
-                msg = "连接正常：%s 返回 ok" % host
-            except Exception as e:
-                err = "连接失败：%s 不可达（%s）" % (host, e)
-            self.safe_emit(self._test_done, host, msg, err)
-
-        threading.Thread(target=worker, daemon=True).start()
 
     def _after_test(self, host, msg, err):
         if err:
@@ -464,32 +480,10 @@ class DeploymentPage(BasePage):
         self.app.set_status(msg)
         self.app.loge("[部署管理] " + msg, "ok")
 
-    # ── 刷新总览 ───────────────────────────────
-    def _refresh_all(self):
-        # 对每个部署(含本机)后台线程跑 deployment_snapshot, 结果更新状态列与详情
-        if self._pending > 0:
-            return
-        self._pending = len(self._rows)
-        if self._refresh_btn is not None:
-            self._refresh_btn.setEnabled(False)
-        self._set_status("正在刷新 %d 个部署 ..." % self._pending)
-        self.app.set_status("正在刷新 %d 个部署 ..." % self._pending)
-        for idx, row in enumerate(self._rows):
-            dep = row["deployment"]
-            threading.Thread(target=self._snap_worker, args=(idx, dep), daemon=True).start()
-
-    def _snap_worker(self, idx, dep):
-        # 后台跑快照; 结果经 safe_emit 回主线程(页面销毁竞态由 safe_emit 兜底)
-        try:
-            snap = dsh_data.deployment_snapshot(dsh_data.DshRemote(dep))
-            if not isinstance(snap, dict):
-                snap = {"ok": False, "error": "快照返回格式错误"}
-        except Exception as e:
-            snap = {"ok": False, "error": str(e)}
-        self.safe_emit(self._snap, idx, snap)
-
     def _apply_snapshot(self, idx, snap):
-        # 主线程应用快照: 更新状态列; 若该行正被选中则同步刷新详情
+        # 应用单行快照: 更新状态列; 若该行正被选中则同步刷新详情
+        if not isinstance(snap, dict) or not isinstance(idx, int):
+            return
         if not (0 <= idx < len(self._rows)):
             return
         row = self._rows[idx]
@@ -507,7 +501,8 @@ class DeploymentPage(BasePage):
         if cur is row:
             self._fill_detail(row)
         self._pending -= 1
-        if self._pending <= 0:
+        if self._pending <= 0 and self._refreshing:
+            self._refreshing = False
             self._pending = 0
             if self._refresh_btn is not None:
                 self._refresh_btn.setEnabled(True)
