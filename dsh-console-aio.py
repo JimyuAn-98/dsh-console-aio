@@ -77,6 +77,21 @@ NAV_ITEMS = [
 ]
 
 
+def card_states_from_monitor(local, remote, cfg):
+    # 把监控探测结果翻译为隧道卡片状态(纯函数, 可单测): 返回 {key: bool}。
+    # 本机 dsh / 本机隧道卡片看本机端口探测; 反向隧道看公网侧 reverse_port 是否在监听
+    # (remote 探测); 探测无数据(如 remote 为 None)的 key 不下结论, 保持上次状态。
+    states = {}
+    for item in ITEMS:
+        key, port = item["key"], item.get("port")
+        if key in ("dsh-web", "dsh-tunnel", "connect-lab-dsh"):
+            states[key] = bool(local and local.get(port, (False, -1))[0])
+        elif key == "dsh-tunnel-reverse" and remote is not None:
+            rp = (cfg or {}).get("reverse_port") or 8091
+            states[key] = bool(remote.get(rp, False))
+    return states
+
+
 
 # ---------------- 现代暗色 QSS 主题(全控件覆盖, 无系统白色残留) ----------------
 QSS = """
@@ -402,6 +417,8 @@ class MainWindow(QMainWindow):
         # 若在页面里 connect 到 app 的槽(接收者是长命的 MainWindow), 会导致连接叠加重复输出。
         self.service.log.connect(self.loge)
         self.service.status.connect(self.set_status)
+        self._card_state = {}               # 隧道卡片最近已知状态(监控/启停事件累计)
+        self.service.card.connect(self._on_card)
         self._start_monitor()               # 右侧健康监控(实时探测端口/隧道)
 
         # ---- 控件检查模式(悬停显示身份, 左键点击打印路径; --inspect 启动 / F12 切换) ----
@@ -722,8 +739,20 @@ class MainWindow(QMainWindow):
         local, ssh_count, remote = payload
         self._apply_monitor(local, ssh_count, remote)
 
+    def _on_card(self, key, on):
+        # 任何来源的卡片事件(启停/监控)都记入状态快照, 页面重建后可恢复。
+        self._card_state[key] = on
+
+    def _sync_card_states(self, local, remote):
+        # 监控探测 -> 卡片状态: 仅广播"有数据且变化"的 key(页面在 service.card 上订阅)。
+        for key, on in card_states_from_monitor(local, remote, CONFIG).items():
+            if self._card_state.get(key) != on:
+                self._card_state[key] = on
+                self.service.card.emit(key, on)
+
     def _apply_monitor(self, local, ssh_count, remote):
-        # 主线程 UI 更新(无 IO): 右侧栏单元格配色 + 底部状态栏汇总
+        # 主线程 UI 更新(无 IO): 右侧栏单元格配色 + 底部状态栏汇总 + 隧道卡片状态同步
+        self._sync_card_states(local, remote)
         for port, (ok, ms) in (local or {}).items():
             if port == "__ssh__":
                 continue
@@ -783,6 +812,10 @@ class TunnelsPage(BasePage):
             grid.addLayout(row)
         v.addLayout(grid)
         v.addStretch(1)
+
+        # 应用已知状态快照(监控/启停事件持续更新; 页面重建后不丢状态)
+        for key, on in self.app._card_state.items():
+            self._set_card(key, on)
 
     def _make_card(self, item):
         card = QFrame(objectName="card")
