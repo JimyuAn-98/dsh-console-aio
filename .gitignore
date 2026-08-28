@@ -40,3 +40,11 @@ config.json.bak
 
 # PySide6 观感预览截图(临时, 不入库)
 *_preview.png
+
+# vscode相关
+.vscode/
+
+# GUI 渲染 dump 产物(tools/dump_ui.py 生成, 不入库)
+dump_ui.json
+dump_ui.xml
+ui_dump/

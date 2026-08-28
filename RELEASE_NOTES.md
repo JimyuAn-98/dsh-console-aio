@@ -14,6 +14,14 @@
 - **打包适配**：`dsh-console-aio.spec` / `build_win.bat` 适配 PySide6（含 `ui/theme.qss` add-data），支持 PyInstaller onefile + Inno Setup 安装包
 - **安全红线**：SSH 私钥 / API key 等凭据绝不读写明文；部署管理页不加密码字段（`DshRemote` 固定 `BatchMode` 免密）
 
+### UI 前后端分层重构（阶段0，详见 docs/UI_LAYERING.md）
+
+- **新增纯 Python 业务层 `dsh_core/`**（config / dshctl / tunnels，严禁 import PySide）+ **信号桥 `app/services.DshService`**：后端与 UI 之间一律 Qt 信号-槽（status/log/card/monitor/finished 五信号），禁止跨线程直接改 UI
+- **隧道页与本机 dsh 启停/停止、右侧健康监控探测改走 service**：主程序中的内联业务实现（_run_dsh/_dsh_start/_dsh_stop/_run_python_tunnel/_start_persist/_stop_py_tunnel/_build_tunnel_obj/_probe 等）全部删除；隧道"常驻重连"状态改由 service 持有（窗口生命周期），修复页面切换重建后"停止隧道又自动重连"的隐患
+- **config.derived 新增 allow_empty_ports 隔离分支**：测试用假配置的空端口不再被兜底回真实端口（3080 事故根因封堵）；默认行为与主程序完全一致
+- **业务层可独立单测**：新增 tests/test_dsh_core.py（config 派生契约/隧道组装/信号桥转发），零真实资源
+- **恢复隧道页"运行更新"（更新 dsh 本体，非控制台）**：该按钮自 PySide6 迁移后引用了未定义的 `_run_update`（点击静默报错）；现从 tkinter 旧主程序恢复完整流程并改进：停止 dsh web → git 拉取 → **清理旧构建产物（`pnpm run clean`，dsh 仓库自带安全清理）** → pnpm install → pnpm run build → 重启，落入 `dsh_core.dshctl.update_dsh` 并经 service 信号桥后台执行，点击先弹确认框列出各步骤；顺带修正旧版 `git fetch` 未在 dsh 仓库内执行的问题。清理一步是 2026-08-28 实测事故的修复：dsh 的 `lib/` 构建产物被 gitignore、git pull 不清，上游大版本改名删导出后，过期产物导致 `tsdown` 报 MISSING_EXPORT 构建失败（上游 CI 干净 checkout 不受影响，本地增量构建必踩）
+
 ## v0.4.0 (未发布)
 
 

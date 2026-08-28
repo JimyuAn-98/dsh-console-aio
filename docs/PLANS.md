@@ -235,8 +235,27 @@
 ## 10. 自动化测试套件（pytest）[2026-08-28 加入]
 
 - `tests/` 提供 pytest 测试: test_dsh_data(数据层) / test_tunnel_mgr(隧道) / test_version_page(版本比较) /
-  test_dialogs(对话框) / test_gui_smoke(GUI 冒烟)。运行: `python -m pytest tests/`。
-- **安全边界**(新增): 默认 `-m "not gui"`, 只执行纯单元测试(隔离 tmp 数据)。
-  涉及真实 MainWindow / 监控线程 / SSH / 端口 / 进程的 GUI 冒烟(40 例)默认跳过,
+  test_dialogs(对话框) / test_dsh_core(业务层: config 派生/隧道组装/信号桥) / test_gui_ui(纯 UI) /
+  test_gui_smoke(GUI 冒烟)。运行: `python -m pytest tests/`。
+- **安全边界**(新增): 默认 `-m "not gui"`, 只执行纯单元 + 纯 UI 测试(隔离 tmp 数据/假配置)。
+  涉及真实 MainWindow 监控线程 / SSH / 端口 / 进程的 GUI 冒烟(test_gui_smoke)默认跳过,
   仅 `python -m pytest tests/ -m gui` 手动执行——**切勿在 dsh(端口 3080)运行中自动触发**。
 - 决策详见 .agents/notes/implemented/testing/2026-08-28-test-suite-safe-boundary.md。
+
+---
+
+## 11. UI 前后端分层重构 [进行中·阶段0 完成 2026-08-28]
+
+- **目标**: 经典 Qt 分层 —— 纯 Python 业务层(dsh_core, 严禁 import PySide) + 信号桥接口层
+  (app/services.DshService) + 只做展示/订阅的 UI 层。后端->UI 一律 Qt 信号-槽(硬约束)。
+- 设计与迁移计划见 docs/UI_LAYERING.md; 决策记录见
+  .agents/notes/implemented/architecture/2026-08-28-ui-layering-signal-bridge.md。
+- **阶段0 已完成**: dsh_core(config/dshctl/tunnels) + DshService 五信号桥;
+  隧道页/主窗口监控从内联业务改走 service(_run_dsh/_dsh_start/_dsh_stop/_run_python_tunnel/
+  _start_persist/_stop_py_tunnel/_build_tunnel_obj/_probe 三件套全部删除);
+  config.derived 增加 allow_empty_ports 隔离分支(测试用假配置不再被兜底回真实端口)。
+- **后续阶段**: 阶段1 收敛 _stream_cmd(页面共用; dsh 完整更新流已恢复进 dshctl.update_dsh) ->
+  阶段2 pages_* 逐页(version/keys/ops 的直接 subprocess 优先) -> 阶段3 dialogs 评估 ->
+  阶段4 dsh_data 归并进 dsh_core。
+- **验证边界**: dsh_core 可独立纯单元测试(tests/test_dsh_core.py, 零真实资源);
+  GUI 交互(隧道启停/监控/3080 无恙)由用户人工在 GUI 验证, 绝不自动跑构造 MainWindow 的测试。

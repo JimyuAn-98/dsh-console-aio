@@ -1,0 +1,114 @@
+# -*- coding: utf-8 -*-
+# app/services.py - 接口层(可 import PySide): 唯一"起后端线程 + 转结果"的地方。
+#
+# 硬约束(见 docs/UI_LAYERING.md): 后端(dsh_core)与 UI 之间一律走 Qt 信号-槽。
+# 本类持有 QObject + Signal; 后台线程跑 dsh_core 的函数, 把它的 events 回调转发到
+# Signal.emit —— Qt 会自动把信号排队到接收者线程(线程安全)。后端线程绝不直接改 UI,
+# UI 只 connect 信号 + 调本类的触发方法。
+
+import threading
+
+from PySide6.QtCore import QObject, Signal
+
+from dsh_core import config as dsh_config
+from dsh_core.dshctl import DshCtl
+from dsh_core.tunnels import TunnelManager
+
+
+class DshService(QObject):
+    # 后端 -> UI 的唯一通道(线程安全, 由 events 回调转发)
+    status   = Signal(str)               # 一条状态文案
+    log      = Signal(str, str)          # (text, tag)
+    card     = Signal(str, bool)         # (隧道key, 是否在线)
+    monitor  = Signal(object)            # (local_map, ssh_count, remote) 探测结果;
+                                         # None 哨兵 = 本轮探测线程异常, UI 只解除 busy 不刷新
+    finished = Signal(str, bool)         # (操作key, ok)
+
+    def __init__(self, base_dir, config_path=None, parent=None):
+        super().__init__(parent)
+        self.base_dir = base_dir
+        self._cfg = dsh_config.load_derived(config_path)
+        self.ctl = DshCtl(self._cfg)
+        self.tunnels = TunnelManager(base_dir, self._cfg)
+
+    # ---- events 回调 -> Qt Signal ----
+    def _events(self):
+        def cb(kind, payload):
+            if kind == "log":
+                text, tag = payload
+                self.log.emit(text, tag)
+            elif kind == "status":
+                self.status.emit(payload)
+            elif kind == "card":
+                key, on = payload
+                self.card.emit(key, on)
+            elif kind == "monitor":
+                self.monitor.emit(payload)
+        return cb
+
+    # ---- UI 触发方法(每个都起后台线程, 不阻塞 UI) ----
+    def start_dsh(self, mode, op="dsh"):
+        ev = self._events()
+
+        def run():
+            try:
+                self.ctl.run_dsh(mode, ev)
+                self.finished.emit(op, True)
+            except Exception as e:
+                ev("log", ("[dsh] 异常: %s" % e, "err"))
+                self.finished.emit(op, False)
+        threading.Thread(target=run, daemon=True).start()
+
+    def update_dsh(self, op="update-dsh"):
+        # dsh 完整更新(停 web -> git 拉取 -> 依赖 -> 构建 -> 重启), 业务在 dshctl.update_dsh。
+        ev = self._events()
+
+        def run():
+            try:
+                ok = self.ctl.update_dsh(ev)
+                self.finished.emit(op, bool(ok))
+            except Exception as e:
+                ev("log", ("[update] 异常: %s" % e, "err"))
+                self.finished.emit(op, False)
+        threading.Thread(target=run, daemon=True).start()
+
+    def start_tunnel(self, key, mode, op=None):
+        op = op or key
+        ev = self._events()
+
+        def run():
+            try:
+                self.tunnels.start(key, mode, ev)
+                self.finished.emit(op, True)
+            except Exception as e:
+                ev("log", ("[%s] 异常: %s" % (key, e), "err"))
+                self.finished.emit(op, False)
+        threading.Thread(target=run, daemon=True).start()
+
+    def monitor_once(self):
+        # 单次健康探测(原 _monitor_tick 的 worker 部分), 结果经 monitor 信号回 UI。
+        # 兜底: 探测线程任何异常都必须以恰好一次 monitor 信号收场(正常结果或 None 哨兵),
+        # 否则 UI 的 busy 标志永真, 监控从此停摆。
+        ev = self._events()
+
+        def run():
+            try:
+                self.ctl.monitor_tick(ev)
+            except Exception as e:
+                # 本层兜底: monitor_tick 内部已逐项吞异常, 这里只防配置结构异常等漏网情况。
+                ev("log", ("[monitor] 探测异常: %s" % e, "err"))
+                self.monitor.emit(None)
+        threading.Thread(target=run, daemon=True).start()
+
+    # ---- 构造 ----
+    @classmethod
+    def from_env(cls, base_dir=None, parent=None):
+        # base_dir 默认取仓库根(config 同目录)。config 走 DSH_AIO_CONFIG(与主程序一致)。
+        import os
+        if base_dir is None:
+            here = os.path.dirname(os.path.abspath(__file__))
+            base_dir = os.path.dirname(here)  # 仓库根
+        return cls(base_dir, config_path=os.environ.get("DSH_AIO_CONFIG"), parent=parent)
+
+
+__all__ = ["DshService"]

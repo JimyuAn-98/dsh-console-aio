@@ -11,12 +11,17 @@
 #   - 拦截 MainWindow._start_monitor(真实健康监控线程)与 _stream_cmd(真实子进程)。
 #   - --smoke 模式: OverviewPage/总览等不做真联网/真操作。
 #
-# 本文件属于"纯 UI 层"(默认运行, 安全); 真实隧道启停/SSH/端口连通测试留给人工(-m gui)。
+# 关于模块引用: 真实源文件是 dsh-console-aio.py(文件名带连字符, 不能直接 import),
+# 因此本文件用 console fixture(在假环境下通过 importlib 动态加载)拿主程序模块对象,
+# 并用 console.NAV_ITEMS / console.OverviewPage 等访问其符号(不再 import dsh_console_aio,
+# 以避免 Pylance 的 reportMissingImports)。
+#
+# 注意: 本文件构造真实 MainWindow 与各页面, 页面构造器会起 daemon 后台线程。这些测试
+#       由人工执行; 自动运行的风险边界与拦截说明见 docs/TESTING.md。
 
 import os
 import sys
 import importlib
-import importlib.util
 
 import pytest
 
@@ -87,17 +92,15 @@ class TestWindowConstruction:
     def test_title(self, main_win):
         assert main_win.windowTitle().startswith("dsh 控制台")
 
-    def test_nav_count(self, main_win):
-        from dsh_console_aio import NAV_ITEMS
-        assert main_win.nav.count() == len(NAV_ITEMS) > 0
+    def test_nav_count(self, main_win, console):
+        assert main_win.nav.count() == len(console.NAV_ITEMS) > 0
 
     def test_deploy_combo_default_local(self, main_win):
         assert main_win.deploy.currentText() == "本机"
         assert main_win._current_deploy is None
 
-    def test_stack_initial_overview(self, main_win):
-        from dsh_console_aio import OverviewPage
-        assert isinstance(main_win.stack.currentWidget(), OverviewPage)
+    def test_stack_initial_overview(self, main_win, console):
+        assert isinstance(main_win.stack.currentWidget(), console.OverviewPage)
 
     def test_bridge_attached(self, main_win):
         assert main_win.bridge._view is not None
@@ -118,12 +121,11 @@ class TestNavToPages:
         qapp_mod.processEvents()
         assert main_win.stack.currentWidget() is not None
 
-    def test_page_types(self, main_win, qapp_mod):
-        import dsh_console_aio as C
+    def test_page_types(self, main_win, qapp_mod, console):
         from pyside.pages_sessions import SessionPage
         from pyside.pages_deployments import DeploymentPage
         from pyside.pages_version import VersionPage
-        expect = {"overview": C.OverviewPage, "tunnels": C.TunnelsPage,
+        expect = {"overview": console.OverviewPage, "tunnels": console.TunnelsPage,
                   "sessions": SessionPage, "deployments": DeploymentPage,
                   "version": VersionPage}
         for key, cls in expect.items():
@@ -134,9 +136,8 @@ class TestNavToPages:
 
 class TestNavMappingAll:
     # NAV_ITEMS 全部 key 都能生成页面
-    def test_all_keys(self, main_win, qapp_mod):
-        from dsh_console_aio import NAV_ITEMS
-        for label, key in NAV_ITEMS:
+    def test_all_keys(self, main_win, qapp_mod, console):
+        for label, key in console.NAV_ITEMS:
             main_win._show_page(key)
             qapp_mod.processEvents()
             assert main_win.stack.currentWidget() is not None, "%s(%s)" % (label, key)
@@ -180,35 +181,44 @@ class TestRightBar:
 
 class TestTunnelsPage:
     # 隧道页卡片构造 + 动作按钮接线(不点真实启停)
-    def test_cards_built(self, main_win, qapp_mod):
-        import dsh_console_aio as C
+    def test_cards_built(self, main_win, qapp_mod, console):
         main_win._show_page("tunnels")
         qapp_mod.processEvents()
         page = main_win.stack.currentWidget()
-        assert isinstance(page, C.TunnelsPage)
+        assert isinstance(page, console.TunnelsPage)
         cards = set(page._cards.keys())
-        items = set(i["key"] for i in C.ITEMS)
+        items = set(i["key"] for i in console.ITEMS)
         assert cards == items
 
     def test_action_buttons_wired(self, main_win, qapp_mod):
-        # 每个 ITEM 的动作按钮都存在且 wired 到处理函数(不点击 -> 不触发真实操作)
-        import dsh_console_aio as C
+        # 每个 ITEM 的动作按钮都存在且 wired 到处理函数(不点击 -> 不触发真实操作)。
+        # 分层后: 页面只分派, 业务经 main_win.service 信号桥执行; 内联隧道实现已删除。
         main_win._show_page("tunnels")
         qapp_mod.processEvents()
         page = main_win.stack.currentWidget()
         assert page._on_action is not None
-        assert page._run_python_tunnel is not None
-        assert hasattr(page, "_stop_py_tunnel")
+        assert main_win.service is not None
+        assert not hasattr(page, "_run_python_tunnel")
+        assert not hasattr(page, "_stop_py_tunnel")
+
+    def test_service_card_connected_to_page(self, main_win, qapp_mod):
+        # service.card -> 当前隧道页 _apply_card: 信号桥接通后卡片圆点随信号更新。
+        main_win._show_page("tunnels")
+        qapp_mod.processEvents()
+        page = main_win.stack.currentWidget()
+        main_win.service.card.emit("dsh-tunnel", True)
+        qapp_mod.processEvents()
+        page._apply_card("dsh-tunnel", False)
+        qapp_mod.processEvents()
 
 
 class TestOverviewPage:
     # 总览页在 smoke 模式显示演示/未配置文案
-    def test_smoke_shows_demo(self, main_win, qapp_mod):
-        import dsh_console_aio as C
+    def test_smoke_shows_demo(self, main_win, qapp_mod, console):
         main_win._show_page("overview")
         qapp_mod.processEvents()
         page = main_win.stack.currentWidget()
-        assert isinstance(page, C.OverviewPage)
+        assert isinstance(page, console.OverviewPage)
         text = page.dep_status.text()
         assert ("演示" in text) or ("未配置" in text)
 
@@ -257,11 +267,10 @@ class TestLayoutFacts:
         # 部署下拉存在且默认"本机"
         assert main_win.deploy.objectName() == "deploy"
 
-    def test_nav_labels_match_constants(self, main_win):
+    def test_nav_labels_match_constants(self, main_win, console):
         # 左导航每一项的文字应与 NAV_ITEMS 一致(事实层级/文案)
-        from dsh_console_aio import NAV_ITEMS
         labels = [main_win.nav.item(i).text() for i in range(main_win.nav.count())]
-        assert labels == [l for l, _ in NAV_ITEMS]
+        assert labels == [l for l, _ in console.NAV_ITEMS]
 
     def test_right_bar_sections_with_empty_ports(self, main_win):
         # 假 config 端口全空 => 右栏不应有本地端口/远程隧道单元格
@@ -277,15 +286,14 @@ class TestLayoutFacts:
         # 日志区固定高度
         assert main_win.log_view.height() > 40
 
-    def test_tunnels_cards_have_action_buttons(self, main_win, qapp_mod):
+    def test_tunnels_cards_have_action_buttons(self, main_win, qapp_mod, console):
         # 每张隧道卡片应含其 ITEMS 声明的动作按钮(事实层级)
-        import dsh_console_aio as C
         from PySide6.QtWidgets import QFrame, QPushButton
         main_win._show_page("tunnels")
         qapp_mod.processEvents()
         page = main_win.stack.currentWidget()
-        for item in C.ITEMS:
-            expected = [C.BTN_TEXT[a] for a in item["actions"]]
+        for item in console.ITEMS:
+            expected = [console.BTN_TEXT[a] for a in item["actions"]]
             card_btns = []
             for card in page.findChildren(QFrame, "card"):
                 card_btns.append([b.text() for b in card.findChildren(QPushButton)])

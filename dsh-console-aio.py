@@ -7,17 +7,17 @@ dsh-console-aio.py - dsh SSH 隧道管理 + 本机 dsh 启停 + 健康监控 (Py
 运行(双击 exe 或):  C:/ProgramData/miniconda3/pythonw.exe dsh-console-aio.py
 离屏验证:  QT_QPA_PLATFORM=offscreen python dsh-console-aio.py --smoke
 """
-import os, sys, json, time, subprocess, socket, threading
+import os, sys, json, time, subprocess, threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
-    QComboBox, QFrame, QScrollArea, QSizePolicy, QAbstractItemView)
+    QComboBox, QFrame, QScrollArea, QSizePolicy, QAbstractItemView,
+    QMessageBox)
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
 from PySide6.QtGui import QFont, QTextCursor, QColor
 
 import dsh_data
-import tunnel_mgr
-from tunnel_mgr import tcp_ok
+from app.services import DshService
 
 if getattr(sys, 'frozen', False):
     # onefile exe: 用户可见/可写的数据目录 = exe 所在目录(放 config.json 便于分发后编辑)。
@@ -44,8 +44,8 @@ CONFIG = _load_config()
 # ---------------- 业务常量(从 config.json 派生) ----------------
 DASH_REPO  = CONFIG.get("dash_repo") or ""
 DASH_PORT  = CONFIG.get("dash_port") or 3080
-DASH_CMD   = list(CONFIG.get("dash_cmd") or ["pnpm.cmd", "dsh", "web"])
 POLL_SECONDS = CONFIG.get("poll_seconds") or 4
+UPDATE_TIMEOUT = CONFIG.get("update_timeout") or 1800
 
 BTN_TEXT = {"start": "启动", "restart": "重启", "persist": "常驻",
            "stop": "停止", "run": "运行更新"}
@@ -406,8 +406,6 @@ class RightBar(QFrame):
 
 # ---------------- 主窗口 ----------------
 class MainWindow(QMainWindow):
-    _monitorGot = Signal(object, object, object)   # (local_map, ssh_count, remote_state) 后台探测回主线程
-
     def __init__(self, smoke=False):
         super().__init__()
         self.smoke = smoke
@@ -421,6 +419,12 @@ class MainWindow(QMainWindow):
         self.bridge = LogBridge()
         self.DASH_REPO = DASH_REPO          # 供插件等页面取 dsh 仓库目录(cwd)
         self.APP_VERSION = APP_VERSION
+        # 业务层信号桥(dsh_core 的唯一 UI 入口): config 走 DSH_AIO_CONFIG, 与本模块一致。
+        self.service = DshService.from_env(parent=self)
+        # service -> 主窗口的日志/状态只在窗口级 connect 一次: 页面会随导航反复销毁重建,
+        # 若在页面里 connect 到 app 的槽(接收者是长命的 MainWindow), 会导致连接叠加重复输出。
+        self.service.log.connect(self.loge)
+        self.service.status.connect(self.set_status)
         self._start_monitor()               # 右侧健康监控(实时探测端口/隧道)
 
         central = QWidget(objectName="central")
@@ -678,10 +682,10 @@ class MainWindow(QMainWindow):
             return False
         return True
 
-    # ---- 右侧健康监控(实时探测本机端口/公网隧道, 后台线程 + Signal 回主线程) ----
+    # ---- 右侧健康监控(探测业务在 dsh_core, 经 service.monitor 信号回主线程) ----
     def _start_monitor(self):
         self._monitor_busy = False
-        self._monitorGot.connect(self._apply_monitor)
+        self.service.monitor.connect(self._on_monitor)
         self._monitor_timer = QTimer(self)
         self._monitor_timer.timeout.connect(self._monitor_tick)
         self._monitor_timer.start(3000)
@@ -692,21 +696,16 @@ class MainWindow(QMainWindow):
         if self._monitor_busy:
             return
         self._monitor_busy = True
+        self.service.monitor_once()
 
-        def worker():
-            try:
-                local = {}
-                for port, _, _ in CONFIG.get("local_ports", []):
-                    local[port] = _probe("127.0.0.1", port)
-                if SSH_SERVER:
-                    local["__ssh__"] = _probe(SSH_SERVER, 22)
-                ssh_count = _ssh_proc_count()
-                remote = _probe_remote_tunnels()
-                self._monitorGot.emit(local, ssh_count, remote)
-            finally:
-                self._monitor_busy = False
-
-        threading.Thread(target=worker, daemon=True).start()
+    def _on_monitor(self, payload):
+        # service.monitor 回包(主线程): payload 为 (local, ssh_count, remote) 元组;
+        # None 哨兵 = 本轮探测线程异常, 仅解除 busy, 下轮定时器重试。
+        self._monitor_busy = False
+        if payload is None:
+            return
+        local, ssh_count, remote = payload
+        self._apply_monitor(local, ssh_count, remote)
 
     def _apply_monitor(self, local, ssh_count, remote):
         # 主线程 UI 更新(无 IO): 右侧栏单元格配色 + 底部状态栏汇总
@@ -742,94 +741,11 @@ def main():
 
 
 
-# ---------------- 隧道配置常量(从 config.json 派生) ----------------
-SSH_SERVER   = CONFIG.get("ssh_server") or ""
-SSH_USER     = CONFIG.get("ssh_user") or ""
-LAB_SERVER   = CONFIG.get("lab_server") or ""
-LAB_USER     = CONFIG.get("lab_user") or ""
-LAB_PORT     = CONFIG.get("lab_port") or 3090
-REVERSE_PORT = CONFIG.get("reverse_port") or 8091
-FORWARD_PORTS = CONFIG.get("forward_ports") or [8090, 8022, 8091]
-TCP_TIMEOUT  = CONFIG.get("tcp_timeout") or 0.8
-UPDATE_TIMEOUT = CONFIG.get("update_timeout") or 1800
-
-
-# ---------------- 健康监控(后台线程探测, 不阻塞主线程) ----------------
-def _probe(host, port):
-    # TCP 连通测试(本机回环或公网): 返回 (ok, 延迟ms)
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(TCP_TIMEOUT)
-        t0 = time.time()
-        s.connect((host, port))
-        s.close()
-        return True, int((time.time() - t0) * 1000)
-    except Exception:
-        return False, -1
-
-
-def _ssh_proc_count():
-    # 统计 ssh.exe 进程数(本机反向隧道进程), 失败返回 -1
-    try:
-        out = subprocess.run(
-            ["tasklist", "/NH", "/FI", "IMAGENAME eq ssh.exe"],
-            capture_output=True, text=True, errors="replace", timeout=8,
-            creationflags=subprocess.CREATE_NO_WINDOW).stdout
-        return sum(1 for ln in out.splitlines() if "ssh.exe" in ln)
-    except Exception:
-        return -1
-
-
-def _probe_remote_tunnels():
-    # SSH 直查公网服务器上反向隧道端口是否监听; 返回 {port: bool}, SSH 不可达返回 None
-    pts = [p for p, _, _ in CONFIG.get("remote_tunnels", [])]
-    if not pts:
-        return {}
-    ports = "|".join(str(p) for p in pts)
-    cmd = "ss -tln | grep -E ':(%s) '" % ports
-    try:
-        p = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-             "-o", "LogLevel=ERROR", "%s@%s" % (SSH_USER, SSH_SERVER), cmd],
-            capture_output=True, text=True, errors="replace", timeout=8,
-            creationflags=subprocess.CREATE_NO_WINDOW)
-        if p.returncode != 0:
-            return None
-        text = p.stdout or ""
-        return {pt: (":%d " % pt) in text or (":%d" % pt) in text for pt in pts}
-    except Exception:
-        return None
-
-
-def _build_tunnel_obj(app, cfg_item):
-    # 依据 config 构造一条 tunnel_mgr.Tunnel
-    key = cfg_item["key"]
-    if key == "dsh-tunnel":
-        forwards = [(p, "127.0.0.1", p) for p in FORWARD_PORTS]
-        host, user, mode = SSH_SERVER, SSH_USER, "forward"
-        watch = FORWARD_PORTS[0] if FORWARD_PORTS else None
-    elif key == "connect-lab-dsh":
-        forwards = [(LAB_PORT, "127.0.0.1", LAB_PORT)]
-        host, user, mode = LAB_SERVER, LAB_USER, "forward"
-        watch = LAB_PORT
-    elif key == "dsh-tunnel-reverse":
-        forwards = [(REVERSE_PORT, "127.0.0.1", DASH_PORT)]
-        host, user, mode = SSH_SERVER, SSH_USER, "reverse"
-        watch = None
-    else:
-        raise ValueError("unknown tunnel: " + key)
-    t = tunnel_mgr.Tunnel(BASE_DIR, key, host, user,
-                          mode=mode, forwards=forwards, watch_port=watch)
-    t.set_logger(lambda msg, tag="": app.loge("  " + msg, tag))
-    return t
-
-
 # ---------------- 隧道页(导航第 2 项) ----------------
 class TunnelsPage(BasePage):
-    _cardGot = Signal(str, bool)   # 后台隧道线程 -> 主线程更新卡片状态(线程安全)
-
     def _build(self):
-        self._cardGot.connect(self._apply_card)
+        # 卡片在线状态经 service.card 信号回本页(接收者=本页, 页面销毁时 Qt 自动断开)。
+        self.app.service.card.connect(self._apply_card)
         v = QVBoxLayout(self)
         v.setContentsMargins(20, 20, 20, 20)
         v.setSpacing(6)
@@ -891,128 +807,44 @@ class TunnelsPage(BasePage):
         d.setText("●" if on else "○")
         d.setStyleSheet("color:#7ecb6a; font-size:15px;" if on else "color:#999; font-size:15px;")
 
-    def _apply_card(self, key, on):
-        # 主线程槽: 由 _cardGot Signal 从后台隧道线程回主线程更新卡片(线程安全)。
-        self._set_card(key, on)
-
-    # ---- 动作分派(后台线程执行, 经信号回 UI) ----
+    # ---- 动作分派: 页面只分派与提示, 业务经 service 信号桥在后台线程执行 ----
     def _on_action(self, item, mode):
         t = item["type"]
         key = item["key"]
         if t == "dsh":
             self.app.set_status("正在 %s 本机 dsh ..." % mode)
-            threading.Thread(target=self._run_dsh, args=(mode,), daemon=True).start()
+            self.app.service.start_dsh(mode)
             return
         if key == "update-dsh":
+            # 更新的是 dsh 本体(dash_repo), 不是本控制台(控制台更新在「关于与更新」页)。
+            # 流程: 停 web -> git 拉取 -> 清理旧构建 -> 依赖 -> 构建 -> 重启, 业务在 dsh_core.dshctl。
+            # 危险操作约定: 先确认"将执行什么", 用户点是才执行。
+            ans = QMessageBox.question(
+                self, "更新 dsh",
+                "将对本机 dsh 执行一次完整更新:\n\n"
+                "  1) 停止当前 dsh web\n"
+                "  2) git 拉取最新代码\n"
+                "  3) 清理旧构建产物\n"
+                "  4) 安装依赖 (pnpm install)\n"
+                "  5) 构建 (pnpm run build, 耗时较长)\n"
+                "  6) 重启 dsh web\n\n"
+                "期间 dsh 页面会短暂不可用。是否继续?")
+            if ans != QMessageBox.StandardButton.Yes:
+                self.app.set_status("已取消更新")
+                return
+            self.app.loge("[update-dsh] 开始完整更新...", "warn")
             self.app.set_status("正在运行更新(构建较久, 请耐心)...")
-            threading.Thread(target=self._run_update, daemon=True).start()
+            self.app.service.update_dsh()
             return
-        # python 隧道
+        # python 隧道: 启停/常驻重连业务在 dsh_core.tunnels; persist 停止标志由 service
+        # 持有(窗口生命周期), 不再随页面重建丢失导致"停止后又被重连"。
         self.app.loge("[%s] 模式: %s (Python)" % (key, mode), "warn")
         self.app.set_status("正在执行 %s -> %s (Python) ..." % (mode, key))
-        threading.Thread(target=self._run_python_tunnel, args=(item, mode), daemon=True).start()
+        self.app.service.start_tunnel(key, mode)
 
-    # ---- 本机 dsh ----
-    def _run_dsh(self, mode):
-        if mode in ("start", "restart"):
-            self._dsh_start()
-        if mode in ("stop", "restart"):
-            self._dsh_stop()
-            if mode == "restart":
-                self.app.loge("  停止完成, 重新启动...", "warn")
-                self._dsh_start()
-
-    def _dsh_start(self):
-        if not os.path.isdir(DASH_REPO):
-            self.app.loge("  仓库不存在: %s" % DASH_REPO, "err")
-            self.app.set_status("启动失败: 仓库目录不存在")
-            return
-        self.app.loge("  $ cd %s && %s" % (DASH_REPO, " ".join(DASH_CMD)))
-        try:
-            logdir = os.path.join(os.environ.get("TEMP", "."), "dsh-dash")
-            os.makedirs(logdir, exist_ok=True)
-            out = open(os.path.join(logdir, "dsh-web.out.log"), "ab")
-            err = open(os.path.join(logdir, "dsh-web.err.log"), "ab")
-            subprocess.Popen(DASH_CMD, cwd=DASH_REPO, stdout=out, stderr=err,
-                             creationflags=subprocess.CREATE_NO_WINDOW)
-            self.app.loge("  已在后台启动, 等待 %d 端口就绪..." % DASH_PORT, "ok")
-            self.app.set_status("已触发本机 dsh 启动 -> http://127.0.0.1:%d" % DASH_PORT)
-            self.safe_emit(self._cardGot, "dsh-web", True)
-        except FileNotFoundError:
-            self.app.loge("  找不到 %s, 请确认 pnpm 在 PATH 或修改配置" % DASH_CMD[0], "err")
-            self.app.set_status("启动失败: 找不到启动命令")
-        except Exception as e:
-            self.app.loge("  异常: %s" % e, "err")
-            self.app.set_status("启动出错: %s" % e)
-
-    def _dsh_stop(self):
-        ps = ("$n=0\n"
-              "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" -ErrorAction SilentlyContinue |\n"
-              "  Where-Object { $_.CommandLine -match 'dsh' -and $_.CommandLine -match 'web' } |\n"
-              "  ForEach-Object { Write-Output ('stop node ' + $_.ProcessId); taskkill /PID $_.ProcessId /T /F | Out-Null; $n++ }\n"
-              "if($n -eq 0){ Write-Output 'no dsh web process' }\n")
-        self.app.loge("  $ stopping dsh web (node, 匹配 dsh+web)...")
-        try:
-            r = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy",
-                                "Bypass", "-Command", ps],
-                               capture_output=True, text=True, errors="replace",
-                               timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
-            for ln in ((r.stdout or "").splitlines() or ["(无输出)"]):
-                self.app.loge("    " + ln, "ok" if r.returncode == 0 else "err")
-            self.app.set_status("已停止本机 dsh web" if r.returncode == 0 else "停止本机 dsh 出错")
-            self.safe_emit(self._cardGot, "dsh-web", False)
-        except subprocess.TimeoutExpired:
-            self.app.loge("  [停止] 超时(60s)", "err")
-            self.app.set_status("停止本机 dsh 超时")
-        except Exception as e:
-            self.app.loge("  异常: %s" % e, "err")
-            self.app.set_status("停止出错: %s" % e)
-
-    # ---- python 隧道 ----
-    def _run_python_tunnel(self, item, mode):
-        key = item["key"]
-        if mode == "stop":
-            self._stop_py_tunnel(item)
-            return
-        t = _build_tunnel_obj(self.app, item)
-        ok = t.start()
-        if not ok:
-            self.app.set_status("启动失败: %s" % key)
-            self.safe_emit(self._cardGot, key, False)
-            return
-        self.app.set_status("%s 已启动 (Python)" % key)
-        self.safe_emit(self._cardGot, key, True)
-        if mode == "persist":
-            self._start_persist(item, t)
-
-    def _start_persist(self, item, t):
-        key = item["key"]
-        stop_flag = threading.Event()
-        if not hasattr(self, "_py_persist"):
-            self._py_persist = {}
-        old = self._py_persist.get(key)
-        if old:
-            old.set()
-        self._py_persist[key] = stop_flag
-
-        def loop():
-            while not stop_flag.is_set():
-                if not t.is_running():
-                    self.app.loge("  [%s] 隧道断开, 尝试重连..." % key, "warn")
-                    t.start()
-                stop_flag.wait(5)
-
-    def _stop_py_tunnel(self, item):
-        # 停止一条 Python 隧道: 取消常驻重连 + 停止隧道进程。
-        key = item["key"]
-        if hasattr(self, "_py_persist") and self._py_persist.get(key):
-            self._py_persist[key].set()
-            self._py_persist.pop(key, None)
-            self.app.loge("  [%s] 已取消常驻重连" % key, "warn")
-        t = _build_tunnel_obj(self.app, item)
-        n = t.stop()
-        self.app.set_status("%s 已停止 (Python)" % key if n else "%s 停止(无进程)" % key)
-        self.safe_emit(self._cardGot, key, False)
+    def _apply_card(self, key, on):
+        # service.card 信号槽(主线程): 更新卡片圆点。
+        self._set_card(key, on)
 
 
 if __name__ == "__main__":

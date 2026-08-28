@@ -10,6 +10,7 @@
 | 纯单元 | tests/test_tunnel_mgr.py | 隧道管理器纯逻辑(tcp_ok/PID文件/Tunnel命令组装) | 是 | 否(临时目录) |
 | 纯单元 | tests/test_version_page.py | 版本号比较 / 路径定位 | 是 | 否 |
 | 纯单元 | tests/test_dialogs.py | 对话框构造 + 字段/保存逻辑 | 是 | 否(不写真实 config) |
+| 纯单元 | tests/test_dsh_core.py | 业务层: config 派生兜底规则(默认/allow_empty_ports)/TunnelManager 组装/DshService 信号桥契约 | 是 | 否(端口全 0/空, 不起线程) |
 | 纯 UI  | tests/test_gui_ui.py | 离屏构造真实 MainWindow, 测页面/导航/按钮接线/日志桥/右栏状态 | 是 | 否(假 config+假 DSH_HOME+拦截线程) |
 | 真实资源(人工) | tests/test_gui_smoke.py | 真实 MainWindow 监控/SSH/端口/启停 dsh 的冒烟 | 否, 需 -m gui | **是, 必须人工执行** |
 
@@ -46,7 +47,8 @@ test_gui_ui.py 就这么做, 并通过 4 道隔离保证不碰真实资源:
 - 每个导航 key 都能 _show_page 出页面且类型正确。
 - 日志桥 bridge.emit 是否真的出现在日志区(线程安全回主线程)。
 - 右栏 set_state 是否更新单元格、对不存在 key 是否安全。
-- 隧道页是否按 ITEMS 生成全部卡片、动作处理函数是否接线(on_action/_run_python_tunnel/_stop_py_tunnel)。
+- 隧道页是否按 ITEMS 生成全部卡片、动作按钮接线到 _on_action 并经 main_win.service 信号桥分派
+  (分层后内联 _run_python_tunnel/_stop_py_tunnel 已删除, 断言其不存在)。
 - 总览页在 smoke 下是否显示演示/未配置文案、refresh 是否不崩溃。
 - **事实布局**(TestLayoutFacts): 顶部栏 配置/环境/安装/立即刷新 按钮存在; 左导航文案与 NAV_ITEMS 一致;
   右栏分区标题存在(端口空=>无单元格); 每张隧道卡片含 ITEMS 声明的动作按钮; 窗口 resize 后几何反映尺寸。
