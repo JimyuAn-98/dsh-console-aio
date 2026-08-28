@@ -1,3 +1,6 @@
+> ⚠️ 内部参考稿：同一 bug 已由 djs326 在上游报告（deepseek-ai/deepseek-harness
+> Discussion #4713，根因结论一致）。**不再另开新帖**，本稿仅作为向 #4713 回复补充证据的素材。
+
 # [Bug] 工具调用子进程执行 `os.kill(pid, 0)` 会杀死宿主 web（Windows）：Ctrl+C 经共享 ConPTY 传导（os.kill(pid, 0) = CTRL_C_EVENT on Windows）
 
 ## 概述

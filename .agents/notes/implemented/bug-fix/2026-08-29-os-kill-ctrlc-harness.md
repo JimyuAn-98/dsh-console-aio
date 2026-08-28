@@ -2,7 +2,9 @@
 
 - Status: implemented
 - Date: 2026-08-29
-- Related: 已准备向 deepseek-ai/deepseek-harness 提交 issue（文稿见 docs/ISSUE_harness_os_kill_ctrlc.md）
+- Related: 上游同一 bug 已由 djs326 在 deepseek-ai/deepseek-harness Discussion #4713 报告
+  （根因结论一致，含 0xC000013A 退出码证据）; 我方以回复形式补充独立证据，不再另开新帖。
+  本地 issue 文稿 docs/ISSUE_harness_os_kill_ctrlc.md 保留为内部参考。
 
 ## 背景
 
