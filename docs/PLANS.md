@@ -254,8 +254,9 @@
   隧道页/主窗口监控从内联业务改走 service(_run_dsh/_dsh_start/_dsh_stop/_run_python_tunnel/
   _start_persist/_stop_py_tunnel/_build_tunnel_obj/_probe 三件套全部删除);
   config.derived 增加 allow_empty_ports 隔离分支(测试用假配置不再被兜底回真实端口)。
-- **后续阶段**: 阶段1 收敛 _stream_cmd(页面共用; dsh 完整更新流已恢复进 dshctl.update_dsh) ->
-  阶段2 pages_* 逐页(version/keys/ops 的直接 subprocess 优先) -> 阶段3 dialogs 评估 ->
-  阶段4 dsh_data 归并进 dsh_core。
+- **后续阶段**: 阶段2 已启动 —— 波0(result 信号+通用结果模板)与波1(version/keys 两页,
+  顺带修"更新后不重启"存量 bug)完成; 余下波2 ops+profiles+sessions -> 波3
+  plugins+deployments -> 波4 dialogs -> 波5 纯读页随阶段4。分波依据 pyside 全量审计
+  (2026-08-28, subagent 产出)。阶段1 已完成(_stream_cmd 收敛 dshctl)。
 - **验证边界**: dsh_core 可独立纯单元测试(tests/test_dsh_core.py, 零真实资源);
   GUI 交互(隧道启停/监控/3080 无恙)由用户人工在 GUI 验证, 绝不自动跑构造 MainWindow 的测试。

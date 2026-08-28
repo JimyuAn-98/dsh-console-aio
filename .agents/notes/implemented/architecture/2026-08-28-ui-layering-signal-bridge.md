@@ -58,3 +58,21 @@ pages_* 直接 import subprocess 干业务), 业务不可独立测试、与 UI �
 - dsh_core 可被单测/CLI 复用; 后续阶段2(pages_*)、阶段4(dsh_data 归并)沿用同一信号桥模式。
 - spec hiddenimports 补 app.services/dsh_core.*; 打包前需真机验证 exe(未自动跑 build)。
 - 未决: 阶段0 改动未经用户 GUI 人工验证前不提交(交接文档要求先提交骨架, 一并待验)。
+
+## 追加(2026-08-28 第二轮): 阶段2 波0+波1 与多 subagent 协作模式
+
+- **阶段1 收尾**: MainWindow._stream_cmd 收敛到 dshctl.stream_cmd(events->loge 桥接),
+  主程序自此零子进程代码; 删 subprocess/time/UPDATE_TIMEOUT。
+- **待办C**: test_gui_ui 第 5 道隔离 —— main_win 存续期硬拦截 threading.Thread.start
+  (只登记不运行)+确定性哨兵测试; "测试干掉 3080"类事故机制性封死。
+- **波0 框架**: DshService 第六信号 result = Signal(str, object) + _run_result_op 通用
+  模板(core 契约 func(events=None,...)->dict payload, 至少含 "err"; 异常也恰好一次
+  result/finished 收场, 不卡 UI busy)。带数据结果的统一通道, 后续所有页面复用。
+- **波1 迁移**: version 页(dsh_core/version.py)与 keys 页(dsh_core/keys.py), 页面零
+  subprocess/urllib/zipfile/shutil/threading; 顺带修复 version 页"源码模式更新后重启
+  指向不存在的 app_pyside.py、错误被吞不重启"的存量 bug; keys 私钥安全红线成文进 core。
+- **多 subagent 并行协作模式**(用户要求并验证可行): 同一波 agent 文件所有权互斥
+  (每 agent 只写自己名下的页面文件/新 core 模块/新测试文件), 共享文件(services.py/
+  dsh_core/__init__.py/主文档/提交)由主 agent 统一收口; 框架先行(波0 服务面先提交,
+  agent 只填实现); 主 agent 评审 diff + 独立跑验证 + 门禁后提交。铁律对 agent 生效:
+  任务书第一条即禁止跑构造 MainWindow 的测试。

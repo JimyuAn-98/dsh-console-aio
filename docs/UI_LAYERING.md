@@ -66,6 +66,15 @@
         clean 步骤不可省: dsh 的 lib/ 构建产物被 gitignore, git pull 不清, 上游改导出后
         过期产物会让 build 报 MISSING_EXPORT(2026-08-28 实测)。余下: _stream_cmd 收敛。
 - 阶段2: pages_* 逐个改走 service: version/keys/ops(直接 subprocess 的页面优先)。
+        **[波0+波1 已完成 2026-08-28]**: 波0 前置 —— DshService 增第六信号
+        result = Signal(str, object) + _run_result_op 通用模板(core 函数契约:
+        func(events=None,...) -> dict payload, payload 至少含 "err"); 波1 ——
+        version 页(dsh_core/version.py, 顺带修复源码模式更新后不重启的存量 bug)与
+        keys 页(dsh_core/keys.py, 私钥安全红线成文)迁移完成, 页面零
+        subprocess/urllib/zipfile/shutil/threading。GUI 人工验收待用户执行。
+        余下波次: 波2 ops+profiles+sessions(写盘类) -> 波3 plugins+deployments
+        (解除 app._stream_cmd 依赖) -> 波4 dialogs(env/install, 三份 _stream_cmd 归一)
+        -> 波5 纯读页留阶段4。
 - 阶段3: dialogs.py 评估是否抽业务(动态表单类可能保留一部分)
 - 阶段4: 收敛 dsh_data.py 到 dsh_core/(config/ssh/data/stats), 页面统一经 service 访问。
 - 每阶段: 业务层可加纯单元测试(不构造 MainWindow, 安全); GUI 交互验证由人工执行。

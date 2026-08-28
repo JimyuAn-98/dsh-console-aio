@@ -22,6 +22,12 @@
 - **业务层可独立单测**：新增 tests/test_dsh_core.py（config 派生契约/隧道组装/信号桥转发），零真实资源
 - **恢复隧道页"运行更新"（更新 dsh 本体，非控制台）**：该按钮自 PySide6 迁移后引用了未定义的 `_run_update`（点击静默报错）；现从 tkinter 旧主程序恢复完整流程并改进：停止 dsh web → git 拉取 → **清理旧构建产物（`pnpm run clean`，dsh 仓库自带安全清理）** → pnpm install → pnpm run build → 重启，落入 `dsh_core.dshctl.update_dsh` 并经 service 信号桥后台执行，点击先弹确认框列出各步骤；顺带修正旧版 `git fetch` 未在 dsh 仓库内执行的问题。清理一步是 2026-08-28 实测事故的修复：dsh 的 `lib/` 构建产物被 gitignore、git pull 不清，上游大版本改名删导出后，过期产物导致 `tsdown` 报 MISSING_EXPORT 构建失败（上游 CI 干净 checkout 不受影响，本地增量构建必踩）
 
+### UI 前后端分层阶段2（波0+波1，详见 docs/UI_LAYERING.md）
+
+- **DshService 新增 `result` 信号与通用结果模板**：带数据的操作结果统一通道（payload 至少含 `err`），core 异常也以恰好一次信号收场、不卡 UI busy
+- **版本管理页业务下沉 `dsh_core/version.py`**：检查更新/一键更新走 service，页面不再 import subprocess/urllib/zipfile/shutil/threading；**修复存量 bug——源码模式更新后重启指向不存在的 app_pyside.py（FileNotFoundError 被吞，表现为更新完成后不重启）**
+- **SSH 密钥页业务下沉 `dsh_core/keys.py`**：列表/生成走 service，ssh-keygen 全在 core；私钥安全红线成文（内容绝不读取/进日志/进返回值，仅存在性+指纹）；生成密钥增加重名预检与文件名校验（防路径穿越），失败文案中文化
+
 ## v0.4.0 (未发布)
 
 
