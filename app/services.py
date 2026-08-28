@@ -23,6 +23,8 @@ class DshService(QObject):
     monitor  = Signal(object)            # (local_map, ssh_count, remote) 探测结果;
                                          # None 哨兵 = 本轮探测线程异常, UI 只解除 busy 不刷新
     finished = Signal(str, bool)         # (操作key, ok)
+    result   = Signal(str, object)       # (操作key, payload dict) 带数据的操作结果,
+                                         # 契约见 _run_result_op
 
     def __init__(self, base_dir, config_path=None, parent=None):
         super().__init__(parent)
@@ -44,6 +46,9 @@ class DshService(QObject):
                 self.card.emit(key, on)
             elif kind == "monitor":
                 self.monitor.emit(payload)
+            elif kind == "result":
+                op, payload = payload
+                self.result.emit(op, payload)
         return cb
 
     # ---- UI 触发方法(每个都起后台线程, 不阻塞 UI) ----
@@ -99,6 +104,43 @@ class DshService(QObject):
                 ev("log", ("[monitor] 探测异常: %s" % e, "err"))
                 self.monitor.emit(None)
         threading.Thread(target=run, daemon=True).start()
+
+    # ---- 阶段2 波0: 带数据结果的通用操作模板 ----
+    # 契约: core 函数签名 func(events=None, ...) -> dict payload; payload 至少含 "err"
+    # (成功为空字符串, 失败为中文文案), 其余字段由 core 模块与页面自行约定。本层只负责
+    # 起线程与信号转发(result + finished), 不含业务; core 异常也以恰好一次信号收场,
+    # 不让 UI 的 busy 状态卡死。页面 connect 本类 result/finished 时接收者是页面自身,
+    # 页面销毁 Qt 自动断开(勿在页面 connect 到 app 级槽, 会随页面重建叠加连接)。
+    def _run_result_op(self, op, func, *args):
+        ev = self._events()
+
+        def run():
+            try:
+                payload = dict(func(ev, *args) or {})
+                payload.setdefault("err", "")
+            except Exception as e:
+                ev("log", ("[%s] 异常: %s" % (op, e), "err"))
+                payload = {"err": str(e)}
+            self.result.emit(op, payload)
+            self.finished.emit(op, not payload.get("err"))
+        threading.Thread(target=run, daemon=True).start()
+
+    # core 模块懒加载: 对应 dsh_core/<域>.py 由阶段2 各波次落地, 未落地前本类仍可导入。
+    def check_console_update(self, op="version-check"):
+        from dsh_core import version as _version
+        self._run_result_op(op, _version.check_latest)
+
+    def update_console(self, op="version-update"):
+        from dsh_core import version as _version
+        self._run_result_op(op, _version.download_and_apply, self.base_dir)
+
+    def list_ssh_keys(self, op="keys-list"):
+        from dsh_core import keys as _keys
+        self._run_result_op(op, _keys.list_keys)
+
+    def generate_ssh_key(self, name, op="keys-gen"):
+        from dsh_core import keys as _keys
+        self._run_result_op(op, _keys.generate_key, name)
 
     # ---- 构造 ----
     @classmethod
