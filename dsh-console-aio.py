@@ -7,7 +7,7 @@ dsh-console-aio.py - dsh SSH 隧道管理 + 本机 dsh 启停 + 健康监控 (Py
 运行(双击 exe 或):  C:/ProgramData/miniconda3/pythonw.exe dsh-console-aio.py
 离屏验证:  QT_QPA_PLATFORM=offscreen python dsh-console-aio.py --smoke
 """
-import os, sys, json, time, subprocess, threading
+import os, sys, json, threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
@@ -45,7 +45,6 @@ CONFIG = _load_config()
 DASH_REPO  = CONFIG.get("dash_repo") or ""
 DASH_PORT  = CONFIG.get("dash_port") or 3080
 POLL_SECONDS = CONFIG.get("poll_seconds") or 4
-UPDATE_TIMEOUT = CONFIG.get("update_timeout") or 1800
 
 BTN_TEXT = {"start": "启动", "restart": "重启", "persist": "常驻",
            "stop": "停止", "run": "运行更新"}
@@ -653,34 +652,15 @@ class MainWindow(QMainWindow):
 
     def _stream_cmd(self, cmd, cwd=None, env=None):
         # 流式运行命令, 逐行打进主日志; 返回 True/False。
+        # 实现收敛到 DshCtl.stream_cmd(超时/kill/FileNotFoundError 处理一致,
+        # update_timeout 取自同一份 config 派生, 见 dsh_core/config.py)。
         # 仅供后台线程调用(loge 经 LogBridge 线程安全回主线程)。不可在主线程阻塞。
-        self.loge("  $ " + " ".join(cmd))
-        try:
-            p = subprocess.Popen(cmd, cwd=cwd, env=env,
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                 encoding="utf-8", errors="replace", bufsize=1, text=True,
-                                 creationflags=subprocess.CREATE_NO_WINDOW)
-        except FileNotFoundError:
-            self.loge("  找不到命令: " + str(cmd[0] if cmd else "?"), "err")
-            return False
-        deadline = time.time() + UPDATE_TIMEOUT
-        while True:
-            line = p.stdout.readline() if p.stdout else None
-            if line:
-                self.loge("    " + line.rstrip())
-                continue
-            if p.poll() is not None:
-                break
-            if time.time() > deadline:
-                p.kill()
-                self.loge("  [stream] 超时，已强制终止", "err")
-                return False
-            time.sleep(0.1)
-        rc = p.wait()
-        if rc != 0:
-            self.loge("  [stream] 命令失败 (exit %s)" % rc, "err")
-            return False
-        return True
+        def _events(kind, payload):
+            # events 契约见 dsh_core/dshctl.py: ("log", (text, tag)) 逐行转主日志。
+            if kind == "log":
+                text, tag = payload
+                self.loge(text, tag)
+        return self.service.ctl.stream_cmd(cmd, cwd=cwd, env=env, events=_events)
 
     # ---- 右侧健康监控(探测业务在 dsh_core, 经 service.monitor 信号回主线程) ----
     def _start_monitor(self):
