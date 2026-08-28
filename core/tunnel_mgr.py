@@ -62,15 +62,22 @@ def tcp_ok(host, port, timeout=0.8):
 def _pid_alive(pid):
     # Windows 进程存在性检查。⚠ 不用 os.kill(pid, 0): 在宿主 harness 的工具调用进程树里
     # 执行它会触发 harness 子进程管理异常(实测 web 宿主被杀, 2026-08-29 排查结论),
-    # 改用 tasklist 按 PID 过滤, 纯子进程无系统调用副作用。
+    # 改用 tasklist CSV 按 PID 精确匹配, 纯子进程无系统调用副作用。
     pid = int(pid)
     try:
         out = subprocess.run(
-            ["tasklist", "/NH", "/FI", "PID eq %d" % pid],
+            ["tasklist", "/NH", "/FO", "CSV", "/FI", "PID eq %d" % pid],
             capture_output=True, text=True, errors="replace",
-            timeout=10, creationflags=NO_WINDOW).stdout
-        # /NH 无表头; 行内含 PID 即存活("信息: 没有运行的任务..."不含 PID, 各语言一致)
-        return ("%d" % pid) in (out or "")
+            timeout=10, creationflags=NO_WINDOW).stdout or ""
+        # CSV 行形如 "python.exe","123","Console","1","12,345 K";
+        # 精确比对第 2 列, 避免子串误判(如 123 命中 1234)。无任务时输出纯文本提示, 无逗号 → 判 False。
+        for line in out.splitlines():
+            if '"' not in line:
+                continue
+            fields = [f.strip('"') for f in line.split('","')]
+            if len(fields) >= 2 and fields[1] == str(pid):
+                return True
+        return False
     except Exception:
         return False
 
