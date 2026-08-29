@@ -4,17 +4,18 @@
 # preset.yml 详情是本机小文件, 同步直读 core.data.read_yaml(纯读过渡态约定)。
 # 部署联动: 当前部署(host 非空)构造 DshRemote, 列表走远程; 目录打开为本机操作。
 # 不做任何写入。log/status 不在页面 connect(主窗口级已接一次)。
+# 布局对齐部署管理页: 左栏窄列表按名字选(ModernList), 右栏显示选中模式详情。
 
 import os
 
 from core import data as core_data
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem,
-    QPushButton, QHeaderView, QMessageBox, QPlainTextEdit)
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QPushButton, QMessageBox, QPlainTextEdit)
 
 from ui.base import BasePage
+from ui.widgets import ModernList, card_wrap
 
 
 def _fmt_scalar(v):
@@ -124,23 +125,22 @@ class AgentPage(BasePage):
         body.setSpacing(10)
         root.addLayout(body, 1)
 
-        self._table = self._make_table(
-            ["名称", "描述", "文件数"], ["w", "w", "center"],
-            [150, 210, 60], stretch_col=0)
-        self._table.itemSelectionChanged.connect(self._on_select)
-        # 左栏固定宽度(两栏互不挤压); 右栏吃剩余空间, 长内容由文本框内部横向滚动消化
-        left_card = self._wrap_table("现有模式", self._table)
-        left_card.setFixedWidth(420)
+        # 左栏窄列表按名字选(与部署管理页同款); 右栏显示选中模式的完整内容
+        self._list = ModernList()
+        self._list.itemSelectionChanged.connect(self._on_select)
+        left_card = card_wrap("Agent 模式", self._list)
+        left_card.setFixedWidth(260)
         body.addWidget(left_card)
 
         right = QFrame(objectName="card")
         rv = QVBoxLayout(right)
-        rv.setContentsMargins(10, 8, 10, 8)
-        rv.setSpacing(4)
-        rv.addWidget(QLabel("preset.yml（只读）", objectName="rightTitle"))
+        rv.setContentsMargins(12, 10, 12, 10)
+        rv.setSpacing(6)
+        rv.addWidget(QLabel("模式详情", objectName="rightTitle"))
         self._info_lbl = QLabel("请在左侧选择一个模式", objectName="monName")
-        self._info_lbl.setWordWrap(True)   # 长说明换行, 不撑大右栏最小宽度
+        self._info_lbl.setWordWrap(True)   # 长说明换行, 不撑大栏最小宽度
         rv.addWidget(self._info_lbl)
+        rv.addWidget(QLabel("preset.yml（只读）", objectName="rightTitle"))
         self._detail_text = QPlainTextEdit()
         self._detail_text.setReadOnly(True)
         self._detail_text.setFont(QFont("Consolas", 9))
@@ -159,30 +159,6 @@ class AgentPage(BasePage):
         btns.addStretch(1)
         root.addLayout(btns)
 
-
-    def _make_table(self, headers, anchors, widths, stretch_col):
-        t = QTableWidget(0, len(headers))
-        t.setHorizontalHeaderLabels(headers)
-        t.verticalHeader().setVisible(False)
-        t.setSelectionBehavior(QTableWidget.SelectRows)
-        t.setEditTriggers(QTableWidget.NoEditTriggers)
-        hh = t.horizontalHeader()
-        for i, (a, wd) in enumerate(zip(anchors, widths)):
-            hh.setSectionResizeMode(i, QHeaderView.ResizeToContents if i != stretch_col
-                                    else QHeaderView.Stretch)
-            t.setColumnWidth(i, wd)
-            if a == "center":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignCenter)
-        return t
-
-    def _wrap_table(self, caption, table):
-        card = QFrame(objectName="card")
-        v = QVBoxLayout(card)
-        v.setContentsMargins(10, 8, 10, 8)
-        cap = QLabel(caption, objectName="rightTitle")
-        v.addWidget(cap)
-        v.addWidget(table)
-        return card
 
     # ── 列表(service 信号桥) ──
     def _refresh(self):
@@ -205,12 +181,9 @@ class AgentPage(BasePage):
     def _apply_data(self, presets, err):
         self._set_btns(True)
         self._presets = presets
-        self._table.setRowCount(len(presets))
-        for r, p in enumerate(presets):
-            self._table.setItem(r, 0, QTableWidgetItem(p["name"]))
-            self._table.setItem(r, 1, QTableWidgetItem(p["desc"] or "—"))
-            self._table.setItem(r, 2, QTableWidgetItem(str(p["files"])))
-        self._table.clearSelection()
+        rows = [{"title": p["name"], "meta": "%d 个文件" % (p.get("files") or 0),
+                 "data": p} for p in presets]
+        self._list.set_rows(rows)
         self._reset_detail()
         if err:
             self._set_status("读取失败: " + err)
@@ -220,17 +193,11 @@ class AgentPage(BasePage):
 
     # ── 详情(本机小文件, 同步直读; 无过期回包问题) ──
     def _on_select(self):
-        rows = self._table.selectionModel().selectedRows()
-        if not rows:
+        row = self._list.current_data()
+        if not row:
             return
-        name = self._table.item(rows[0].row(), 0).text()
-        preset = None
-        for p in self._presets:
-            if p["name"] == name:
-                preset = p
-                break
-        if preset is None:
-            return
+        preset = row.get("data") or {}
+        name = preset.get("name") or ""
         self._info_lbl.setText("模式: %s   ·   描述: %s   ·   文件数: %d"
                                % (name, preset["desc"] or "—", preset["files"]))
         pp = os.path.join(core_data.dsh_home(), ".agent-presets", name, "preset.yml")
