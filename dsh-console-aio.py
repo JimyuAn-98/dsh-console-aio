@@ -426,7 +426,7 @@ class StatusPanel(QFrame):
         # 同一控件双态: 收起 = 隐藏元素 + 压缩宽度(动画全程无空白)
         self._target = "collapsed"
         self.right.set_compact(True)
-        self._start_anim(120)
+        self._start_anim(100)
 
     def expand(self):
         self._target = "expanded"
@@ -446,8 +446,8 @@ class StatusPanel(QFrame):
 
     def _on_anim_done(self):
         if self._target == "collapsed":
-            self.setMinimumWidth(120)
-            self.setMaximumWidth(120)     # 钉死收起宽度
+            self.setMinimumWidth(100)
+            self.setMaximumWidth(100)     # 钉死收起宽度
             self._collapsed = True
         elif self._target == "expanded":
             self.setMinimumWidth(210)
