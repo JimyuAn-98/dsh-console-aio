@@ -24,7 +24,6 @@ from PySide6.QtGui import QTextCursor, QColor, QCursor
 from core import data as dsh_data
 from app.services import DshService
 from ui.theme import build_qss, apply_window_effects, try_system_blur
-from ui.acrylic import AcrylicBackdrop
 
 if getattr(sys, 'frozen', False):
     # onefile exe: 用户可见/可写的数据目录 = exe 所在目录(放 config.json 便于分发后编辑)。
@@ -336,11 +335,9 @@ class MainWindow(QMainWindow):
         self._normal_geo = None                # 最大化前几何(还原用)
         self._maxed = False                    # 自维护最大化状态(setGeometry 伪最大化)
         self._btn_max = None                   # 最大化按钮(图标切换 □/❐)
-        self._backdrop = None                  # 自绘亚克力背景(分层窗口时启用)
         # 平台窗口效果(Win11 22H2+ 分层透明; 失败自动回退纯 QSS)
         self._mica = apply_window_effects(self)
-        # 优先系统级模糊(SetWindowCompositionAttribute, 本科项目验证过的经典方案);
-        # 失败则回退自绘 AcrylicBackdrop(抓壁纸层模糊)
+        # 系统级模糊(SetWindowCompositionAttribute, 经典方案); 失败则半透明无模糊
         self._sys_blur = try_system_blur(self) if self._mica else False
         self.setStyleSheet(self._load_theme())
 
@@ -395,14 +392,8 @@ class MainWindow(QMainWindow):
             if sys.platform == "win32":
                 QTimer.singleShot(800, self._log_window_facts)
             if self._mica:
-                if self._sys_blur:
-                    self.loge("模糊: 系统级(ACCENT_ENABLE_BLURBEHIND)", "ok")
-                else:
-                    # 自绘亚克力底层背景(抓屏模糊+着色); 放最底层, 面板 rgba 透出
-                    self.loge("模糊: 系统级失败, 回退自绘", "warn")
-                    self._backdrop = AcrylicBackdrop(self)
-                    self._backdrop.lower()
-                    QTimer.singleShot(250, self._backdrop.refresh)
+                self.loge("模糊: %s" % ("系统级(ACCENT_ENABLE_BLURBEHIND)" if self._sys_blur
+                                        else "系统级失败, 半透明无模糊"), "ok")
 
     # ---- 主题(主题引擎 ui/theme.py, token 驱动) ----
     def _load_theme(self):
@@ -502,9 +493,6 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        if self._backdrop is not None:
-            self._backdrop.setGeometry(self.rect())
-            self._backdrop.lower()
 
     def nativeEvent(self, eventType, message):
         # WM_NCHITTEST: 标题栏空白区拖拽(HTCAPTION), 边缘 6px 拉伸, 控件区放行。

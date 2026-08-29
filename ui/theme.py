@@ -60,14 +60,15 @@ TOKENS = {
 def build_qss(t=None, mica=False):
     """由 token 生成完整 QSS。
 
-    亚克力方案(2026-08-29 定稿): 放弃 DWM Mica/丙烯酸(分层窗口上不渲染, 实测多次)。
-    改用**自绘亚克力**: 无边框 + WA_TranslucentBackground(分层) + ui/acrylic.py 抓屏
-    高斯模糊+着色画底层背景; 本函数 mica=True 时顶层背景透明、面板 rgba 半透明,
-    让模糊背景从面板透出。非 Windows/旧系统走纯 QSS 不透明主题。
+    亚克力方案(2026-08-29 定稿): 无边框 + WA_TranslucentBackground(分层) + 系统级模糊
+    (SetWindowCompositionAttribute ACCENT_ENABLE_BLURBEHIND, try_system_blur 启用,
+    参考用户本科项目 areo.h 的经典方案; 实测 Win11 22H2+ 可用)。
+    mica=True 时顶层背景透明、面板 rgba 半透明, 透出系统模糊; 系统模糊失败时保持
+    半透明(无模糊)。非 Windows/旧系统走纯 QSS 不透明主题。
     """
     t = t or TOKENS
     if mica:
-        bg_main = "transparent"      # 顶层透明, 底层由系统模糊或 AcrylicBackdrop 提供
+        bg_main = "transparent"      # 顶层透明, 系统模糊透出
         bg_panel = t["bg_elevated_rgba"]
         bg_log = t["bg_log_rgba"]
         bg_page = t["bg_page_rgba"]
@@ -91,11 +92,11 @@ QFrame#vsep {{ background: {t["border_strong"]}; border: none; width: 1px; }}
 
 /* 无边框窗口控制按钮(自绘标题栏) */
 QPushButton#winBtn {{
-    background: transparent; border: none; border-radius: {t["radius_sm"]};
+    background: transparent; border: 1px solid transparent; border-radius: {t["radius_sm"]};
     padding: 6px 12px; color: {t["text_dim"]}; font-size: 13px;
 }}
-QPushButton#winBtn:hover {{ background: rgba(255, 255, 255, 0.12); color: {t["text"]}; }}
-QPushButton#winBtnClose:hover {{ background: #e81123; color: #ffffff; }}
+QPushButton#winBtn:hover {{ background: rgba(255, 255, 255, 0.12); color: {t["text"]}; border-color: transparent; }}
+QPushButton#winBtnClose:hover {{ background: #e81123; color: #ffffff; border-color: #e81123; }}
 QComboBox#deploy {{
     background: #2f2f45; border: 1px solid {t["border_strong"]}; border-radius: {t["radius_sm"]};
     padding: 4px 10px; min-width: 130px; color: {t["text"]};
@@ -231,9 +232,9 @@ def try_system_blur(window):
 def apply_window_effects(window):
     """对顶层窗口应用平台效果(须配合无边框窗口, 见 build_qss 注释):
     Win11 22H2+ 启用 WA_TranslucentBackground(分层); DWM backdrop 显式置 0——
-    分层窗口上 Mica/丙烯酸材质不渲染且会盖住透明(实测), 模糊交给 ui/acrylic.py 自绘。
+    分层窗口上 Mica/丙烯酸材质不渲染且会盖住透明(实测), 模糊由 try_system_blur 提供。
 
-    返回 True 表示亚克力模式已启用(调用方应使用 build_qss(mica=True) + AcrylicBackdrop)。
+    返回 True 表示亚克力模式已启用(调用方应使用 build_qss(mica=True))。
     非 Windows/旧系统返回 False(纯 QSS 回退)。
     """
     if not is_windows_11_22h2():
