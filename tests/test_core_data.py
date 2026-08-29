@@ -228,6 +228,32 @@ class TestDumpYaml:
         assert _dump_scalar("has#hash") == '"has#hash"'
 
 
+# ── dir_stats 会话大小 ───────────────────────────────────
+
+class TestDirStats:
+    """DshRemote.dir_stats 本地分支: 嵌套目录大小统计。"""
+
+    def test_nested_dirs_counted(self, tmp_path, monkeypatch):
+        # 回归: 会话目录是 组/会话/文件 三层, 旧实现只数直接文件 -> total 恒 0
+        from core import data as d
+        base = tmp_path / "sessions"
+        (base / "g1" / "s1").mkdir(parents=True)
+        (base / "g1" / "s1" / "a.jsonl").write_bytes(b"x" * 100)
+        (base / "g1" / "s2").mkdir()
+        (base / "g1" / "s2" / "b.jsonl").write_bytes(b"x" * 30)
+        (base / "g1" / "empty").mkdir()
+        monkeypatch.setenv("DSH_HOME", str(tmp_path))
+        st = d.DshRemote(None).dir_stats("sessions")
+        assert st["total"] == 130
+        assert st["dirs"]["g1"] == 130   # 空嵌套目录不影响合计
+
+    def test_missing_dir_zero(self, tmp_path, monkeypatch):
+        from core import data as d
+        monkeypatch.setenv("DSH_HOME", str(tmp_path))
+        st = d.DshRemote(None).dir_stats("nope")
+        assert st == {"dirs": {}, "total": 0}
+
+
 # ── dump-config 解析 ─────────────────────────────────────
 
 class TestDumpEntryStates:

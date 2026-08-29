@@ -24,6 +24,7 @@ from PySide6.QtGui import QTextCursor, QColor, QCursor
 from core import data as dsh_data
 from app.services import DshService
 from ui.theme import build_qss, apply_window_effects, try_system_blur
+from ui.widgets import ModernList, card_wrap
 
 # 白色齿轮 SVG(内嵌, 无需打包资源文件; QSvgRenderer 渲染为 QIcon)
 _GEAR_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e6e6e6">'
@@ -204,68 +205,272 @@ class BasePage(QWidget):
 
 
 # ---------------- 总览页(验证数据联通 + 部署状态) ----------------
+def _ov_size(n):
+    # 概览页字节数人性化(与 sessions 页口径一致)
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return "%.1f%s" % (n, unit)
+        n /= 1024.0
+    return "0B"
+
+
 class OverviewPage(BasePage):
-    def _build(self):
-        v = QVBoxLayout(self)
-        v.setContentsMargins(20, 20, 20, 20)
-        v.setSpacing(14)
+    # 部署总览: 运行状态卡 + 数据速览 + 部署列表 + 隧道速览。
+    # 数据经页面级 Signal + safe_emit 回主线程(修复旧实现经 bridge 发进底部日志区的 bug);
+    # 全部纯读: 本机文件/端口探测 + 远程快照(DshRemote 只读) + 反向隧道 ssh 查监听。
+    _data = Signal(object)   # worker 结果 payload(dict)
 
-        title = QLabel("部署总览", objectName="cardTitle")
-        v.addWidget(title)
-
-        card = QFrame(objectName="card")
-        cv = QVBoxLayout(card)
-        cv.setContentsMargins(18, 16, 18, 16)
-        cv.setSpacing(10)
-
-        hint = QLabel("以下为各部署(本机 + 远程)的实时状态快照", objectName="cardHint")
-        self.dep_status = QLabel("加载中…", objectName="monVal")
-        self.dep_status.setWordWrap(True)
-        refresh = QPushButton("刷新部署状态", objectName="primary")
-
-        cv.addWidget(hint)
-        cv.addWidget(self.dep_status)
-        cv.addWidget(refresh, 0, Qt.AlignRight)
-        v.addWidget(card)
-        v.addStretch(1)
-
-        refresh.clicked.connect(self.refresh)
+    def __init__(self, app, parent=None):
+        super().__init__(app, parent)
+        self._data.connect(self._apply_data)
         self.refresh()
 
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 16, 18, 12)
+        root.setSpacing(8)
+
+        head = QHBoxLayout()
+        head.addWidget(QLabel("部署总览", objectName="cardTitle"))
+        head.addStretch(1)
+        refresh = QPushButton("刷新", objectName="primary")
+        refresh.clicked.connect(self.refresh)
+        head.addWidget(refresh)
+        root.addLayout(head)
+        root.addWidget(QLabel("本机与远程部署的实时状态、数据速览与隧道探测(纯读获取)。",
+                              objectName="cardHint"))
+
+        # 运行状态卡: dsh web 探测 + 本体版本
+        run = QFrame(objectName="card")
+        rl = QHBoxLayout(run)
+        rl.setContentsMargins(14, 10, 14, 10)
+        rl.setSpacing(10)
+        self._web_lbl = QLabel("dsh web 检测中…", objectName="monVal")
+        self._web_lbl.setTextFormat(Qt.RichText)
+        rl.addWidget(self._web_lbl)
+        rl.addStretch(1)
+        root.addWidget(run)
+
+        # 数据速览: 四张迷你卡
+        quick = QHBoxLayout()
+        quick.setSpacing(8)
+        self._quick = {}
+        for key, cap in (("sessions", "会话"), ("usage", "模型用量"),
+                         ("tasks", "任务板"), ("plugins", "插件与预设")):
+            mini = QFrame(objectName="card")
+            mv = QVBoxLayout(mini)
+            mv.setContentsMargins(12, 8, 12, 8)
+            mv.setSpacing(2)
+            mv.addWidget(QLabel(cap, objectName="rightTitle"))
+            val = QLabel("…", objectName="monVal")
+            val.setWordWrap(True)
+            mv.addWidget(val)
+            mv.addStretch(1)
+            self._quick[key] = val
+            quick.addWidget(mini, 1)
+        root.addLayout(quick)
+
+        # 部署列表(本机 + 远程, 快照字段进 meta)
+        self._dep_list = ModernList()
+        root.addWidget(card_wrap("部署", self._dep_list), 1)
+
+        # 隧道速览(富文本圆点, 与右栏监控同口径)
+        self._tunnel_lbl = QLabel("", objectName="monName")
+        self._tunnel_lbl.setTextFormat(Qt.RichText)
+        self._tunnel_lbl.setWordWrap(True)
+        root.addWidget(card_wrap("隧道状态", self._tunnel_lbl))
+
+        self._status_lbl = QLabel("就绪", objectName="statusBar")
+        root.addWidget(self._status_lbl)
+
     def refresh(self):
-        # --smoke 模式: 不触发真实 SSH, 用占位演示
+        self._set_status("正在读取总览数据...")
         cfg = CONFIG
-        ssh = str(cfg.get("ssh_server") or "")
-        unconfigured = (not ssh) or ssh.startswith("YOUR_")
-        if self.app.smoke or unconfigured:
-            self.dep_status.setText("(演示/未配置) 配置服务器地址后可查看真实部署状态")
-            return
-        self.dep_status.setText("读取中…")
-        depls = [{"name": "本机", "host": ""}] + dsh_data.load_deployments()
+        depls = dsh_data.load_deployments()
+        smoke = bool(getattr(self.app, "smoke", False))
 
         def worker():
-            rows = []
-            for d in depls:
+            payload = {"dash_port": int(cfg.get("dash_port") or 3080),
+                       "deploys": [], "probe": {}, "remote_probe": None,
+                       "local_ports": cfg.get("local_ports", []),
+                       "remote_tunnels": cfg.get("remote_tunnels", []),
+                       "local_name": cfg.get("local_name") or "本机",
+                       "ssh_name": cfg.get("ssh_name") or "公网中转"}
+            # dsh web 探测 + 本体版本(仓库 package.json, 仅本机)
+            try:
+                payload["web_ok"], payload["web_ms"] = \
+                    self.app.service.ctl.probe("127.0.0.1", payload["dash_port"])
+            except Exception:
+                payload["web_ok"], payload["web_ms"] = False, -1
+            try:
+                with open(os.path.join(cfg.get("dash_repo") or "", "package.json"),
+                          encoding="utf-8") as f:
+                    payload["dsh_version"] = (json.load(f) or {}).get("version")
+            except Exception:
+                payload["dsh_version"] = None
+
+            # 部署快照: 本机必做; 远程只读(smoke/占位配置跳过)
+            def snap_for(dep, is_local):
+                if not is_local and (smoke or not dep.get("host")
+                                     or str(dep.get("host")).startswith("YOUR_")):
+                    return {"ok": False, "error": "未配置/演示模式"}
                 try:
-                    snap = dsh_data.deployment_snapshot(dsh_data.DshRemote(d if d.get("host") else None))
+                    return dsh_data.deployment_snapshot(
+                        dsh_data.DshRemote(None if is_local else dep))
                 except Exception as e:
-                    snap = {"ok": False, "error": str(e), "name": d.get("name")}
-                rows.append(snap)
-            # 跨线程回主线程: 用信号桥
-            self.app.bridge.emit(self._fmt(rows), "ok")
+                    return {"ok": False, "error": str(e)}
+
+            payload["deploys"].append({"dep": {"name": payload["local_name"]},
+                                       "snap": snap_for(None, True), "local": True})
+            for d in depls:
+                payload["deploys"].append({"dep": d, "snap": snap_for(d, False),
+                                           "local": False})
+
+            # 数据速览(纯读, 单项失败置 None 不拖垮整页)
+            try:
+                u = dsh_data.usage_stats()
+                total, priced, calls = 0.0, False, 0
+                for name, m in (u.get("models") or {}).items():
+                    if not isinstance(m, dict):
+                        continue
+                    calls += int(m.get("calls") or 0)
+                    c = dsh_data.estimate_cost(name, int(m.get("input") or 0),
+                                               int(m.get("output") or 0),
+                                               int(m.get("cache") or 0))
+                    if c is not None:
+                        total += c
+                        priced = True
+                payload["usage"] = {"ok": bool(u.get("ok")), "models": len(u.get("models") or {}),
+                                    "calls": calls,
+                                    "cost": ("%.2f 元" % total) if priced else "未定价",
+                                    "error": u.get("error")}
+            except Exception as e:
+                payload["usage"] = {"ok": False, "error": str(e)}
+            try:
+                payload["tasks"] = len(((dsh_data.read_taskboard().get("ledger") or {})
+                                        .get("tasks") or []))
+            except Exception:
+                payload["tasks"] = None
+            try:
+                groups = dsh_data.list_sessions()
+                payload["sessions"] = {"groups": len(groups),
+                                       "count": sum(g.get("count") or 0 for g in groups),
+                                       "bytes": sum(g.get("bytes") or 0 for g in groups)}
+            except Exception:
+                payload["sessions"] = None
+            try:
+                payload["archived"] = len(dsh_data.read_workspace()
+                                          .get("archivedSessionIds") or [])
+            except Exception:
+                payload["archived"] = None
+
+            # 隧道探测: 本机端口本机探; 反向隧道经 ssh 查公网监听(只读)
+            for port, label, note in payload["local_ports"]:
+                try:
+                    payload["probe"][("L", int(port))] = \
+                        self.app.service.ctl.probe("127.0.0.1", int(port))[0]
+                except Exception:
+                    payload["probe"][("L", int(port))] = False
+            try:
+                payload["remote_probe"] = self.app.service.ctl.probe_remote_tunnels()
+            except Exception:
+                payload["remote_probe"] = None
+            self.safe_emit(self._data, payload)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _fmt(self, rows):
-        parts = []
-        for s in rows:
-            name = s.get("name") or "?"
-            if not s.get("ok"):
-                parts.append(name + ": 离线")
-                continue
-            parts.append("%s v%s · 会话%d · 插件%d" % (
-                name, s.get("version") or "?", s.get("sessions") or 0, s.get("plugins") or 0))
-        return "   |  ".join(parts)
+    def _apply_data(self, p):
+        # 运行状态卡
+        if p.get("web_ok"):
+            self._web_lbl.setText(
+                '<span style="color:#7ecb6a">●</span> dsh web :%s 在线'
+                '<span style="color:#9a9ab0">（%d ms）</span>'
+                % (p.get("dash_port"), p.get("web_ms") or 0)
+                + ('<span style="color:#9a9ab0"> · dsh 本体 v%s</span>' % p["dsh_version"]
+                   if p.get("dsh_version") else ""))
+        else:
+            self._web_lbl.setText(
+                '<span style="color:#e07a7a">●</span> dsh web :%s 离线'
+                '<span style="color:#9a9ab0">（未启动时可在隧道页启动）</span>' % p.get("dash_port"))
+
+        # 部署列表
+        rows = []
+        for item in p.get("deploys") or []:
+            snap = item.get("snap") or {}
+            dep = item.get("dep") or {}
+            name = dep.get("name") or snap.get("name") or "?"
+            meta = []
+            if item.get("local") and p.get("dsh_version"):
+                meta.append("本体 v" + str(p["dsh_version"]))
+            if snap.get("version"):
+                meta.append("市场 " + str(snap["version"]))
+            meta.append("插件 %s" % (snap.get("plugins") or 0))
+            meta.append("profile %s" % (snap.get("profiles") or 0))
+            meta.append("预设 %s" % (snap.get("presets") or 0))
+            meta.append("会话 %s · %s" % (snap.get("sessions") or 0,
+                                          _ov_size(snap.get("session_bytes"))))
+            if snap.get("ok"):
+                badge, dot = ("在线", "ok"), "#7ecb6a"
+            else:
+                err = str(snap.get("error") or "")
+                if "未配置" in err:
+                    badge, dot = ("未配置", "dim"), "#9a9ab0"
+                else:
+                    badge, dot = ("离线", "err"), "#e07a7a"
+            rows.append({"title": name, "meta": " · ".join(meta),
+                         "dot": dot, "badges": [badge], "data": item})
+        self._dep_list.set_rows(rows)
+
+        # 数据速览
+        s = p.get("sessions")
+        self._quick["sessions"].setText(
+            ("%d 个 · %s\n%d 个已归档" % (s["count"], _ov_size(s["bytes"]),
+                                          p.get("archived") or 0)) if s else "读取失败")
+        u = p.get("usage") or {}
+        if u.get("ok"):
+            self._quick["usage"].setText("%d 模型 · %s 次\n累计 %s"
+                                         % (u.get("models") or 0, u.get("calls") or 0,
+                                            u.get("cost") or "-"))
+        else:
+            self._quick["usage"].setText("不支持: " + str(u.get("error") or "失败")
+                                         if "远程" in str(u.get("error")) else "统计失败")
+        self._quick["tasks"].setText(
+            "%d 个任务" % p["tasks"] if p.get("tasks") is not None else "读取失败")
+        local_snap = {}
+        for item in p.get("deploys") or []:
+            if item.get("local"):
+                local_snap = item.get("snap") or {}
+                break
+        self._quick["plugins"].setText(
+            "%d bundles · %d profile\n%d 预设" % (local_snap.get("plugins") or 0,
+                                                  local_snap.get("profiles") or 0,
+                                                  local_snap.get("presets") or 0))
+
+        # 隧道速览(圆点富文本, 与右栏监控同口径)
+        def dot(ok):
+            return '<span style="color:%s">●</span>' % ("#7ecb6a" if ok else "#e07a7a")
+
+        segs = []
+        for port, label, note in p.get("local_ports") or []:
+            segs.append("%s:%s %s" % (label, port, dot(p.get("probe", {}).get(("L", int(port))))))
+        ltext = "  ".join(segs) if segs else "（未配置本机监测端口）"
+        r = p.get("remote_probe")
+        if r is None:
+            rtext = '<span style="color:#9a9ab0">公网侧未探测(未配置或中转不可达)</span>'
+        else:
+            rsegs = ["%s:%s %s" % (label, port, dot(bool(r.get(int(port)))))
+                     for port, label, note in p.get("remote_tunnels") or []]
+            rtext = "  ".join(rsegs) if rsegs else "（未配置反向隧道）"
+        self._tunnel_lbl.setText(
+            '<span style="color:#9a9ab0">%s端口</span> %s<br>'
+            '<span style="color:#9a9ab0">%s反向隧道</span> %s'
+            % (p.get("local_name"), ltext, p.get("ssh_name"), rtext))
+
+        self._set_status("总览已刷新(数据为只读快照)")
+
+    def _set_status(self, text):
+        self._status_lbl.setText(text)
 
 
 # ---------------- 右状态栏(监控点) ----------------

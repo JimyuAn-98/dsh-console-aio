@@ -746,8 +746,7 @@ class DshRemote:
             for d in os.listdir(base):
                 dp = os.path.join(base, d)
                 if os.path.isdir(dp):
-                    b = sum(os.path.getsize(os.path.join(dp, f)) for f in os.listdir(dp)
-                            if os.path.isfile(os.path.join(dp, f)))
+                    b = _tree_size(dp)
                     res[d] = b
                     total += b
         return {"dirs": res, "total": total}
@@ -763,6 +762,29 @@ class DshRemote:
         if r.returncode != 0:
             raise OSError((r.stderr or "").strip() or ("退出码 %d" % r.returncode))
         return r.stdout
+
+
+def _tree_size(root, max_depth=4):
+    # 有界递归目录大小(字节)。会话目录是 组/会话/文件 三层, 旧实现只数直接文件恒为 0;
+    # 限深防符号链接环与大目录失控。
+    total = 0
+    stack = [(root, 0)]
+    while stack:
+        cur, lvl = stack.pop()
+        try:
+            for name in os.listdir(cur):
+                p = os.path.join(cur, name)
+                if os.path.isdir(p):
+                    if lvl < max_depth:
+                        stack.append((p, lvl + 1))
+                else:
+                    try:
+                        total += os.path.getsize(p)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    return total
 
 
 def deployment_snapshot(remote):

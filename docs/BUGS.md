@@ -10,3 +10,5 @@
 | BUG-004 | 会话归档调用不存在的 `dsh_data.write_workspace`（AttributeError，归档/恢复自迁移起失效） | 已修复（阶段2 波2） | core 信封直写 workspace.json |
 | BUG-005 | 隧道"停止后又被自动重连"：persist 停止标志随页面重建丢失 | 已修复（阶段1） | 停止标志改由 service 持有 |
 | BUG-006 | 隧道页"运行更新"按钮引用未定义的 `_run_update`（点击静默报错） | 已修复（阶段1） | 从 tkinter 旧主程序恢复完整更新流至 `dshctl.update_dsh` |
+| BUG-007 | 部署快照"会话大小"恒 0：`DshRemote.dir_stats` 本地分支只数子目录直接文件，而会话目录是 组/会话/文件 三层 | 已修复（2026-08-29） | 改 `_tree_size` 有界递归；概览页/部署页快照同源修复 |
+| BUG-008 | 概览页快照结果经 bridge 发进底部日志区，`dep_status` 永远停在"读取中…"（技术债"裸线程未走信号"的实际代价） | 已修复（2026-08-29） | 概览页重设计：页面级 Signal + safe_emit 回 UI，数据改走 service.ctl 探测 |
