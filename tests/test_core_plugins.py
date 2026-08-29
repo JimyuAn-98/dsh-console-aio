@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # test_core_plugins.py - core/plugins.py 纯单元测试(零 Qt)。
 #
-# 安全边界: DSH_HOME 指向 tmp_path 造假 ~/.dsh; load_entry_id_map(dump-config 子进程)
+# 安全边界: DSH_HOME 指向 tmp_path 造假 ~/.dsh; dump_entry_states(dump-config 子进程)
 # 用 monkeypatch 拦截, 绝不真跑 pnpm; 不构造任何 Qt 对象。
 
 import json
@@ -62,19 +62,28 @@ class TestMergeEntries:
 
 
 class TestLoadView:
-    def test_payload_with_id_map(self, tmp_path, monkeypatch):
+    def test_payload_with_id_map_and_cordis(self, tmp_path, monkeypatch):
         _fake_profile(tmp_path, monkeypatch)
-        monkeypatch.setattr(dsh_data, "load_entry_id_map",
-                            lambda profile, dash_repo=None: {"dshmarket": "dsh-market"})
+        monkeypatch.setattr(dsh_data, "dump_entry_states",
+                            lambda profile, dash_repo=None: {
+                                "id_map": {"dshmarket": "dsh-market"},
+                                "states": {"dsh-market": {"name": "dshmarket", "disabled": True}}})
         r = pl.load_view(None, "web", None, "D:/repo")
         assert r["err"] == ""
         assert len(r["entries"]) == 3
         assert r["id_map"] == {"dshmarket": "dsh-market"}
+        by_id = {e["id"]: e for e in r["entries"]}
+        # bundle 行经映射解析到真实 entry id -> cordis 生效状态
+        assert by_id["dshmarket"]["cordis"] == "disabled"
+        # patch insert 行 id 即真实 entry id -> 直接命中
+        assert by_id["dsh-market"]["cordis"] == "disabled"
+        # dump 里没有的条目 -> None(未知)
+        assert by_id["@deepseek-ai/dsh-web"]["cordis"] is None
 
     def test_remote_skips_dump_config(self, tmp_path, monkeypatch):
         _fake_profile(tmp_path, monkeypatch)
         called = []
-        monkeypatch.setattr(dsh_data, "load_entry_id_map",
+        monkeypatch.setattr(dsh_data, "dump_entry_states",
                             lambda *a, **k: called.append(1) or {})
 
         class FakeRemote:
@@ -95,9 +104,10 @@ class TestLoadView:
         def boom(*a, **k):
             raise OSError("pnpm missing")
 
-        monkeypatch.setattr(dsh_data, "load_entry_id_map", boom)
+        monkeypatch.setattr(dsh_data, "dump_entry_states", boom)
         r = pl.load_view(None, "web", None, "D:/repo")
         assert r["err"] == "" and r["id_map"] == {}   # 映射失败不阻断列表
+        assert all(e["cordis"] is None for e in r["entries"])   # 徽章退化为未知
 
     def test_empty_profile_refused(self):
         r = pl.load_view(None, "  ", None, None)

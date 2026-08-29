@@ -26,10 +26,11 @@ from ui.base import BasePage
 
 def _entry_src_text(e):
     # 渲染条目 src 区: 来源 + 原始键值(patch 行含 disabled/description 等, bundle 行含版本)。
+    # cordis 是我们附加的生效状态字段, 不属于文件内容, 不展示。
     origin = "cordis.patch.yml" if e.get("_src") == "patch" else "package.json (dsh.profile.bundles)"
     lines = ["# 来源: " + origin]
     for k in sorted(e.keys()):
-        if k in ("_src", "_src_text"):
+        if k in ("_src", "_src_text", "cordis"):
             continue
         v = e[k]
         if v is None:
@@ -85,15 +86,15 @@ class PluginPage(BasePage):
         self._btn_open_patch.clicked.connect(self._open_patch)
         top.addWidget(self._btn_open_patch)
         top.addStretch(1)
-        top.addWidget(QLabel("已装插件来自 package.json bundles · 改动写入 cordis.patch.yml",
+        top.addWidget(QLabel("已装插件来自 package.json bundles · 改动写入 cordis.patch.yml · cordis 列=dump-config 生效状态",
                              objectName="cardHint"))
         root.addLayout(top)
 
         mid = QHBoxLayout()
         mid.setSpacing(10)
         self._table = self._make_table(
-            ["名称", "来源", "描述", "状态"], ["w", "w", "w", "center"],
-            [200, 110, 240, 70], stretch_col=2)
+            ["名称", "来源", "描述", "配置", "cordis"], ["w", "w", "w", "center", "center"],
+            [200, 110, 240, 70, 70], stretch_col=2)
         self._table.itemSelectionChanged.connect(self._on_select)
         mid.addWidget(self._wrap_table("插件条目", self._table), 3)
 
@@ -223,9 +224,13 @@ class PluginPage(BasePage):
             self._table.setItem(r, 0, QTableWidgetItem(e.get("name") or e.get("id") or "?"))
             self._table.setItem(r, 1, QTableWidgetItem(src))
             self._table.setItem(r, 2, QTableWidgetItem(e.get("description") or "—"))
+            # 配置 = 本地 patch 视图; cordis = dump-config 合成生效状态(None=未知, 远程/dump 失败)
             self._table.setItem(r, 3, QTableWidgetItem("已停用" if e.get("disabled") else "已启用"))
+            cordis = e.get("cordis")
+            self._table.setItem(r, 4, QTableWidgetItem(
+                "停用" if cordis == "disabled" else ("启用" if cordis == "enabled" else "—")))
             if e.get("disabled"):
-                for c in range(4):
+                for c in range(5):
                     self._table.item(r, c).setForeground(Qt.gray)
         self._table.clearSelection()
         self._on_select()

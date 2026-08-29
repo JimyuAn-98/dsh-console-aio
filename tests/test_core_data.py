@@ -228,6 +228,76 @@ class TestDumpYaml:
         assert _dump_scalar("has#hash") == '"has#hash"'
 
 
+# ── dump-config 解析 ─────────────────────────────────────
+
+class TestDumpEntryStates:
+    """dump_entry_states: dump-config 输出 -> id 映射 + cordis 生效状态(逐行缩进栈解析)。"""
+
+    # 仿真 dump-config 输出: # == 分组注释 + js-yaml 缩进 2 的条目列表,
+    # 覆盖 config 同名键噪音 / 嵌套 group 子条目 / group 尾部字段 / !!js 表达式
+    FAKE_DUMP = (
+        "# == @deepseek-ai/dsh-base\n"
+        "- id: webserver\n"
+        "  name: '@deepseek-ai/dsh-web'\n"
+        "  config:\n"
+        "    port: 3080\n"
+        "    disabled: true\n"
+        "- id: hmr\n"
+        "  name: cordis:@deepseek-ai/cordis-plugin-hmr\n"
+        "# == dshmarket\n"
+        "- id: dsh-market\n"
+        "  name: dshmarket\n"
+        "- id: group-x\n"
+        "  group: true\n"
+        "  disabled: false\n"
+        "  config:\n"
+        "    - id: inner-1\n"
+        "      name: inner-one\n"
+        "      disabled: true\n"
+        "    - id: inner-2\n"
+        "      name: inner-two\n"
+        "- id: jsentry\n"
+        "  name: js-one\n"
+        "  disabled: !!js process.env.FOO\n"
+    )
+
+    def _parse(self, monkeypatch):
+        from core import data as d
+        monkeypatch.setattr(d, "_dump_config_output",
+                            lambda profile, dash_repo=None, remote=None: self.FAKE_DUMP)
+        return d.dump_entry_states("web", "D:/repo")
+
+    def test_id_map_and_states(self, monkeypatch):
+        r = self._parse(monkeypatch)
+        assert r["id_map"]["dshmarket"] == "dsh-market"
+        assert r["id_map"]["dsh-market"] == "dsh-market"   # entry id 自映射
+        assert r["id_map"]["@deepseek-ai/dsh-web"] == "webserver"
+        assert r["states"]["dsh-market"]["disabled"] is False
+
+    def test_config_disabled_key_not_attributed(self, monkeypatch):
+        # webserver 的 config 里恰好叫 disabled 的键是配置内容, 不是 entry 字段
+        r = self._parse(monkeypatch)
+        assert r["states"]["webserver"]["disabled"] is False
+
+    def test_nested_group_children_and_tail_field(self, monkeypatch):
+        # 嵌套子条目各自归属; group 尾部 disabled(缩进 2)不被深层子条目吃掉
+        r = self._parse(monkeypatch)
+        assert r["states"]["inner-1"]["disabled"] is True
+        assert r["states"]["inner-2"]["disabled"] is False
+        assert r["id_map"]["inner-one"] == "inner-1"
+        assert r["states"]["group-x"]["disabled"] is False
+
+    def test_js_expression_disabled_counts_false(self, monkeypatch):
+        r = self._parse(monkeypatch)
+        assert r["states"]["jsentry"]["disabled"] is False
+        assert r["id_map"]["js-one"] == "jsentry"
+
+    def test_dump_failure_yields_empty(self, monkeypatch):
+        from core import data as d
+        monkeypatch.setattr(d, "_dump_config_output", lambda *a, **k: "")
+        assert d.dump_entry_states("web") == {"id_map": {}, "states": {}}
+
+
 # ── 路径定位 ──────────────────────────────────────────
 
 class TestPaths:

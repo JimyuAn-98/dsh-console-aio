@@ -62,6 +62,17 @@
 - **查证结论**：dsh 启停链路无需 build——`dsh plugin` 是纯 pnpm 转发器（apps/cli/src/plugin.ts），
   dshmarket 自身启停也是纯 patch 文件操作（lib/patch.js）；纯单元 311 例全绿
 
+### 插件管理对齐 dsh web：cordis 生效状态徽章（P2 第一步）
+
+- **插件页新增「cordis」列**：显示每个条目在 cordis 合成层的生效状态（启用/停用/—未知），
+  与「配置」列（cordis.patch.yml 本地视图，原「状态」列更名）并列，两列不一致即"配置改了但
+  生效层没跟上/被更低层压住"，一眼可辨
+- **`core/data.py dump_entry_states` 替代 `load_entry_id_map`**：同一次 `dsh --dump-config`
+  子进程（零新增开销）同时产出 bundle名→entry id 映射与每条 entry 的 disabled 状态；
+  逐行缩进栈解析而非完整 YAML（输出可含 `!!js` 表达式），config 里恰好叫 disabled 的键、
+  嵌套 group 子条目、group 尾部字段均正确归属；dump 失败徽章退化为"—"不阻断列表
+- **真机验证**：web profile 实测 293 条 id 映射 / 147 条生效状态；纯单元 316 例全绿
+
 ## v0.4.0 (未发布)
 
 

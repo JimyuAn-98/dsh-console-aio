@@ -5,6 +5,7 @@
 # 接口文档见 docs/ARCHITECTURE.md。
 
 import os
+import re
 import sys
 import io
 import json
@@ -351,36 +352,60 @@ def plugin_cmd(profile, *args):
     return ["pnpm.cmd", "dsh", "plugin", "--profile", profile] + list(args)
 
 
-def load_entry_id_map(profile, dash_repo=None, remote=None):
-    # 解析 dsh --profile X --dump-config 输出, 建立 name(包名)->entry id 映射。
-    # 停用/启用必须用真实 entry id(如 dshmarket 的 id 是 dsh-market), 不能用 bundle 名。
+def _dump_config_output(profile, dash_repo, remote):
+    # 跑 dsh --profile X --dump-config(纯读合成, 不启动 web), 返回 stdout; 失败返回空串。
     import subprocess as _sp
     _r = remote if remote is not None else DshRemote(None)
     cmd = ["pnpm.cmd", "dsh", "--profile", profile, "--dump-config"]
     try:
         if _r.is_remote:
-            out = _r.exec("cd " + (dash_repo or "~") + " && pnpm dsh --profile " + profile + " --dump-config")
-        else:
-            r = _sp.run(cmd, capture_output=True, text=True, errors="replace",
-                        timeout=60, creationflags=_sp.CREATE_NO_WINDOW,
-                        cwd=dash_repo or os.getcwd())
-            out = r.stdout or ""
+            return _r.exec("cd " + (dash_repo or "~") + " && pnpm dsh --profile " + profile + " --dump-config")
+        r = _sp.run(cmd, capture_output=True, text=True, errors="replace",
+                    timeout=60, creationflags=_sp.CREATE_NO_WINDOW,
+                    cwd=dash_repo or os.getcwd())
+        return r.stdout or ""
     except Exception:
-        return {}
-    mapping = {}
-    cur_id = None
+        # dump 失败只影响 id 映射/cordis 徽章退化为空, 不阻断插件列表
+        return ""
+
+
+def dump_entry_states(profile, dash_repo=None, remote=None):
+    # 解析 dump-config 输出, 返回 {"id_map": name->真实 entry id, "states": {entry id: {name, disabled}}}。
+    # 停用/启用必须用真实 entry id(如 dshmarket 的 id 是 dsh-market), 不能用 bundle 名;
+    # states 即 cordis 合成生效状态(disabled 含 patch 层停用与强制启用的 false)。
+    # 逐行解析而非完整 YAML: 输出可含 !!js 表达式, 且缩进契约稳定(js-yaml 缩进 2):
+    # `- id:` 行开启一条 entry(任意层级), 其字段在 缩进+2; 用缩进栈归属, group 条目的
+    # 尾部字段与嵌套子条目互不串扰, config 里恰好叫 disabled 的键(更深缩进)不会误归属。
+    # !!js 的 disabled 无法离线求值, 视为未停用。
+    out = _dump_config_output(profile, dash_repo, remote)
+    id_map = {}
+    states = {}
+    stack = []       # (字段缩进, entry id), 缩进随嵌套递增
     for line in out.splitlines():
-        s = line.strip()
-        if s.startswith("- id:"):
-            cur_id = s.split(":", 1)[1].strip()
-        elif s.startswith("name:") and cur_id:
-            nm = s.split(":", 1)[1].strip().strip("'\"")
-            mapping[nm] = cur_id
-            mapping[cur_id] = cur_id   # entry id 也映射到自身
-            cur_id = None
-        elif s.startswith("id:") and cur_id is None:
-            cur_id = s.split(":", 1)[1].strip()
-    return mapping
+        m = re.match(r"^(\s*)- id:\s*(.+?)\s*$", line)
+        if m:
+            indent = len(m.group(1))
+            eid = m.group(2).strip("'\"")
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            stack.append((indent, eid))
+            states.setdefault(eid, {"name": eid, "disabled": False})
+            id_map[eid] = eid
+            continue
+        m = re.match(r"^(\s*)(name|disabled):\s*(.*?)\s*$", line)
+        if m:
+            indent = len(m.group(1))
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            if stack and stack[-1][0] == indent - 2:
+                eid = stack[-1][1]
+                if m.group(2) == "name":
+                    nm = m.group(3).strip("'\"")
+                    states[eid]["name"] = nm
+                    id_map[nm] = eid
+                else:
+                    states[eid]["disabled"] = m.group(3) == "true"
+    return {"id_map": id_map, "states": states}
 
 
 def read_profile_package(profile, remote=None):

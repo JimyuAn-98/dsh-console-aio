@@ -90,8 +90,9 @@ def merge_entries(profile, remote=None):
 
 def load_view(events=None, profile=None, remote=None, dash_repo=None):
     # 服务契约: {"entries": [...], "id_map": {name->真实 entry id}, "err": ""}。
-    # id 映射来自 dsh --dump-config(子进程, 较慢); 远程部署不跑 dump-config(映射退化为空,
-    # 停用/启用用 bundle 名), 映射失败也只退化为空不阻断列表。
+    # id 映射与 cordis 生效状态来自同一次 dsh --dump-config(子进程, 较慢), 每行附带
+    # cordis 字段("enabled"/"disabled"/None=未知); 远程部署不跑 dump-config(退化 None),
+    # dump 失败也只退化为空不阻断列表。
     profile = str(profile or "").strip()
     if not profile:
         return {"entries": [], "id_map": {}, "err": "profile 不能为空"}
@@ -99,13 +100,18 @@ def load_view(events=None, profile=None, remote=None, dash_repo=None):
         entries = merge_entries(profile, remote=remote)
     except Exception as e:
         return {"entries": [], "id_map": {}, "err": "读取插件列表失败: %s" % e}
-    id_map = {}
+    dump = {"id_map": {}, "states": {}}
     if not remote:
         try:
-            id_map = dsh_data.load_entry_id_map(profile, dash_repo) or {}
+            dump = dsh_data.dump_entry_states(profile, dash_repo) or dump
         except Exception:
-            # 映射失败只影响停用/启用退化为用 bundle 名, 不阻断列表
+            # 映射/状态失败只影响徽章退化为 None, 不阻断列表
             pass
+    id_map = dump.get("id_map") or {}
+    states = dump.get("states") or {}
+    for e in entries:
+        st = states.get(id_map.get(e.get("id"), e.get("id")))
+        e["cordis"] = None if st is None else ("disabled" if st.get("disabled") else "enabled")
     return {"entries": entries, "id_map": id_map, "err": ""}
 
 
