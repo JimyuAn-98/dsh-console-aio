@@ -374,20 +374,28 @@ class StatusPanel(QFrame):
         self._target = None
 
     def collapse(self):
+        # 先动画(RightBar 保持可见被压缩), 动画结束时才切换窄条 —— 避免动画期间
+        # 面板区域露空(露出页面底色)
         self._target = "collapsed"
+        self._start_anim(44)
+
+    def expand(self):
+        # 先切回全量(44px 处开始压缩态), 再动画展开 —— 窄条不参与展开动画
+        self._target = "expanded"
+        self._swap_to_right()
+        self._start_anim(240)
+
+    def _swap_to_mini(self):
         self._lay.removeWidget(self.right)
         self._lay.addWidget(self._mini)
         self.right.hide()
         self._mini.show()
-        self._start_anim(44)
 
-    def expand(self):
-        self._target = "expanded"
+    def _swap_to_right(self):
         self._lay.removeWidget(self._mini)
         self._lay.addWidget(self.right)
         self._mini.hide()
         self.right.show()
-        self._start_anim(240)
 
     def _start_anim(self, end):
         w = self.width()
@@ -404,6 +412,7 @@ class StatusPanel(QFrame):
         if self._target == "collapsed":
             self.setMinimumWidth(44)
             self.setMaximumWidth(44)     # 钉死窄条
+            self._swap_to_mini()         # 44px 处无缝替换为窄条
         elif self._target == "expanded":
             self.setMinimumWidth(210)
             self.setMaximumWidth(280)
