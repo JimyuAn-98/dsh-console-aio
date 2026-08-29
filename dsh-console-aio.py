@@ -64,7 +64,7 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get('DSH_AIO_CONFIG') or os.path.join(BASE_DIR, 'config.json')
-APP_VERSION = '0.5.0'
+APP_VERSION = '0.6.0'
 
 # frozen 模式下把 exe 目录也加入 sys.path, 保证旁置的可写数据/日志可见(仅当需要时)。
 if getattr(sys, 'frozen', False) and BASE_DIR not in sys.path:

@@ -36,7 +36,8 @@ jobs:
             --hidden-import ui.pages_taskboard --hidden-import ui.pages_usage `
             --hidden-import ui.pages_llm --hidden-import ui.pages_ops `
             --hidden-import ui.pages_keys --hidden-import ui.pages_version `
-            --hidden-import ui.pages_deployments `
+            --hidden-import ui.pages_deployments --hidden-import ui.pages_logs `
+            --hidden-import ui.pages_settings `
             --add-data "RELEASE_NOTES.md;." `
             dsh-console-aio.py
 
@@ -53,7 +54,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/dsh-console-aio.exe
             dist/dsh-console-aio-setup-*.exe
           body_path: RELEASE_BODY.md
           generate_release_notes: false
