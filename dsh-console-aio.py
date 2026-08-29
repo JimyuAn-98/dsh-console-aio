@@ -120,8 +120,8 @@ NAV_ITEMS = [
     ('总览', 'overview'), ('隧道', 'tunnels'), ('会话与工作区', 'sessions'),
     ('Agent 模式', 'agents'), ('Profile 管理', 'profiles'), ('插件管理', 'plugins'),
     ('任务看板', 'taskboard'), ('模型用量', 'usage'), ('LLM 配置', 'llm'),
-    ('备份与运维', 'ops'), ('SSH 密钥', 'keys'), ('关于与更新', 'version'),
-    ('部署管理', 'deployments'),
+    ('备份与运维', 'ops'), ('SSH 密钥', 'keys'), ('部署管理', 'deployments'),
+    ('日志', 'logs'), ('关于与更新', 'version'),
 ]
 
 
@@ -860,8 +860,11 @@ class MainWindow(QMainWindow):
         elif key == "deployments":
             from ui.pages_deployments import DeploymentPage
             page = DeploymentPage(self)
+        elif key == "logs":
+            from ui.pages_logs import LogsPage
+            page = LogsPage(self)
         else:
-            # 兜底(正常不可达: 13 个导航 key 全部有真实页面)
+            # 兜底(正常不可达: 14 个导航 key 全部有真实页面)
             page = QLabel("未知页面: " + key)
         self.stack.addWidget(page)
 
