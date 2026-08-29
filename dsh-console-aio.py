@@ -100,25 +100,6 @@ def card_states_from_monitor(local, remote, cfg):
 
 
 
-
-    def _load_theme(self):
-        # 主题引擎(ui/theme.py, token 驱动):
-        #   Mica 可用(Win11 22H2+) -> 生成半透明 QSS(外部 theme.qss 不参与, 避免盖住 DWM 背景);
-        #   否则 -> 外部 ui/theme.qss 优先(手动微调), 缺失回退生成的不透明 QSS。
-        if self._mica:
-            return build_qss(mica=True)
-        if getattr(sys, 'frozen', False):
-            base = getattr(sys, '_MEIPASS', BASE_DIR)
-        else:
-            base = BASE_DIR
-        for cand in (os.path.join(base, 'ui', 'theme.qss'),
-                     os.path.join(BASE_DIR, 'ui', 'theme.qss')):
-            try:
-                with open(cand, encoding='utf-8') as f:
-                    return f.read()
-            except Exception:
-                continue
-        return build_qss(mica=False)
 # ---------------- 线程安全日志桥: 后台线程 -> Qt 主线程 ----------------
 class LogBridge(QObject):
     _sig = Signal(str, str)          # (text, tag)
@@ -355,6 +336,25 @@ class MainWindow(QMainWindow):
         self._show_page("overview")
         if not smoke:
             self.loge("DSH Console 已启动(v" + APP_VERSION + ")", "ok")
+
+    # ---- 主题(主题引擎 ui/theme.py, token 驱动) ----
+    def _load_theme(self):
+        #   Mica 可用(Win11 22H2+) -> 生成半透明 QSS(外部 theme.qss 不参与, 避免盖住 DWM 背景);
+        #   否则 -> 外部 ui/theme.qss 优先(手动微调), 缺失回退生成的不透明 QSS。
+        if self._mica:
+            return build_qss(mica=True)
+        if getattr(sys, 'frozen', False):
+            base = getattr(sys, '_MEIPASS', BASE_DIR)
+        else:
+            base = BASE_DIR
+        for cand in (os.path.join(base, 'ui', 'theme.qss'),
+                     os.path.join(BASE_DIR, 'ui', 'theme.qss')):
+            try:
+                with open(cand, encoding='utf-8') as f:
+                    return f.read()
+            except Exception:
+                continue
+        return build_qss(mica=False)
 
     # ---- 顶部栏 ----
     def _build_topbar(self):
