@@ -48,28 +48,41 @@ def _load_config():
 CONFIG = _load_config()
 
 # ---------------- 业务常量(从 config.json 派生) ----------------
-DASH_PORT  = CONFIG.get("dash_port") or 3080
-
 BTN_TEXT = {"start": "启动", "restart": "重启", "persist": "常驻",
            "stop": "停止", "run": "运行更新"}
 
-ITEMS = [
-    {"type": "dsh", "key": "dsh-web", "title": "本机 dsh", "port": DASH_PORT,
-     "actions": ["start", "restart", "stop"],
-     "desc": "启动/重启/停止本机 dsh GUI\n(后台 pnpm dsh web,\n访问 http://127.0.0.1:%d)" % DASH_PORT},
-    {"type": "py", "key": "dsh-tunnel", "port": 8090, "backend": "python",
-     "actions": ["start", "persist", "stop"],
-     "desc": "在家 -> 打通三个转发口\n8090->实验室GUI / 8022->SSH / 8091->本机GUI"},
-    {"type": "py", "key": "connect-lab-dsh", "port": 3090, "backend": "python",
-     "actions": ["start", "persist", "stop"],
-     "desc": "实验室局域网 -> 直连实验室 dsh GUI (本机 3090)"},
-    {"type": "py", "key": "dsh-tunnel-reverse", "port": 0, "backend": "python",
-     "actions": ["start", "persist", "stop"],
-     "desc": "本机 dsh -> 公网反向隧道\n公网:8091 -> 本机 3080"},
-    {"type": "py", "key": "update-dsh", "port": -1, "backend": "python",
-     "actions": ["run"],
-     "desc": "运行一次完整更新:\ngit 拉取->依赖->构建->重启"},
-]
+def build_items(cfg):
+    # 隧道卡片清单(名字可配置, P0): local/lab/ssh 三处命名来自 config。
+    local = cfg.get("local_name") or "本机"
+    lab = cfg.get("lab_name") or "实验室"
+    ssh = cfg.get("ssh_name") or "公网中转"
+    port = cfg.get("dash_port") or 3080
+    return [
+        {"type": "dsh", "key": "dsh-web", "title": local + " dsh", "port": port,
+         "actions": ["start", "restart", "stop"],
+         "desc": "启动/重启/停止%s dsh GUI\n(后台 pnpm dsh web,\n访问 http://127.0.0.1:%d)" % (local, port)},
+        {"type": "py", "key": "dsh-tunnel", "port": 8090, "backend": "python",
+         "actions": ["start", "persist", "stop"],
+         "desc": "在家 -> 打通三个转发口\n8090->%sGUI / 8022->SSH / 8091->本机GUI" % lab},
+        {"type": "py", "key": "connect-lab-dsh", "port": 3090, "backend": "python",
+         "actions": ["start", "persist", "stop"],
+         "desc": "%s局域网 -> 直连%s dsh GUI (本机 3090)" % (lab, lab)},
+        {"type": "py", "key": "dsh-tunnel-reverse", "port": 0, "backend": "python",
+         "actions": ["start", "persist", "stop"],
+         "desc": "%s dsh -> %s反向隧道\n%s:8091 -> 本机 3080" % (local, ssh, ssh)},
+        {"type": "py", "key": "update-dsh", "port": -1, "backend": "python",
+         "actions": ["run"],
+         "desc": "运行一次完整更新:\ngit 拉取->依赖->构建->重启"},
+    ]
+
+
+ITEMS = build_items(CONFIG)
+
+
+def _apply_items(cfg):
+    # 热重载: 原地重建卡片清单(TunnelsPage 重建时读取)
+    ITEMS.clear()
+    ITEMS.extend(build_items(cfg))
 
 NAV_ITEMS = [
     ('总览', 'overview'), ('隧道', 'tunnels'), ('会话与工作区', 'sessions'),
@@ -225,7 +238,7 @@ class OverviewPage(BasePage):
 
 # ---------------- 右状态栏(监控点) ----------------
 class RightBar(QFrame):
-    def __init__(self, on_collapse=None, parent=None):
+    def __init__(self, on_collapse=None, on_settings=None, parent=None):
         super().__init__(parent)
         self.setObjectName("rightBar")
         self.setMinimumWidth(210)
@@ -243,22 +256,49 @@ class RightBar(QFrame):
             btn.clicked.connect(on_collapse)
         head.addWidget(t)
         head.addStretch(1)
+        if on_settings:
+            btn_set = QPushButton("⚙", objectName="collapseBtn")
+            btn_set.setFixedSize(24, 22)
+            btn_set.setToolTip("监控设置(端口/命名)")
+            btn_set.clicked.connect(on_settings)
+            head.addWidget(btn_set)
         head.addWidget(btn)
         v.addLayout(head)
 
-        self._add_section("本机端口")
+        # 内容区独立容器: 热重载时整体清空重建(命名/端口跟随配置)
+        self._content = QVBoxLayout()
+        self._content.setSpacing(8)
+        v.addLayout(self._content)
+        self._build_content(CONFIG)
+
+    def _clear_layout(self, lay):
+        while lay.count():
+            item = lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                self._clear_layout(item.layout())
+
+    def _build_content(self, cfg):
+        self._clear_layout(self._content)
+        local = cfg.get("local_name") or "本机"
+        ssh = cfg.get("ssh_name") or "公网中转"
+        self._add_section(local + "端口")
         self._cells = {}
-        for port, label, note in CONFIG.get("local_ports", []):
+        for port, label, note in cfg.get("local_ports", []):
             self._add_cell("L" + str(port), label, note, port)
-        v.addSpacing(6)
-        self._add_section("公网服务器 反向隧道")
-        for port, label, note in CONFIG.get("remote_tunnels", []):
+        self._content.addSpacing(6)
+        self._add_section(ssh + " 反向隧道")
+        for port, label, note in cfg.get("remote_tunnels", []):
             self._add_cell("R" + str(port), label, note, port)
-        v.addStretch(1)
+        self._content.addStretch(1)
+
+    def reload(self, cfg):
+        self._build_content(cfg)
 
     def _add_section(self, text):
         lbl = QLabel(text, objectName="rightTitle")
-        self.layout().addWidget(lbl)
+        self._content.addWidget(lbl)
 
     def _add_cell(self, key, name, note, port):
         row = QHBoxLayout()
@@ -274,7 +314,7 @@ class RightBar(QFrame):
         row.addWidget(dot)
         row.addLayout(col, 1)
         row.addWidget(val, 0, Qt.AlignRight)
-        self.layout().addLayout(row)
+        self._content.addLayout(row)
         self._cells[key] = (dot, val)
 
     def set_state(self, key, ok, ms=-1):
@@ -313,14 +353,32 @@ class MiniStatusStrip(QFrame):
             btn.setToolTip("展开状态栏")
             btn.clicked.connect(on_expand)
             v.addWidget(btn, 0, Qt.AlignHCenter)
+        # 内容区独立容器: 热重载时重建(命名/端口跟随配置)
+        self._content = QVBoxLayout()
+        self._content.setSpacing(4)
+        v.addLayout(self._content)
+        self._build_content(CONFIG)
+
+    def _clear_layout(self, lay):
+        while lay.count():
+            item = lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                self._clear_layout(item.layout())
+
+    def _build_content(self, cfg):
+        self._clear_layout(self._content)
+        local = cfg.get("local_name") or "本机"
+        ssh = cfg.get("ssh_name") or "公网中转"
         # 与右栏同构: 分组中文间隔 + 同顺序的「状态点+端口号」(点/号左对齐, 位置一致)
         self._rows = {}   # ("L"|"R", port) -> (dot, num)
-        for tag, title, ports in (("L", "本机端口", CONFIG.get("local_ports", [])),
-                                  ("R", "公网隧道", CONFIG.get("remote_tunnels", []))):
+        for tag, title, ports in (("L", local + "端口", cfg.get("local_ports", [])),
+                                  ("R", ssh, cfg.get("remote_tunnels", []))):
             if not ports:
                 continue
             sec = QLabel(title, objectName="miniSection")
-            v.addWidget(sec, 0, Qt.AlignLeft)
+            self._content.addWidget(sec, 0, Qt.AlignLeft)
             for port, _, _ in ports:
                 row = QHBoxLayout()
                 row.setSpacing(3)
@@ -330,9 +388,12 @@ class MiniStatusStrip(QFrame):
                 row.addWidget(dot)
                 row.addWidget(num)
                 row.addStretch(1)
-                v.addLayout(row)
+                self._content.addLayout(row)
                 self._rows[(tag, port)] = (dot, num)
-        v.addStretch(1)
+        self._content.addStretch(1)
+
+    def reload(self, cfg):
+        self._build_content(cfg)
 
     def mousePressEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton and self._on_expand:
@@ -356,13 +417,13 @@ class MiniStatusStrip(QFrame):
 class StatusPanel(QFrame):
     """右栏容器: 全量 RightBar <-> 窄条 MiniStatusStrip, 展开/收起带宽度动画。"""
 
-    def __init__(self, parent=None):
+    def __init__(self, on_settings=None, parent=None):
         super().__init__(parent)
         self.setObjectName("statusPanel")
         self.setMinimumWidth(44)
         self.setMaximumWidth(280)
         self._mini = MiniStatusStrip(on_expand=self.expand)
-        self.right = RightBar(on_collapse=self.collapse)
+        self.right = RightBar(on_collapse=self.collapse, on_settings=on_settings)
         # 普通布局 + 显式右对齐(窄条贴面板右缘; QStackedLayout 的 alignment 实测不生效)
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
@@ -425,6 +486,11 @@ class StatusPanel(QFrame):
 
     def update_states(self, local, remote):
         self._mini.update_states(local, remote)
+
+    def reload(self, cfg):
+        # 热重载: 右栏与窄条按新配置重建(端口/命名)
+        self.right.reload(cfg)
+        self._mini.reload(cfg)
 
 
 
@@ -757,7 +823,7 @@ class MainWindow(QMainWindow):
         return body
 
     def _build_right(self):
-        self._status_panel = StatusPanel()
+        self._status_panel = StatusPanel(on_settings=self._open_monitor_settings)
         self.right = self._status_panel.right
         return self._status_panel
 
@@ -833,7 +899,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(page)
 
     def _refresh_deploy_list(self):
-        self._deployments = [{"name": "本机", "host": ""}] + dsh_data.load_deployments()
+        local = CONFIG.get("local_name") or "本机"
+        self._deployments = [{"name": local, "host": ""}] + dsh_data.load_deployments()
         names = [d.get("name") or "?" for d in self._deployments]
         self.deploy.blockSignals(True)
         self.deploy.clear()
@@ -856,6 +923,24 @@ class MainWindow(QMainWindow):
         if isinstance(page, OverviewPage):
             page.refresh()
         self.loge("已请求刷新", "ok")
+
+    # ---- P0 配置驱动: 监控设置 + 热重载 ----
+    def _open_monitor_settings(self):
+        from ui.dialogs import MonitorSettingsDialog
+        dlg = MonitorSettingsDialog(CONFIG, CONFIG_PATH, parent=self)
+        if dlg.exec() and dlg.saved:
+            self._reload_config()
+
+    def _reload_config(self):
+        # 热重载: 重读 config -> 重建卡片/右栏/窄条/部署列表, service 探测点跟随。
+        global CONFIG
+        CONFIG = _load_config()
+        _apply_items(CONFIG)
+        self.service.reload_config()
+        self._status_panel.reload(CONFIG)
+        self._refresh_deploy_list()
+        self.loge("配置已重载(端口/命名已生效)", "ok")
+        self.set_status("配置已重载")
 
     # ---- 日志/状态 ----
     def loge(self, text, tag=""):

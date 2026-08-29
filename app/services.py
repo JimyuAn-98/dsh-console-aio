@@ -29,9 +29,19 @@ class DshService(QObject):
     def __init__(self, base_dir, config_path=None, parent=None):
         super().__init__(parent)
         self.base_dir = base_dir
+        self._config_path = config_path
         self._cfg = dsh_config.load_derived(config_path)
         self.ctl = DshCtl(self._cfg)
         self.tunnels = TunnelManager(base_dir, self._cfg)
+
+    def reload_config(self, config_path=None):
+        # 热重载(P0): 重读配置并更新 ctl/tunnels 的派生 dict——监控探测点/卡片状态等
+        # 随之跟随; UI 侧需另行重建依赖 CONFIG 的视图(右栏/窄条/卡片/部署列表)。
+        if config_path is not None:
+            self._config_path = config_path
+        self._cfg = dsh_config.load_derived(self._config_path)
+        self.ctl.d = self._cfg
+        self.tunnels.d = self._cfg
 
     # ---- events 回调 -> Qt Signal ----
     def _events(self):

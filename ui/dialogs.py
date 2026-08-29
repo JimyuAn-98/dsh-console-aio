@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from core import env as core_env
@@ -412,6 +412,98 @@ class InstallDialog(_DialogBase):
         self._cancel_btn.setEnabled(not on)
         self._url.setEnabled(not on)
         self._dir.setEnabled(not on)
+
+
+class MonitorSettingsDialog(QDialog):
+    """监控设置(P0): 编辑本机监测端口与公网隧道(端口/名称/备注)。
+    保存写 config.json(带 .bak 备份, core.config.save_config); 主窗口收到 saved 后热重载。"""
+
+    def __init__(self, cfg, config_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("监控设置")
+        self.resize(560, 460)
+        self.saved = False
+        self._config_path = config_path
+        lay = QVBoxLayout(self)
+
+        hint = QLabel("编辑监测端口(右栏/窄条/监控探测即时跟随, 保存后无需重启)", objectName="cardHint")
+        lay.addWidget(hint)
+
+        self._tabs = QTabWidget()
+        self._local_tbl = self._make_table()
+        self._remote_tbl = self._make_table()
+        self._tabs.addTab(self._local_tbl, "本机端口")
+        self._tabs.addTab(self._remote_tbl, "公网隧道")
+        lay.addWidget(self._tabs)
+
+        btns = QHBoxLayout()
+        add = QPushButton("添加一行")
+        add.clicked.connect(lambda: self._current_tbl().insertRow(self._current_tbl().rowCount()))
+        dele = QPushButton("删除选中")
+        dele.clicked.connect(self._del_row)
+        btns.addWidget(add)
+        btns.addWidget(dele)
+        btns.addStretch(1)
+        lay.addLayout(btns)
+
+        box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
+                               | QDialogButtonBox.StandardButton.Cancel)
+        box.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        box.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        box.accepted.connect(self._on_save)
+        box.rejected.connect(self.reject)
+        lay.addWidget(box)
+
+        self._fill(self._local_tbl, cfg.get("local_ports", []))
+        self._fill(self._remote_tbl, cfg.get("remote_tunnels", []))
+
+    def _make_table(self):
+        t = QTableWidget(0, 3)
+        t.setHorizontalHeaderLabels(["端口", "名称", "备注"])
+        t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        t.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        return t
+
+    def _current_tbl(self):
+        return self._local_tbl if self._tabs.currentIndex() == 0 else self._remote_tbl
+
+    def _fill(self, tbl, rows):
+        for port, name, note in rows:
+            r = tbl.rowCount()
+            tbl.insertRow(r)
+            tbl.setItem(r, 0, QTableWidgetItem(str(port)))
+            tbl.setItem(r, 1, QTableWidgetItem(name))
+            tbl.setItem(r, 2, QTableWidgetItem(note))
+
+    def _collect(self, tbl):
+        rows = []
+        for r in range(tbl.rowCount()):
+            try:
+                port = int((tbl.item(r, 0) or QTableWidgetItem("")).text().strip())
+            except ValueError:
+                port = 0
+            name = (tbl.item(r, 1) or QTableWidgetItem("")).text().strip()
+            note = (tbl.item(r, 2) or QTableWidgetItem("")).text().strip()
+            if port > 0:
+                rows.append([port, name, note])
+        return rows
+
+    def _del_row(self):
+        tbl = self._current_tbl()
+        for idx in sorted({i.row() for i in tbl.selectedIndexes()}, reverse=True):
+            tbl.removeRow(idx)
+
+    def _on_save(self):
+        from core import config as dsh_config
+        cfg = dsh_config.load_config(self._config_path)
+        cfg["local_ports"] = self._collect(self._local_tbl)
+        cfg["remote_tunnels"] = self._collect(self._remote_tbl)
+        if not dsh_config.save_config(cfg, self._config_path):
+            QMessageBox.warning(self, "保存失败",
+                                "config.json 写入失败(可能被占用), 请检查后重试")
+            return
+        self.saved = True
+        self.accept()
 
 
 class EnvDialog(_DialogBase):

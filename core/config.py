@@ -66,6 +66,10 @@ def derived(cfg, allow_empty_ports=False):
     d['ssh_user'] = _or(cfg.get('ssh_user'), '')
     d['lab_server'] = _or(cfg.get('lab_server'), '')
     d['lab_user'] = _or(cfg.get('lab_user'), '')
+    # 三处机器命名(自定义, P0): 本机/实验室/公网中转
+    d['local_name'] = _or(cfg.get('local_name'), '本机')
+    d['lab_name'] = _or(cfg.get('lab_name'), '实验室')
+    d['ssh_name'] = _or(cfg.get('ssh_name'), '公网中转')
     d['tcp_timeout'] = cfg.get('tcp_timeout') or 0.8
     d['update_timeout'] = cfg.get('update_timeout') or 1800
     d['poll_seconds'] = cfg.get('poll_seconds') or 4

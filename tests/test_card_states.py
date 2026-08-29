@@ -57,3 +57,27 @@ class TestCardStatesFromMonitor:
     def test_no_probe_data_no_crash(self, mod):
         s = mod.card_states_from_monitor(None, None, {})
         assert s == {"dsh-web": False, "dsh-tunnel": False, "connect-lab-dsh": False}
+
+
+class TestBuildItems:
+    # P0: 卡片清单的命名来自配置(local/lab/ssh 三处可自定义)
+    def test_custom_names_used(self, mod):
+        items = mod.build_items({"local_name": "家里", "lab_name": "机房",
+                                 "ssh_name": "中转", "dash_port": 3080})
+        d = {i["key"]: i for i in items}
+        assert d["dsh-web"]["title"] == "家里 dsh"
+        assert "机房" in d["connect-lab-dsh"]["desc"]
+        assert "中转" in d["dsh-tunnel-reverse"]["desc"]
+        assert "家里" in d["dsh-tunnel-reverse"]["desc"]
+
+    def test_default_names(self, mod):
+        items = mod.build_items({})
+        d = {i["key"]: i for i in items}
+        assert d["dsh-web"]["title"] == "本机 dsh"
+        assert "实验室" in d["connect-lab-dsh"]["desc"]
+        assert "公网中转" in d["dsh-tunnel-reverse"]["desc"]
+
+    def test_all_five_cards(self, mod):
+        items = mod.build_items({})
+        assert [i["key"] for i in items] == [
+            "dsh-web", "dsh-tunnel", "connect-lab-dsh", "dsh-tunnel-reverse", "update-dsh"]
