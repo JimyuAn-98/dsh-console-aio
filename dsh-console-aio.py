@@ -11,7 +11,8 @@ Win11 Mica 支持; 外部 ui/theme.qss 为非 Mica 模式的可选覆盖)。
 检查模式: 启动加 --inspect 或运行中按 F12 —— 悬停显示控件身份(类名+objectName),
           左键点击在日志区打印控件完整路径(便于向开发者指认界面元素)。
 """
-import os, sys, json, threading
+import os, sys, json, threading, ctypes
+import ctypes.wintypes
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
@@ -287,10 +288,16 @@ class MainWindow(QMainWindow):
     def __init__(self, smoke=False):
         super().__init__()
         self.smoke = smoke
+        # 无边框窗口仅 Windows(自绘标题栏 + 分层透明 + DWM Mica); 拖拽/拉伸走 WM_NCHITTEST。
+        # 其他平台保留原生标题栏(跨平台策略, 见 docs/VISION_部署子工具组.md)。
+        self._frameless = sys.platform == "win32"
+        if self._frameless:
+            self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setWindowTitle("DSH Console · v" + APP_VERSION)
         self.resize(1160, 800)
         self.setMinimumSize(960, 620)
-        # 平台窗口效果(Win11 22H2+ Mica + 暗色标题栏; 失败自动回退纯 QSS)
+        self._normal_geo = None                # 最大化前几何(还原用)
+        # 平台窗口效果(Win11 22H2+ 分层 + Mica; 失败自动回退纯 QSS)
         self._mica = apply_window_effects(self)
         self.setStyleSheet(self._load_theme())
 
@@ -336,12 +343,12 @@ class MainWindow(QMainWindow):
         self._show_page("overview")
         if not smoke:
             if sys.platform == "win32" and self._mica:
-                mica_txt = "Mica 开(build %d)" % sys.getwindowsversion().build
+                theme_txt = "Mica 渐变(build %d)" % sys.getwindowsversion().build
             elif sys.platform == "win32":
-                mica_txt = "Mica 关(build %d, 回退纯 QSS)" % sys.getwindowsversion().build
+                theme_txt = "纯 QSS(build %d)" % sys.getwindowsversion().build
             else:
-                mica_txt = "Mica 关(非 Windows)"
-            self.loge("DSH Console 已启动(v" + APP_VERSION + ") · " + mica_txt, "ok")
+                theme_txt = "纯 QSS"
+            self.loge("DSH Console 已启动(v" + APP_VERSION + ") · 主题: " + theme_txt, "ok")
 
     # ---- 主题(主题引擎 ui/theme.py, token 驱动) ----
     def _load_theme(self):
@@ -396,7 +403,79 @@ class MainWindow(QMainWindow):
         lay.addWidget(env)
         lay.addWidget(install)
         lay.addWidget(refresh)
+
+        # 无边框窗口控制按钮(自绘标题栏; 仅 Windows 无边框模式)
+        if self._frameless:
+            btn_min = QPushButton("—", objectName="winBtn")
+            btn_max = QPushButton("□", objectName="winBtn")
+            btn_close = QPushButton("×", objectName="winBtnClose")
+            btn_min.clicked.connect(self.showMinimized)
+            btn_max.clicked.connect(self._toggle_maximize)
+            btn_close.clicked.connect(self.close)
+            for b in (btn_min, btn_max, btn_close):
+                b.setFixedSize(34, 28)
+                lay.addWidget(b)
         return bar
+
+    # ---- 无边框窗口: 最大化/还原 + Windows 原生命中测试(拖拽/边缘拉伸) ----
+    def _toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+            if self._normal_geo is not None:
+                self.setGeometry(self._normal_geo)
+        else:
+            self._normal_geo = self.geometry()
+            scr = self.screen() or QApplication.primaryScreen()
+            if scr is not None:
+                self.setGeometry(scr.availableGeometry())
+
+    def nativeEvent(self, eventType, message):
+        # WM_NCHITTEST: 标题栏空白区拖拽(HTCAPTION), 边缘 6px 拉伸, 控件区放行。
+        if sys.platform == "win32" and not self.smoke:
+            try:
+                msg = ctypes.wintypes.MSG.from_address(int(message))
+                if msg.message == 0x0084:  # WM_NCHITTEST
+                    x = ctypes.c_short(msg.lParam & 0xFFFF).value
+                    y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                    geo = self.geometry()
+                    if self.isMaximized():
+                        # 最大化时标题栏仍可拖拽(触发系统还原)
+                        return True, (2 if y <= geo.y() + 52 else 1)
+                    ex, ey, ew, eh = geo.x(), geo.y(), geo.width(), geo.height()
+                    EDGE = 6
+                    left = x <= ex + EDGE
+                    right = x >= ex + ew - EDGE
+                    top = y <= ey + EDGE
+                    bottom = y >= ey + eh - EDGE
+                    if left and top:
+                        hit = 13
+                    elif right and top:
+                        hit = 14
+                    elif left and bottom:
+                        hit = 16
+                    elif right and bottom:
+                        hit = 17
+                    elif left:
+                        hit = 10
+                    elif right:
+                        hit = 11
+                    elif top:
+                        hit = 12
+                    elif bottom:
+                        hit = 15
+                    elif y <= ey + 52:
+                        # 标题栏: 交互控件放行(HTCLIENT), 空白/标题区可拖拽(HTCAPTION)
+                        w = self.childAt(self.mapFromGlobal(QPoint(x, y)))
+                        if w is None or w is self or w.objectName() in ("titleLbl", "verLbl"):
+                            hit = 2
+                        else:
+                            hit = 1
+                    else:
+                        hit = 1
+                    return True, hit
+            except Exception:
+                pass
+        return super().nativeEvent(eventType, message)
 
     # ---- 顶栏对话框入口(配置向导/环境检查/安装向导) ----
     def _open_config(self):

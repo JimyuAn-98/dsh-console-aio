@@ -20,12 +20,12 @@ def test_build_qss_contains_key_selectors():
     assert "#1e1e2e" in qss
 
 
-def test_build_qss_mica_variant_uses_transparent_top_level():
+def test_build_qss_mica_variant_uses_rgba_panels():
     from ui.theme import TOKENS, build_qss
     qss = build_qss(mica=True)
-    # 顶层透明 -> DWM Mica 透出; 面板保持不透明
+    # Mica(分层)模式: 面板 rgba 半透明 + 页面宿主透明
+    assert TOKENS["bg_elevated_rgba"] in qss
     assert "background: transparent;" in qss
-    assert TOKENS["bg_elevated"] in qss
 
 
 def test_custom_tokens_override():

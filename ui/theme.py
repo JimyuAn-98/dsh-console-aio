@@ -57,21 +57,23 @@ TOKENS = {
 def build_qss(t=None, mica=False):
     """由 token 生成完整 QSS。
 
-    Mica 方案说明(2026-08-29 实测): Qt 6.11 在 Windows 上带原生标题栏的窗口不会进入
-    分层模式(WA_TranslucentBackground 无效, EXSTYLE 无 WS_EX_LAYERED)——逐像素 alpha
-    的丙烯酸路线需要无边框窗口(未来再做)。当前用"非分层 + DWM backdrop
-    (DWMSBT_MAINWINDOW) + 顶层背景 transparent"实现真 Mica: 顶层不画背景,
-    DWM 的 Mica 材质从空白区透出; 面板保持不透明保证可读性。
+    Mica 方案(2026-08-29 两轮实测后定稿): 带原生标题栏的 Qt 窗口无法分层
+    (WA_TranslucentBackground 无效), 非分层窗口表面不透明(透不出 DWM 材质)。
+    → 采用**无边框窗口 + WA_TranslucentBackground(分层) + DWM backdrop(MAINWINDOW)**:
+    mica=True 时顶层/面板用 rgba 半透明, 逐像素 alpha 让 Mica/桌面透出;
+    标题栏自绘(拖拽/按钮见 dsh-console-aio.nativeEvent 的 WM_NCHITTEST)。
     """
     t = t or TOKENS
     if mica:
-        bg_main = "transparent"      # 顶层空白区 -> DWM Mica 透出
-        bg_panel = t["bg_elevated"]  # 面板不透明(非分层窗口无逐像素 alpha)
-        bg_log = t["bg_log"]
+        bg_main = t["bg_rgba"]
+        bg_panel = t["bg_elevated_rgba"]
+        bg_log = t["bg_log_rgba"]
+        bg_page = "transparent"
     else:
         bg_main = t["bg"]
         bg_panel = t["bg_elevated"]
         bg_log = t["bg_log"]
+        bg_page = t["bg"]
     return f"""
 * {{
     font-family: {t["font"]};
@@ -79,12 +81,19 @@ def build_qss(t=None, mica=False):
     color: {t["text"]};
 }}
 QMainWindow, QWidget#central, QWidget#body {{ background: {bg_main}; }}
-
 /* 顶部栏 */
 QFrame#topbar {{ background: {bg_panel}; border-bottom: 1px solid {t["border"]}; }}
 QLabel#titleLbl {{ font-size: 17px; font-weight: bold; color: {t["text_bright"]}; }}
 QLabel#verLbl {{ color: {t["text_dim"]}; font-size: 12px; }}
 QFrame#vsep {{ background: {t["border_strong"]}; border: none; width: 1px; }}
+
+/* 无边框窗口控制按钮(自绘标题栏) */
+QPushButton#winBtn {{
+    background: transparent; border: none; border-radius: {t["radius_sm"]};
+    padding: 6px 12px; color: {t["text_dim"]}; font-size: 13px;
+}}
+QPushButton#winBtn:hover {{ background: rgba(255, 255, 255, 0.12); color: {t["text"]}; }}
+QPushButton#winBtnClose:hover {{ background: #e81123; color: #ffffff; }}
 QComboBox#deploy {{
     background: #2f2f45; border: 1px solid {t["border_strong"]}; border-radius: {t["radius_sm"]};
     padding: 4px 10px; min-width: 130px; color: {t["text"]};
@@ -133,7 +142,7 @@ QFrame#card {{
 QFrame#card:hover {{ border-color: {t["border_hover"]}; }}
 QLabel#cardTitle {{ font-size: 15px; font-weight: bold; color: {t["text_bright"]}; }}
 QLabel#cardHint {{ color: {t["text_dim"]}; font-size: 12px; }}
-QFrame#pageHostBg {{ background: {bg_main}; }}
+QFrame#pageHostBg {{ background: {bg_page}; }}
 
 /* 日志区 */
 QFrame#logWrap {{ background: {bg_panel}; border-top: 1px solid {t["border"]}; }}
@@ -193,19 +202,17 @@ def is_windows_11_22h2():
 
 
 def apply_window_effects(window):
-    """对顶层窗口应用平台效果: Win11 22H2+ 启用暗色标题栏 + DWM Mica 背景。
+    """对顶层窗口应用平台效果(须配合无边框窗口, 见 build_qss 注释):
+    Win11 22H2+ 启用 WA_TranslucentBackground(分层) + DWM Mica backdrop。
 
-    ⚠ 不使用 WA_TranslucentBackground: 带原生标题栏的窗口在 Qt 6.11/Windows 上不会进入
-    分层模式(实测 EXSTYLE 无 WS_EX_LAYERED), 逐像素 alpha 需无边框窗口(丙烯酸路线, 未来做)。
-    当前方案 = 非分层窗口 + DwmSetWindowAttribute(backdrop=MAINWINDOW) + 顶层 QSS transparent,
-    由 build_qss(mica=True) 配合。
-
-    返回 True 表示 Mica 已启用(调用方应使用 build_qss(mica=True) 的主题)。
-    失败(旧系统/非 Windows)静默回退, 不抛异常。
+    返回 True 表示 Mica 模式已启用(调用方应使用 build_qss(mica=True) 的主题)。
+    失败(旧系统/非 Windows/非无边框)静默回退, 不抛异常。
     """
     if not is_windows_11_22h2():
         return False
     try:
+        from PySide6.QtCore import Qt  # 惰性导入: 本模块顶层保持纯 Python
+        window.setAttribute(Qt.WA_TranslucentBackground, True)
         hwnd = int(window.winId())
         DWMWA_USE_IMMERSIVE_DARK_MODE = 20
         DWMWA_SYSTEMBACKDROP_TYPE = 38
