@@ -2,7 +2,8 @@
 """
 dsh-console-aio.py - dsh 控制台主程序 (PySide6): 主窗口骨架 + 总览/隧道页 + 日志桥。
 UI 分层: 后端业务在 core/(纯 Python 零 Qt), 信号桥在 app/services.py(DshService),
-管理页在 ui/pages_*.py, 对话框在 ui/dialogs.py, 主题在 ui/theme.qss(内嵌 QSS 兜底)。
+管理页在 ui/pages_*.py, 对话框在 ui/dialogs.py, 主题引擎在 ui/theme.py(token 生成 QSS,
+Win11 Mica 支持; 外部 ui/theme.qss 为非 Mica 模式的可选覆盖)。
 兼容 shim: dsh_data.py(转发 core.data); 隧道管理: tunnel_mgr.py(被 core.tunnels 使用)。
 
 运行(双击 exe 或):  C:/Users/1/.conda/envs/console/pythonw.exe dsh-console-aio.py
@@ -21,6 +22,7 @@ from PySide6.QtGui import QTextCursor, QColor, QCursor
 
 from core import data as dsh_data
 from app.services import DshService
+from ui.theme import build_qss, apply_window_effects
 
 if getattr(sys, 'frozen', False):
     # onefile exe: 用户可见/可写的数据目录 = exe 所在目录(放 config.json 便于分发后编辑)。
@@ -93,128 +95,30 @@ def card_states_from_monitor(local, remote, cfg):
 
 
 
-# ---------------- 现代暗色 QSS 主题(全控件覆盖, 无系统白色残留) ----------------
-QSS = """
-* {
-    font-family: "Microsoft YaHei UI";
-    font-size: 13px;
-    color: #e6e6e6;
-}
-QMainWindow, QWidget#central, QWidget#body { background: #1e1e2e; }
-
-/* 顶部栏 */
-QFrame#topbar { background: #252535; border-bottom: 1px solid #33334a; }
-QLabel#titleLbl { font-size: 17px; font-weight: bold; color: #ffffff; }
-QLabel#verLbl { color: #9a9ab0; font-size: 12px; }
-QFrame#vsep { background: #3d3d5c; border: none; width: 1px; }
-QComboBox#deploy {
-    background: #2f2f45; border: 1px solid #3d3d5c; border-radius: 6px;
-    padding: 4px 10px; min-width: 130px; color: #e6e6e6;
-}
-QComboBox#deploy::drop-down { border: none; width: 22px; }
-QComboBox#deploy QAbstractItemView {
-    background: #2f2f45; border: 1px solid #3d3d5c; selection-background-color: #4f6ef7;
-    selection-color: #ffffff; color: #e6e6e6; outline: 0; padding: 4px;
-}
-
-QPushButton {
-    background: #2f2f45; border: 1px solid #3d3d5c; border-radius: 6px;
-    padding: 5px 14px; color: #e6e6e6;
-}
-QPushButton:hover { background: #3a3a58; border-color: #5858a0; }
-QPushButton:pressed { background: #26263a; }
-QPushButton:disabled { color: #6a6a80; background: #2a2a3c; }
-QPushButton#primary { background: #4f6ef7; border-color: #4f6ef7; color: #fff; font-weight: bold; }
-QPushButton#primary:hover { background: #6179ff; }
-
-/* 左导航 */
-QListWidget#nav {
-    background: #252535; border: none; border-right: 1px solid #33334a;
-    outline: 0; padding-top: 6px;
-}
-QListWidget#nav::item { padding: 9px 16px; border-left: 3px solid transparent; color: #b8b8cf; }
-QListWidget#nav::item:hover { background: #2e2e44; color: #fff; }
-QListWidget#nav::item:selected {
-    background: #2f3353; color: #ffffff; border-left: 3px solid #4f6ef7; font-weight: bold;
-}
-
-/* 右状态栏 */
-QFrame#rightBar { background: #252535; border-left: 1px solid #33334a; }
-QLabel#rightTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; font-weight: bold; }
-QLabel#monDot { font-size: 15px; }
-QLabel#monName { color: #e6e6e6; font-size: 12px; }
-QLabel#monNote { color: #9a9ab0; font-size: 11px; }
-QLabel#monVal { color: #e6e6e6; font-size: 12px; font-weight: bold; }
-
-/* 页面卡片 */
-QFrame#card {
-    background: #252535; border: 1px solid #33334a; border-radius: 10px;
-}
-QLabel#cardTitle { font-size: 15px; font-weight: bold; color: #ffffff; }
-QLabel#cardHint { color: #9a9ab0; font-size: 12px; }
-QFrame#pageHostBg { background: #1e1e2e; }
-
-/* 日志区 */
-QFrame#logWrap { background: #1e1e2e; border-top: 1px solid #33334a; }
-QLabel#logTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; }
-QTextEdit#log {
-    background: #16161f; border: 1px solid #2c2c40; border-radius: 8px;
-    padding: 6px; font-family: Consolas; font-size: 12px; color: #e6e6e6;
-    selection-background-color: #4f6ef7;
-}
-
-/* 底部状态栏 */
-QLabel#statusBar {
-    background: #252535; border-top: 1px solid #33334a;
-    padding: 5px 12px; color: #9a9ab0; font-size: 12px;
-}
-
-/* 全局滚动条(修掉白色拖拽条) */
-QScrollBar:vertical {
-    background: #1a1a28; width: 12px; margin: 0; border: none;
-}
-QScrollBar::handle:vertical {
-    background: #3d3d5c; min-height: 30px; border-radius: 6px; margin: 2px;
-}
-QScrollBar::handle:vertical:hover { background: #4f5674; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; background: none; border: none; }
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
-QScrollBar:horizontal {
-    background: #1a1a28; height: 12px; margin: 0; border: none;
-}
-QScrollBar::handle:horizontal {
-    background: #3d3d5c; min-width: 30px; border-radius: 6px; margin: 2px;
-}
-QScrollBar::handle:horizontal:hover { background: #4f5674; }
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; background: none; border: none; }
-QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
-
-/* 工具提示/下拉菜单也覆盖掉系统色 */
-QToolTip { background: #2f2f45; color: #e6e6e6; border: 1px solid #4f5674; padding: 4px 8px; }
-QMenu { background: #2f2f45; border: 1px solid #3d3d5c; }
-QMenu::item { padding: 6px 22px; }
-QMenu::item:selected { background: #4f6ef7; }
-QScrollArea { border: none; }
-"""
+# ---------------- 主题: 由 ui/theme.py 主题引擎生成(token 驱动, 见 build_qss) ----------------
 
 
 
 
-def _load_theme():
-    # 优先读独立 ui/theme.qss(可用 QssStylesheetEditor 等编辑);
-    # 打包(exe)时读冻结目录; 缺失/读取失败回退内嵌 QSS(兜底)。
-    if getattr(sys, 'frozen', False):
-        base = getattr(sys, '_MEIPASS', BASE_DIR)
-    else:
-        base = BASE_DIR
-    for cand in (os.path.join(base, 'ui', 'theme.qss'),
-                 os.path.join(BASE_DIR, 'ui', 'theme.qss')):
-        try:
-            with open(cand, encoding='utf-8') as f:
-                return f.read()
-        except Exception:
-            continue
-    return QSS
+
+    def _load_theme(self):
+        # 主题引擎(ui/theme.py, token 驱动):
+        #   Mica 可用(Win11 22H2+) -> 生成半透明 QSS(外部 theme.qss 不参与, 避免盖住 DWM 背景);
+        #   否则 -> 外部 ui/theme.qss 优先(手动微调), 缺失回退生成的不透明 QSS。
+        if self._mica:
+            return build_qss(mica=True)
+        if getattr(sys, 'frozen', False):
+            base = getattr(sys, '_MEIPASS', BASE_DIR)
+        else:
+            base = BASE_DIR
+        for cand in (os.path.join(base, 'ui', 'theme.qss'),
+                     os.path.join(BASE_DIR, 'ui', 'theme.qss')):
+            try:
+                with open(cand, encoding='utf-8') as f:
+                    return f.read()
+            except Exception:
+                continue
+        return build_qss(mica=False)
 # ---------------- 线程安全日志桥: 后台线程 -> Qt 主线程 ----------------
 class LogBridge(QObject):
     _sig = Signal(str, str)          # (text, tag)
@@ -402,10 +306,12 @@ class MainWindow(QMainWindow):
     def __init__(self, smoke=False):
         super().__init__()
         self.smoke = smoke
-        self.setWindowTitle("dsh 控制台 · PySide6 v" + APP_VERSION)
+        self.setWindowTitle("DSH Console · v" + APP_VERSION)
         self.resize(1160, 800)
         self.setMinimumSize(960, 620)
-        self.setStyleSheet(_load_theme())
+        # 平台窗口效果(Win11 22H2+ Mica + 暗色标题栏; 失败自动回退纯 QSS)
+        self._mica = apply_window_effects(self)
+        self.setStyleSheet(self._load_theme())
 
         self._current_page_key = None
         self._deployments = []
@@ -448,7 +354,7 @@ class MainWindow(QMainWindow):
         self._refresh_deploy_list()
         self._show_page("overview")
         if not smoke:
-            self.loge("PySide6 主框架已启动(v" + APP_VERSION + ")", "ok")
+            self.loge("DSH Console 已启动(v" + APP_VERSION + ")", "ok")
 
     # ---- 顶部栏 ----
     def _build_topbar(self):
@@ -457,7 +363,7 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(16, 10, 16, 10)
         lay.setSpacing(10)
 
-        title = QLabel("dsh 控制台", objectName="titleLbl")
+        title = QLabel("DSH Console", objectName="titleLbl")
         ver = QLabel("  v" + APP_VERSION, objectName="verLbl")
         sep = QFrame(objectName="vsep"); sep.setFixedWidth(1)
         dlab = QLabel("部署:")

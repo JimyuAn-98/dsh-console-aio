@@ -1,5 +1,7 @@
+# 本文件由 ui/theme.py 的 build_qss(mica=False) 生成(token 驱动); 手动覆盖用, 重新生成: python -c "from ui.theme import build_qss; open('ui/theme.qss','w').write(build_qss())"
+
 * {
-    font-family: "Microsoft YaHei UI";
+    font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
     font-size: 13px;
     color: #e6e6e6;
 }
@@ -16,7 +18,8 @@ QComboBox#deploy {
 }
 QComboBox#deploy::drop-down { border: none; width: 22px; }
 QComboBox#deploy QAbstractItemView {
-    background: #2f2f45; border: 1px solid #3d3d5c; selection-background-color: #4f6ef7;
+    background: #2f2f45; border: 1px solid #3d3d5c;
+    selection-background-color: #4f6ef7;
     selection-color: #ffffff; color: #e6e6e6; outline: 0; padding: 4px;
 }
 
@@ -28,7 +31,7 @@ QPushButton:hover { background: #3a3a58; border-color: #5858a0; }
 QPushButton:pressed { background: #26263a; }
 QPushButton:disabled { color: #6a6a80; background: #2a2a3c; }
 QPushButton#primary { background: #4f6ef7; border-color: #4f6ef7; color: #fff; font-weight: bold; }
-QPushButton#primary:hover { background: #6179ff; }
+QPushButton#primary:hover { background: #6179ff; border-color: #6179ff; }
 
 /* 左导航 */
 QListWidget#nav {
@@ -38,7 +41,8 @@ QListWidget#nav {
 QListWidget#nav::item { padding: 9px 16px; border-left: 3px solid transparent; color: #b8b8cf; }
 QListWidget#nav::item:hover { background: #2e2e44; color: #fff; }
 QListWidget#nav::item:selected {
-    background: #2f3353; color: #ffffff; border-left: 3px solid #4f6ef7; font-weight: bold;
+    background: #2f3353; color: #ffffff;
+    border-left: 3px solid #4f6ef7; font-weight: bold;
 }
 
 /* 右状态栏 */
@@ -53,16 +57,17 @@ QLabel#monVal { color: #e6e6e6; font-size: 12px; font-weight: bold; }
 QFrame#card {
     background: #252535; border: 1px solid #33334a; border-radius: 10px;
 }
+QFrame#card:hover { border-color: #5858a0; }
 QLabel#cardTitle { font-size: 15px; font-weight: bold; color: #ffffff; }
 QLabel#cardHint { color: #9a9ab0; font-size: 12px; }
 QFrame#pageHostBg { background: #1e1e2e; }
 
 /* 日志区 */
-QFrame#logWrap { background: #1e1e2e; border-top: 1px solid #33334a; }
+QFrame#logWrap { background: #252535; border-top: 1px solid #33334a; }
 QLabel#logTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; }
 QTextEdit#log {
-    background: #16161f; border: 1px solid #2c2c40; border-radius: 8px;
-    padding: 6px; font-family: Consolas; font-size: 12px; color: #e6e6e6;
+    background: #16161f; border: 1px solid #2c2c40; border-radius: 6px;
+    padding: 6px; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 12px; color: #e6e6e6;
     selection-background-color: #4f6ef7;
 }
 
