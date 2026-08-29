@@ -21,10 +21,11 @@ def test_build_qss_contains_key_selectors():
 
 
 def test_build_qss_mica_variant_uses_rgba():
-    from ui.theme import build_qss
+    from ui.theme import TOKENS, build_qss
     qss = build_qss(mica=True)
-    assert "rgba(30, 30, 46, 0.86)" in qss
-    assert "rgba(37, 37, 53, 0.78)" in qss
+    # 直接断言 token 值, 避免改 token 时测试不同步
+    assert TOKENS["bg_rgba"] in qss
+    assert TOKENS["bg_elevated_rgba"] in qss
 
 
 def test_custom_tokens_override():
