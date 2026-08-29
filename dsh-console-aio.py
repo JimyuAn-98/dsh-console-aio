@@ -236,7 +236,7 @@ class RightBar(QFrame):
 
         head = QHBoxLayout()
         t = QLabel("监控", objectName="rightTitle")
-        btn = QPushButton("«", objectName="collapseBtn")
+        btn = QPushButton("»", objectName="collapseBtn")   # 右栏收起: 朝右(滑向右缘)
         btn.setFixedSize(24, 22)
         btn.setToolTip("收起为窄条")
         if on_collapse:
@@ -308,7 +308,7 @@ class MiniStatusStrip(QFrame):
         v.setContentsMargins(4, 6, 4, 6)
         v.setSpacing(4)
         if on_expand:
-            btn = QPushButton("»", objectName="collapseBtn")
+            btn = QPushButton("«", objectName="collapseBtn")   # 窄条展开: 朝左(滑出内容)
             btn.setFixedSize(26, 22)
             btn.setToolTip("展开状态栏")
             btn.clicked.connect(on_expand)
@@ -364,41 +364,46 @@ class StatusPanel(QFrame):
         self._lay.setSpacing(0)
         self._lay.addWidget(self.right)
         self._lay.setAlignment(self._mini, Qt.AlignRight)
-        self._anim = QPropertyAnimation(self, b"maximumWidth", self)
-        self._anim.setDuration(180)
-        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._anim.finished.connect(self._on_anim_done)
+        # min/max 同步动画: 布局按约束强制给宽, 动画期间宽度严格跟随(右锚定顺滑)
+        self._anim_max = QPropertyAnimation(self, b"maximumWidth", self)
+        self._anim_min = QPropertyAnimation(self, b"minimumWidth", self)
+        for a in (self._anim_max, self._anim_min):
+            a.setDuration(180)
+            a.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim_max.finished.connect(self._on_anim_done)
         self._target = None
 
     def collapse(self):
         self._target = "collapsed"
-        self.setMinimumWidth(0)          # 松开下限, 让 max 动画能缩到 44
         self._lay.removeWidget(self.right)
         self._lay.addWidget(self._mini)
         self.right.hide()
         self._mini.show()
-        self._anim.stop()
-        self._anim.setStartValue(self.width())
-        self._anim.setEndValue(44)
-        self._anim.start()
+        self._start_anim(44)
 
     def expand(self):
         self._target = "expanded"
-        self.setMinimumWidth(0)
-        self.setMaximumWidth(280)
         self._lay.removeWidget(self._mini)
         self._lay.addWidget(self.right)
         self._mini.hide()
         self.right.show()
-        self._anim.stop()
-        self._anim.setStartValue(self.width())
-        self._anim.setEndValue(240)
-        self._anim.start()
+        self._start_anim(240)
+
+    def _start_anim(self, end):
+        w = self.width()
+        self._anim_max.stop()
+        self._anim_min.stop()
+        self._anim_max.setStartValue(w)
+        self._anim_max.setEndValue(end)
+        self._anim_min.setStartValue(w)
+        self._anim_min.setEndValue(end)
+        self._anim_max.start()
+        self._anim_min.start()
 
     def _on_anim_done(self):
         if self._target == "collapsed":
             self.setMinimumWidth(44)
-            self.setMaximumWidth(44)     # 钉死窄条(分栏不可再拖)
+            self.setMaximumWidth(44)     # 钉死窄条
         elif self._target == "expanded":
             self.setMinimumWidth(210)
             self.setMaximumWidth(280)
@@ -723,17 +728,18 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget(objectName="pageHostBg")
 
-        # 分栏(可拖拽): 左导航 | 页面 | 右状态栏(可收起为窄条)
+        # 左导航 | 页面 用分栏(可拖拽); 右状态栏独立放布局 -> 天然右锚定,
+        # 收起动画只动它自己的宽度, 不依赖 splitter 的右缘行为(实测 splitter 右缘不可靠)
         splitter = QSplitter(Qt.Orientation.Horizontal, objectName="mainSplit")
         splitter.addWidget(self.nav)
         splitter.addWidget(self.stack)
-        splitter.addWidget(self._build_right())
         splitter.setStretchFactor(1, 1)
-        for i in range(3):
-            splitter.setCollapsible(i, False)
-        splitter.setSizes([172, 700, 240])
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        splitter.setSizes([172, 700])
 
-        lay.addWidget(splitter)
+        lay.addWidget(splitter, 1)
+        lay.addWidget(self._build_right())
         return body
 
     def _build_right(self):
