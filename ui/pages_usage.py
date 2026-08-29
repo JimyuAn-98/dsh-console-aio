@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from core import data as core_data
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QVBoxLayout, QWidget)
+    QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
 from ui.base import BasePage
 from ui.widgets import ModernList, card_wrap, three_split
@@ -88,12 +88,25 @@ class UsagePage(BasePage):
         mid = three_split(
             card_wrap("按模型", self._make_list(is_model=True)),
             card_wrap("按天", self._make_list(is_model=False)),
-            self._make_detail_card())
-        root.addWidget(mid, 1)
+            self._make_detail_card(),
+            mins=(270, 300, 330))
 
         note = QLabel("估算费用按内置单价(元/百万 token)计算; 价格修改仅本次运行生效, 不写入文件。",
                       objectName="cardHint")
-        root.addWidget(note)
+
+        # 三栏横向可扩展(与其他三栏页同款): 视口不足时出横向滚动条, 不再互相挤压
+        mid.setMinimumWidth(950)
+        content = QWidget()
+        cv = QVBoxLayout(content)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
+        cv.addWidget(mid, 1)
+        cv.addWidget(note)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
 
     # ── 三栏构建(按模型|按天|明细) ──
     def _make_list(self, is_model):
