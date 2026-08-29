@@ -426,8 +426,18 @@ class MonitorSettingsDialog(QDialog):
         self._config_path = config_path
         lay = QVBoxLayout(self)
 
-        hint = QLabel("编辑监测端口(右栏/窄条/监控探测即时跟随, 保存后无需重启)", objectName="cardHint")
+        hint = QLabel("编辑监测端口与机器命名(保存后即时生效, 无需重启)", objectName="cardHint")
         lay.addWidget(hint)
+
+        # 三处机器命名(自定义)
+        form = QFormLayout()
+        self._in_local = QLineEdit(cfg.get("local_name") or "本机")
+        self._in_lab = QLineEdit(cfg.get("lab_name") or "实验室")
+        self._in_ssh = QLineEdit(cfg.get("ssh_name") or "公网中转")
+        form.addRow("本机名称", self._in_local)
+        form.addRow("实验室名称", self._in_lab)
+        form.addRow("公网中转名称", self._in_ssh)
+        lay.addLayout(form)
 
         self._tabs = QTabWidget()
         self._local_tbl = self._make_table()
@@ -498,6 +508,9 @@ class MonitorSettingsDialog(QDialog):
         cfg = dsh_config.load_config(self._config_path)
         cfg["local_ports"] = self._collect(self._local_tbl)
         cfg["remote_tunnels"] = self._collect(self._remote_tbl)
+        cfg["local_name"] = self._in_local.text().strip() or "本机"
+        cfg["lab_name"] = self._in_lab.text().strip() or "实验室"
+        cfg["ssh_name"] = self._in_ssh.text().strip() or "公网中转"
         if not dsh_config.save_config(cfg, self._config_path):
             QMessageBox.warning(self, "保存失败",
                                 "config.json 写入失败(可能被占用), 请检查后重试")
