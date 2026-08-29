@@ -11,14 +11,15 @@
 
 from core import data as dsh_data
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem,
-    QPushButton, QHeaderView, QMessageBox, QDialog, QLineEdit, QFormLayout,
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit,
+    QPushButton, QMessageBox, QDialog, QLineEdit, QFormLayout,
     QGridLayout)
 
 from core import deployments as core_deployments
 from ui.base import BasePage
+from ui.widgets import ModernList, card_wrap, three_split
 
 
 _LOCAL_NAME = "本机"
@@ -134,14 +135,14 @@ class DeploymentPage(BasePage):
 
     def __init__(self, app, parent=None):
         self._deployments = []
-        self._rows = []          # [{deployment, snap, dep_index, gen}], 与表格行一一对应
+        self._rows = []          # [{deployment, snap, dep_index, gen}], 与列表行一一对应
         self._gen = 0            # 列表重建代数, 用于丢弃过期快照回调
         self._refreshing = False
         self._pending = 0        # 刷新总览的未回包行数
         self._pending_op = None  # 正在等待的 service op: "deploy-test" / "deploy-save"
         self._last_op_msg = None
         self._preselect = getattr(app, "_current_deploy", None)
-        self._table = None
+        self._list = None
         self._add_btn = None
         self._del_btn = None
         self._test_btn = None
@@ -165,13 +166,13 @@ class DeploymentPage(BasePage):
                       objectName="cardHint")
         root.addWidget(hint)
 
-        # ── 上半区: 部署列表 ──
-        self._table = self._make_table(
-            ["名称", "主机", "端口", "用户", "状态"], ["w", "w", "center", "w", "center"],
-            [160, 200, 60, 100, 70], stretch_col=1)
-        self._table.itemSelectionChanged.connect(self._on_select)
-        root.addWidget(self._wrap_table("部署列表（本机 + config.json deployments）",
-                                        self._table), 1)
+        # ── 三栏: 部署列表 | 详情 | 操作日志 ──
+        mid = three_split(
+            card_wrap("部署列表（本机 + config.json deployments）", self._make_list()),
+            self._make_detail_card(),
+            self._make_oplog_card(),
+            widths=(280, 360, 330))
+        root.addWidget(mid, 1)
 
         # ── 操作区 ──
         btns = QHBoxLayout()
@@ -191,55 +192,59 @@ class DeploymentPage(BasePage):
         btns.addWidget(note)
         root.addLayout(btns)
 
-        # ── 下半区: 选中部署详情(只读) ──
+        # ── 页面内状态行 ──
+        self._status_lbl = QLabel("就绪", objectName="statusBar")
+        root.addWidget(self._status_lbl)
+
+    # ── 三栏构建(部署|详情|操作日志) ──
+    def _make_list(self):
+        self._list = ModernList()
+        self._list.itemSelectionChanged.connect(self._on_select)
+        return self._list
+
+    def _make_detail_card(self):
         detail = QFrame(objectName="card")
         dv = QVBoxLayout(detail)
-        dv.setContentsMargins(10, 8, 10, 8)
-        dv.setSpacing(2)
+        dv.setContentsMargins(12, 10, 12, 10)
+        dv.setSpacing(4)
         dv.addWidget(QLabel("部署详情（只读）", objectName="rightTitle"))
         grid = QGridLayout()
         grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(2)
+        grid.setVerticalSpacing(4)
         for i, (_key, label) in enumerate(self._FIELDS):
-            grid.addWidget(QLabel(label, objectName="monName"), i, 0, Qt.AlignLeft)
+            grid.addWidget(QLabel(label, objectName="monNote"), i, 0, Qt.AlignLeft)
             val = QLabel("-", objectName="monVal")
             val.setWordWrap(True)
             grid.addWidget(val, i, 1)
             self._detail_lbls[_key] = val
         grid.setColumnStretch(1, 1)
         dv.addLayout(grid)
-        root.addWidget(detail)
+        dv.addStretch(1)
+        return detail
 
-        # ── 页面内状态行 ──
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
-
-    def _make_table(self, headers, anchors, widths, stretch_col):
-        t = QTableWidget(0, len(headers))
-        t.setHorizontalHeaderLabels(headers)
-        t.verticalHeader().setVisible(False)
-        t.setSelectionBehavior(QTableWidget.SelectRows)
-        t.setEditTriggers(QTableWidget.NoEditTriggers)
-        hh = t.horizontalHeader()
-        for i, (a, wd) in enumerate(zip(anchors, widths)):
-            hh.setSectionResizeMode(i, QHeaderView.ResizeToContents if i != stretch_col
-                                    else QHeaderView.Stretch)
-            t.setColumnWidth(i, wd)
-            if a == "e":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            elif a == "center":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignCenter)
-        t.setSelectionMode(QTableWidget.SingleSelection)
-        return t
-
-    def _wrap_table(self, caption, table):
+    def _make_oplog_card(self):
         card = QFrame(objectName="card")
-        v = QVBoxLayout(card)
-        v.setContentsMargins(10, 8, 10, 8)
-        cap = QLabel(caption, objectName="rightTitle")
-        v.addWidget(cap)
-        v.addWidget(table)
+        cv = QVBoxLayout(card)
+        cv.setContentsMargins(12, 10, 12, 10)
+        cv.setSpacing(4)
+        cv.addWidget(QLabel("操作日志", objectName="rightTitle"))
+        cv.addWidget(QLabel("测试连接/刷新总览/保存的结果就地显示(带时间戳), 同时进主日志区。",
+                            objectName="cardHint"))
+        self._op_log = QPlainTextEdit()
+        self._op_log.setReadOnly(True)
+        self._op_log.setFont(QFont("Consolas", 9))
+        self._op_log.setMaximumBlockCount(500)
+        cv.addWidget(self._op_log, 1)
         return card
+
+    def _op(self, text, tag=""):
+        # 操作日志一行: 时间戳 + 语义色(绿 ok/红 err/灰 普通); 主日志区照常输出
+        import time as _t
+        color = {"ok": "#7ecb6a", "err": "#e07a7a"}.get(tag, "#9a9ab0")
+        stamp = _t.strftime("%H:%M:%S")
+        self._op_log.appendHtml(
+            '<span style="color:#6a6a80">%s</span>  <span style="color:%s">%s</span>'
+            % (stamp, color, text))
 
     # ── 数据加载与列表渲染(本地小 IO 同步直调) ──
     def _load(self):
@@ -262,33 +267,29 @@ class DeploymentPage(BasePage):
             self._set_status("共 %d 个部署（含本机）" % (len(depls) + 1))
 
     def _render_rows(self):
-        # 重建表格: 第 0 行本机, 其后为 config 里的每个部署
-        if self._table is None:
-            return
-        self._table.setRowCount(0)
+        # 重建列表: 第 0 行本机, 其后为 config 里的每个部署
         self._gen += 1
         self._pending = 0   # 列表重建后旧刷新的过期回包不再计数
         if self._refresh_btn is not None:
             self._refresh_btn.setEnabled(True)
         self._rows = []
-        rows = [(None, _LOCAL_NAME, "本地", "-", "-")] + [
+        entries = [(None, _LOCAL_NAME, "本地", "-", "-")] + [
             (d, d.get("name") or d.get("host") or "-", d.get("host") or "-",
              str(d.get("port") or 22), d.get("user") or "-")
             for d in self._deployments
         ]
-        self._table.setRowCount(len(rows))
-        for idx, (dep, name, host, port, user) in enumerate(rows):
-            self._rows.append({"deployment": dep, "snap": None,
-                               "dep_index": idx - 1, "gen": self._gen})
-            items = (QTableWidgetItem(name), QTableWidgetItem(host),
-                     QTableWidgetItem(port), QTableWidgetItem(user),
-                     QTableWidgetItem("未测试"))
-            for c, it in enumerate(items):
-                if c == 4:
-                    it.setForeground(QColor("#888888"))
-                    it.setTextAlignment(Qt.AlignCenter)
-                self._table.setItem(idx, c, it)
-        self._table.clearSelection()
+        rows = []
+        for idx, (dep, name, host, port, user) in enumerate(entries):
+            row = {"deployment": dep, "snap": None, "dep_index": idx - 1, "gen": self._gen}
+            self._rows.append(row)
+            rows.append({
+                "title": name,
+                "meta": "本地 dsh 实例" if dep is None else "%s · %s" % (host, user),
+                "dot": "#9a9ab0",
+                "badges": [("未测试", "dim")],
+                "data": row,
+            })
+        self._list.set_rows(rows)
         self._fill_detail(None)
         self._update_action_btns()
         self._preselect_row()
@@ -299,25 +300,20 @@ class DeploymentPage(BasePage):
         if not self._rows:
             return
         if dep is None:
-            self._table.selectRow(0)
+            self._list.setCurrentRow(0)
             return
         for idx, row in enumerate(self._rows):
             d = row["deployment"]
             if d and (d.get("host") == dep.get("host") and
                       d.get("user") == dep.get("user") and
                       int(d.get("port") or 22) == int(dep.get("port") or 22)):
-                self._table.selectRow(idx)
+                self._list.setCurrentRow(idx)
                 return
 
     def _selected_row(self):
-        # 当前选中行对应的 row dict; 未选中返回 None
-        rows = self._table.selectionModel().selectedRows()
-        if not rows:
-            return None
-        idx = rows[0].row()
-        if 0 <= idx < len(self._rows):
-            return self._rows[idx]
-        return None
+        # 当前选中行对应的内部 row dict; 未选中返回 None
+        lr = self._list.current_data()
+        return lr.get("data") if lr else None
 
     # ── 选择与详情 ─────────────────────────────
     def _on_select(self):
@@ -464,9 +460,11 @@ class DeploymentPage(BasePage):
         if err:
             self._set_status("保存失败: " + err)
             self.app.loge("[部署管理] 写入 config.json 失败: " + err, "err")
+            self._op("保存失败: " + err, "err")
             QMessageBox.critical(self, "保存失败", "写入 config.json 失败：\n" + err)
             return
         self.app.loge("[部署管理] " + msg, "ok")
+        self._op(msg, "ok")
         self._last_op_msg = msg
         self._load()
 
@@ -475,13 +473,15 @@ class DeploymentPage(BasePage):
             self._set_status(err)
             self.app.set_status(err)
             self.app.loge("[部署管理] " + err, "err")
+            self._op("%s · %s" % (host, err), "err")
             return
         self._set_status(msg)
         self.app.set_status(msg)
         self.app.loge("[部署管理] " + msg, "ok")
+        self._op("%s · %s" % (host, msg), "ok")
 
     def _apply_snapshot(self, idx, snap):
-        # 应用单行快照: 更新状态列; 若该行正被选中则同步刷新详情
+        # 应用单行快照: 更新该行状态徽章/状态点; 若该行正被选中则同步刷新详情
         if not isinstance(snap, dict) or not isinstance(idx, int):
             return
         if not (0 <= idx < len(self._rows)):
@@ -493,10 +493,8 @@ class DeploymentPage(BasePage):
         ok = bool(snap.get("ok"))
         status = "在线" if ok else "离线"
         color = "#7ecb6a" if ok else "#e07a7a"
-        it = self._table.item(idx, 4)
-        if it is not None:
-            it.setText(status)
-            it.setForeground(QColor(color))
+        self._set_row_status(idx, status, color, ok)
+        self._op("%s · %s" % (self._row_title(idx), status), "ok" if ok else "err")
         cur = self._selected_row()
         if cur is row:
             self._fill_detail(row)
@@ -508,6 +506,20 @@ class DeploymentPage(BasePage):
                 self._refresh_btn.setEnabled(True)
             self._set_status("总览刷新完成")
             self.app.set_status("部署总览刷新完成")
+
+    def _set_row_status(self, idx, status, color, ok):
+        # 更新列表行的状态徽章与状态点: 改 Python 侧行数据(权威), 再同步 item 副本重绘
+        lr = self._list.row_data(idx)
+        if lr is None:
+            return
+        lr["dot"] = color
+        lr["badges"] = [(status, "ok" if ok else "err")]
+        self._list.item(idx).setData(Qt.UserRole, lr)
+        self._list.viewport().update()
+
+    def _row_title(self, idx):
+        lr = self._list.row_data(idx)
+        return (lr or {}).get("title") or "?"
 
     # ── 状态与按钮 ─────────────────────────────
     def _set_btns(self, on):

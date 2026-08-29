@@ -4,33 +4,24 @@
 # 价格表为内置估算单价(元/百万 token), 仅内存修改 DEFAULT_PRICES, 不写回任何文件。
 # 统计走 service.read_usage_stats 信号桥(result "usage-read" 回包, 接收者是页面自身,
 # 页面销毁 Qt 自动断开); log/status 不在页面 connect(主窗口级已接)。
+# P1 多栏展开: 按模型|按天|明细 三栏(ModernList + three_split), 第三栏显示选中行完整字段。
 
 from PySide6.QtCore import Qt
 
 from core import data as core_data
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+    QDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+    QMessageBox, QPushButton, QVBoxLayout, QWidget)
 
 from ui.base import BasePage
+from ui.widgets import ModernList, card_wrap, three_split
 
-
-# 表格固定列: (数据字段, 表头)
-MODEL_COLS = (
-    ("model", "模型"),
-    ("provider", "Provider"),
-    ("input", "输入 tokens"),
-    ("cache", "缓存命中"),
-    ("output", "输出 tokens"),
-    ("calls", "调用次数"),
-    ("cost", "估算费用"),
-)
-DAY_COLS = (
-    ("date", "日期"),
-    ("input", "输入 tokens"),
-    ("cache", "缓存命中"),
-    ("output", "输出 tokens"),
-)
+# 明细卡键值对: (数据字段, 界面名)
+_MODEL_FIELDS = (("model", "模型"), ("provider", "Provider"), ("input", "输入 tokens"),
+                 ("cache", "缓存命中"), ("output", "输出 tokens"), ("calls", "调用次数"),
+                 ("cost", "估算费用"))
+_DAY_FIELDS = (("date", "日期"), ("input", "输入 tokens"), ("cache", "缓存命中"),
+               ("output", "输出 tokens"))
 
 
 def _num(v):
@@ -94,48 +85,52 @@ class UsagePage(BasePage):
         il.addWidget(self._btn_refresh)
         root.addWidget(info)
 
-        self._model_table = self._make_table(
-            [c[0] for c in MODEL_COLS],
-            ["w", "w", "e", "e", "e", "e", "w"],
-            [150, 130, 100, 100, 100, 80, 100], stretch_col=0)
-        root.addWidget(self._wrap_table("按模型", self._model_table), 1)
-
-        self._day_table = self._make_table(
-            [c[0] for c in DAY_COLS],
-            ["w", "e", "e", "e"],
-            [120, 120, 120, 120], stretch_col=0)
-        root.addWidget(self._wrap_table("按天", self._day_table))
+        mid = three_split(
+            card_wrap("按模型", self._make_list(is_model=True)),
+            card_wrap("按天", self._make_list(is_model=False)),
+            self._make_detail_card())
+        root.addWidget(mid, 1)
 
         note = QLabel("估算费用按内置单价(元/百万 token)计算; 价格修改仅本次运行生效, 不写入文件。",
                       objectName="cardHint")
         root.addWidget(note)
 
-    def _make_table(self, headers, anchors, widths, stretch_col):
-        t = QTableWidget(0, len(headers))
-        t.setHorizontalHeaderLabels(headers)
-        t.verticalHeader().setVisible(False)
-        t.setSelectionBehavior(QTableWidget.SelectRows)
-        t.setEditTriggers(QTableWidget.NoEditTriggers)
-        t.setSelectionMode(QTableWidget.SingleSelection)
-        hh = t.horizontalHeader()
-        for i, (a, wd) in enumerate(zip(anchors, widths)):
-            hh.setSectionResizeMode(i, QHeaderView.ResizeToContents if i != stretch_col
-                                    else QHeaderView.Stretch)
-            t.setColumnWidth(i, wd)
-            if a == "e":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            elif a == "center":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignCenter)
-        return t
+    # ── 三栏构建(按模型|按天|明细) ──
+    def _make_list(self, is_model):
+        lst = ModernList()
+        if is_model:
+            self._model_list = lst
+            lst.itemSelectionChanged.connect(self._on_model_select)
+        else:
+            self._day_list = lst
+            lst.itemSelectionChanged.connect(self._on_day_select)
+        return lst
 
-    def _wrap_table(self, caption, table):
+    def _make_detail_card(self):
         card = QFrame(objectName="card")
         v = QVBoxLayout(card)
-        v.setContentsMargins(10, 8, 10, 8)
-        cap = QLabel(caption, objectName="rightTitle")
-        v.addWidget(cap)
-        v.addWidget(table)
+        v.setContentsMargins(12, 10, 12, 10)
+        v.setSpacing(6)
+        v.addWidget(QLabel("明细（选择行查看）", objectName="rightTitle"))
+        self._d_form = QFormLayout()
+        self._d_form.setHorizontalSpacing(14)
+        self._d_form.setVerticalSpacing(4)
+        v.addLayout(self._d_form)
+        v.addStretch(1)
+        self._d_note = QLabel("估算费用按内置单价(元/百万 token)计算, 区分缓存命中与高峰/空闲时段。",
+                              objectName="monNote")
+        self._d_note.setWordWrap(True)
+        v.addWidget(self._d_note)
         return card
+
+    def _fill_detail(self, pairs):
+        # pairs: [(界面名, 值)] 全量重建明细卡键值行
+        while self._d_form.rowCount():
+            self._d_form.removeRow(0)
+        for label, value in pairs:
+            val = QLabel(str(value), objectName="monVal")
+            val.setWordWrap(True)
+            self._d_form.addRow(QLabel(label, objectName="monNote"), val)
 
     def _refresh(self):
         # 解压扫描 session 文件(core 业务), 结果经 result("usage-read") 回主线程更新
@@ -162,8 +157,9 @@ class UsagePage(BasePage):
     def _apply_data(self, res, err):
         self._busy = False
         self._set_btns(True)
-        self._model_table.setRowCount(0)
-        self._day_table.setRowCount(0)
+        self._model_list.set_rows([])
+        self._day_list.set_rows([])
+        self._fill_detail([])
         if err:
             self._sessions_lbl.setText("会话总数: --")
             self._set_status("统计失败: " + err)
@@ -182,7 +178,8 @@ class UsagePage(BasePage):
         self._fill_days(res.get("days") or {})
 
     def _fill_models(self, models):
-        # 模型表: 每行 model/provider/input/cache/output/calls/估算费用
+        # 模型行: 标题=模型名, meta=provider · 调用次数 · 估算费用
+        rows = []
         for name in sorted(models):
             m = models[name]
             if not isinstance(m, dict):
@@ -191,30 +188,52 @@ class UsagePage(BasePage):
             cache = int(m.get("cache") or 0)
             out = int(m.get("output") or 0)
             provider = m.get("provider") or "（无数据）"
-            r = self._model_table.rowCount()
-            self._model_table.insertRow(r)
-            vals = (name, provider, _num(inp), _num(cache), _num(out),
-                    _num(m.get("calls")), _cost_text(name, inp, out, cache))
-            for c, v in enumerate(vals):
-                self._model_table.setItem(r, c, QTableWidgetItem(v))
+            rows.append({
+                "title": name,
+                "meta": "%s · %s 次 · %s" % (provider, _num(m.get("calls")),
+                                             _cost_text(name, inp, out, cache)),
+                "data": {"model": name, "provider": provider, "input": _num(inp),
+                         "cache": _num(cache), "output": _num(out),
+                         "calls": _num(m.get("calls")),
+                         "cost": _cost_text(name, inp, out, cache)},
+            })
+        self._model_list.set_rows(rows)
 
     def _fill_days(self, days):
-        # 天表: 未知日期("?")排最后
+        # 天行: 标题=日期, meta=输入/缓存/输出; 未知日期("?")排最后
+        rows = []
         for date in sorted(days, key=lambda d: (d == "?", str(d))):
             d = days[date]
             if not isinstance(d, dict):
                 d = {}
-            r = self._day_table.rowCount()
-            self._day_table.insertRow(r)
-            vals = (date, _num(d.get("input")), _num(d.get("cache")), _num(d.get("output")))
-            for c, v in enumerate(vals):
-                self._day_table.setItem(r, c, QTableWidgetItem(v))
+            rows.append({
+                "title": str(date),
+                "meta": "输入 %s · 缓存 %s · 输出 %s" % (_num(d.get("input")),
+                                                        _num(d.get("cache")),
+                                                        _num(d.get("output"))),
+                "data": {"date": str(date), "input": _num(d.get("input")),
+                         "cache": _num(d.get("cache")), "output": _num(d.get("output"))},
+            })
+        self._day_list.set_rows(rows)
+
+    def _on_model_select(self):
+        row = self._model_list.current_data()
+        if not row:
+            return
+        data = row.get("data") or {}
+        self._fill_detail([(label, data.get(key) or "-") for key, label in _MODEL_FIELDS])
+
+    def _on_day_select(self):
+        row = self._day_list.current_data()
+        if not row:
+            return
+        data = row.get("data") or {}
+        self._fill_detail([(label, data.get(key) or "-") for key, label in _DAY_FIELDS])
 
     def _refresh_costs(self):
         # 价格修改后, 用缓存的统计结果重算费用列(不重新扫描)
         if not self._stats or not self._stats.get("ok"):
             return
-        self._model_table.setRowCount(0)
         self._fill_models(self._stats.get("models") or {})
 
     def _edit_prices(self):

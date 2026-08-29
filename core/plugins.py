@@ -112,7 +112,7 @@ def load_view(events=None, profile=None, remote=None, dash_repo=None):
     for e in entries:
         st = states.get(id_map.get(e.get("id"), e.get("id")))
         e["cordis"] = None if st is None else ("disabled" if st.get("disabled") else "enabled")
-    return {"entries": entries, "id_map": id_map, "err": ""}
+    return {"entries": entries, "id_map": id_map, "cordis_states": states, "err": ""}
 
 
 def set_disabled(events=None, profile=None, eid=None, disabled=False):

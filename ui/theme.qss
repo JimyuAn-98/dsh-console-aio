@@ -52,6 +52,13 @@ QListWidget#nav::item:selected {
     border-left: 3px solid #4f6ef7; font-weight: bold;
 }
 
+/* 现代列表(P1 多栏展开): 行渲染全在自绘 delegate, QSS 只关掉默认选择块 */
+QListWidget#modernList {
+    background: transparent; border: none; outline: 0;
+}
+QListWidget#modernList::item { border: none; }
+QListWidget#modernList::item:selected { background: transparent; color: #ffffff; }
+
 /* 右状态栏 */
 QFrame#rightBar { background: #252535; border-left: 1px solid #33334a; }
 QLabel#rightTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; font-weight: bold; }

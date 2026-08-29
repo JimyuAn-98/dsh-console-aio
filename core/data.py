@@ -369,6 +369,26 @@ def _dump_config_output(profile, dash_repo, remote):
         return ""
 
 
+def _entry_yaml_blocks(out):
+    # 抓每条 entry 的原始 YAML 块(从 `- id:` 行到下一个不深于它的行前),
+    # 供插件页"配置"栏只读展示; `# ==` 分组注释不属于任何 entry, 剔除。
+    lines = out.splitlines()
+    starts = []
+    for i, line in enumerate(lines):
+        m = re.match(r"^(\s*)- id:\s*(.+?)\s*$", line)
+        if m:
+            starts.append((i, len(m.group(1)), m.group(2).strip("'\"")))
+    blocks = {}
+    for pos, (i, indent, eid) in enumerate(starts):
+        end = len(lines)
+        for j, ind2, _eid2 in starts[pos + 1:]:
+            if ind2 <= indent:
+                end = j
+                break
+        blocks[eid] = "\n".join(l for l in lines[i:end] if not l.startswith("# =="))
+    return blocks
+
+
 def dump_entry_states(profile, dash_repo=None, remote=None):
     # 解析 dump-config 输出, 返回 {"id_map": name->真实 entry id, "states": {entry id: {name, disabled}}}。
     # 停用/启用必须用真实 entry id(如 dshmarket 的 id 是 dsh-market), 不能用 bundle 名;
@@ -405,6 +425,10 @@ def dump_entry_states(profile, dash_repo=None, remote=None):
                     id_map[nm] = eid
                 else:
                     states[eid]["disabled"] = m.group(3) == "true"
+    blocks = _entry_yaml_blocks(out)
+    for eid, st in states.items():
+        if eid in blocks:
+            st["yaml"] = blocks[eid]
     return {"id_map": id_map, "states": states}
 
 

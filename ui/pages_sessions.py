@@ -7,17 +7,20 @@
 # 刷新读取保留页面内后台线程 + safe_emit(纯读过渡态; 阶段4 收敛 dsh_data 后统一走 service)。
 # 远程只读红线(本页关键约束): self._remote 非 None(远程部署)时归档/恢复/删除分组一律拒绝 ——
 # 读取走远程、写入却落本机 workspace.json/本机 sessions 目录是语义错误, 必须封死。
+# P1 多栏展开: 分组|会话|会话详情 三栏(ModernList + three_split), 第三栏显示选中会话完整信息。
 
+import json
 import threading
 import time
 
 from core import data as dsh_data
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem,
-    QPushButton, QHeaderView, QMessageBox)
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QMessageBox, QTextEdit)
 
 from ui.base import BasePage
+from ui.widgets import ModernList, card_wrap, three_split
 
 
 def _human_size(n):
@@ -52,6 +55,7 @@ class SessionPage(BasePage):
         self._group_map = {}
         self._archived = set()
         self._sel_group = None
+        self._sel_session = None    # 选中会话名(详情栏展示用)
         self._last_op_msg = None
         self._pending = None   # 正在等待的 service op: "sessions-archive" / "sessions-delete"
         super().__init__(app, parent)
@@ -79,20 +83,11 @@ class SessionPage(BasePage):
         wl.addStretch(1)
         root.addWidget(wsf)
 
-        mid = QHBoxLayout()
-        mid.setSpacing(10)
-        root.addLayout(mid, 1)
-
-        self._group_tree = self._make_table(
-            ["工作目录", "会话数", "总大小"], ["w", "center", "e"],
-            [210, 60, 90], stretch_col=0)
-        self._group_tree.itemSelectionChanged.connect(self._on_group_select)
-        mid.addWidget(self._wrap_table("会话分组", self._group_tree), 1)
-
-        self._detail_tree = self._make_table(
-            ["会话", "大小", "修改时间", "状态"], ["w", "e", "w", "center"],
-            [130, 70, 130, 55], stretch_col=0)
-        mid.addWidget(self._wrap_table("会话详情（选择分组查看）", self._detail_tree), 1)
+        mid = three_split(
+            card_wrap("会话分组", self._make_list(is_group=True)),
+            card_wrap("会话", self._make_list(is_group=False)),
+            self._make_detail_card())
+        root.addWidget(mid, 1)
 
         btns = QHBoxLayout()
         self._btn_refresh = QPushButton("刷新")
@@ -108,6 +103,42 @@ class SessionPage(BasePage):
 
         self._status_lbl = QLabel("就绪", objectName="statusBar")
         root.addWidget(self._status_lbl)
+
+    # ── 三栏构建(分组|会话|详情) ──
+    def _make_list(self, is_group):
+        lst = ModernList()
+        if is_group:
+            self._group_list = lst
+            lst.itemSelectionChanged.connect(self._on_group_select)
+        else:
+            self._session_list = lst
+            lst.itemSelectionChanged.connect(self._on_session_select)
+        return lst
+
+    _DETAIL_FIELDS = (("name", "名称"), ("bytes", "大小"), ("mtime", "修改时间"),
+                      ("state", "状态"), ("group", "所在分组"))
+
+    def _make_detail_card(self):
+        card = QFrame(objectName="card")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(12, 10, 12, 10)
+        v.setSpacing(6)
+        v.addWidget(QLabel("会话详情（选择会话查看）", objectName="rightTitle"))
+        self._d_fields = {}
+        for key, label in self._DETAIL_FIELDS:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label, objectName="monNote"))
+            val = QLabel("-", objectName="monVal")
+            val.setWordWrap(True)
+            row.addWidget(val, 1)
+            v.addLayout(row)
+            self._d_fields[key] = val
+        v.addWidget(QLabel("原始数据", objectName="rightTitle"))
+        self._d_json = QTextEdit()
+        self._d_json.setReadOnly(True)
+        self._d_json.setFont(QFont("Consolas", 9))
+        v.addWidget(self._d_json, 1)
+        return card
 
     # ---- service 信号槽(接收者=本页, 销毁自动断开) ----
     def _on_result(self, op, payload):
@@ -148,11 +179,9 @@ class SessionPage(BasePage):
         self._archived = set(str(x) for x in (arch_ids if isinstance(arch_ids, list) else []))
         self._ws_lbl.setText("工作区数量: %d 个    已归档会话: %d 个"
                              % (len(ws_ids), len(self._archived)))
-        self._fill_group_table(groups)
-        self._detail_tree.setRowCount(0)
+        self._fill_groups(groups)
         if self._sel_group in self._group_map:
             self._select_group(self._sel_group)
-            self._show_group_details(self._sel_group)
         if err:
             self._set_status("读取失败: " + err)
         elif self._last_op_msg:
@@ -162,58 +191,92 @@ class SessionPage(BasePage):
             total = sum(g.get("count") or 0 for g in groups)
             self._set_status("已刷新: %d 个分组, %d 个会话" % (len(groups), total))
 
-    def _fill_group_table(self, groups):
+    def _fill_groups(self, groups):
         self._group_map = {}
-        self._group_tree.setRowCount(len(groups))
-        for r, g in enumerate(groups):
+        rows = []
+        for g in groups:
             self._group_map[g["workdir"]] = g
-            self._group_tree.setItem(r, 0, QTableWidgetItem(g["workdir"]))
-            self._group_tree.setItem(r, 1, QTableWidgetItem(str(g["count"])))
-            self._group_tree.setItem(r, 2, QTableWidgetItem(_human_size(g["bytes"])))
+            rows.append({
+                "title": g["workdir"],
+                "meta": "%d 个会话 · %s" % (g.get("count") or 0, _human_size(g.get("bytes"))),
+                "data": g,
+            })
+        self._group_list.set_rows(rows)
 
     def _on_group_select(self):
-        rows = self._group_tree.selectionModel().selectedRows()
-        if not rows:
+        row = self._group_list.current_data()
+        if not row:
             return
-        workdir = self._group_tree.item(rows[0].row(), 0).text()
-        self._sel_group = workdir
-        self._show_group_details(workdir)
+        g = row.get("data") or {}
+        self._sel_group = g.get("workdir")
+        self._show_group_details(self._sel_group)
 
     def _select_group(self, workdir):
-        for r in range(self._group_tree.rowCount()):
-            if self._group_tree.item(r, 0).text() == workdir:
-                self._group_tree.selectRow(r)
+        for r in range(self._group_list.count()):
+            row = self._group_list.item(r).data(Qt.UserRole) or {}
+            if (row.get("data") or {}).get("workdir") == workdir:
+                self._group_list.setCurrentRow(r)
                 return
 
     def _show_group_details(self, workdir):
         g = self._group_map.get(workdir)
-        self._detail_tree.setRowCount(0)
+        self._session_list.set_rows([])
+        self._fill_session_detail(None)
         if not g:
             return
-        sessions = g.get("sessions") or []
-        self._detail_tree.setRowCount(len(sessions))
-        for r, s in enumerate(sessions):
+        rows = []
+        for s in (g.get("sessions") or []):
             name = s.get("name") or "?"
             archived = name in self._archived
-            self._detail_tree.setItem(r, 0, QTableWidgetItem(name))
-            self._detail_tree.setItem(r, 1, QTableWidgetItem(_human_size(s.get("bytes"))))
-            self._detail_tree.setItem(r, 2, QTableWidgetItem(_fmt_time(s.get("mtime"))))
-            st = QTableWidgetItem("已归档" if archived else "")
-            self._detail_tree.setItem(r, 3, st)
-            if archived:
-                for c in range(4):
-                    self._detail_tree.item(r, c).setForeground(Qt.gray)
+            rows.append({
+                "title": name,
+                "meta": "%s · %s" % (_human_size(s.get("bytes")), _fmt_time(s.get("mtime"))),
+                "badges": [("已归档", "dim")] if archived else [("活跃", "ok")],
+                "data": s,
+            })
+        self._session_list.set_rows(rows)
+        if self._sel_session:
+            self._select_session(self._sel_session)
+
+    def _select_session(self, name):
+        for r in range(self._session_list.count()):
+            row = self._session_list.item(r).data(Qt.UserRole) or {}
+            if (row.get("data") or {}).get("name") == name:
+                self._session_list.setCurrentRow(r)
+                return
+
+    def _on_session_select(self):
+        row = self._session_list.current_data()
+        s = (row or {}).get("data")
+        self._sel_session = (s or {}).get("name")
+        self._fill_session_detail(s)
+
+    def _fill_session_detail(self, s):
+        vals = {k: "-" for k, _ in self._DETAIL_FIELDS}
+        if s:
+            archived = (s.get("name") or "") in self._archived
+            vals = {
+                "name": s.get("name") or "-",
+                "bytes": _human_size(s.get("bytes")),
+                "mtime": _fmt_time(s.get("mtime")),
+                "state": "已归档" if archived else "活跃",
+                "group": self._sel_group or "-",
+            }
+        for key, text in vals.items():
+            self._d_fields[key].setText(text)
+        self._d_json.setPlainText(
+            json.dumps(s, ensure_ascii=False, indent=2) if s else "（未选择会话）")
 
     # ---- 归档/恢复(危险操作, 先确认; 远程只读红线) ----
     def _toggle_archive(self):
         if self._remote is not None:
             QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
             return
-        row = self._current_detail_row()
-        if row is None:
-            self._set_status("请先在右侧选择要归档/恢复的会话")
+        row = self._session_list.current_data()
+        if not row:
+            self._set_status("请先选择要归档/恢复的会话")
             return
-        name = self._detail_tree.item(row, 0).text()
+        name = (row.get("data") or {}).get("name") or ""
         was_archived = name in self._archived
         act = "恢复" if was_archived else "归档"
         msg = ("确定恢复会话\"%s\"为正常？" % name) if was_archived \
@@ -236,11 +299,11 @@ class SessionPage(BasePage):
         if self._remote is not None:
             QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
             return
-        rows = self._group_tree.selectionModel().selectedRows()
-        if not rows:
+        row = self._group_list.current_data()
+        if not row:
             self._set_status("请先选择要删除的会话分组")
             return
-        workdir = self._group_tree.item(rows[0].row(), 0).text()
+        workdir = (row.get("data") or {}).get("workdir") or ""
         g = self._group_map.get(workdir)
         n = g.get("count") if g else 0
         if QMessageBox.question(self, "删除分组", "确定删除整个会话分组\"%s\"？" % workdir) != QMessageBox.Yes:
@@ -265,39 +328,6 @@ class SessionPage(BasePage):
         self.app.loge("[会话管理] " + msg, "ok")
         self._last_op_msg = msg + "（已刷新）"
         self._refresh()
-
-    def _current_detail_row(self):
-        rows = self._detail_tree.selectionModel().selectedRows()
-        if not rows:
-            return None
-        return rows[0].row()
-
-    def _make_table(self, headers, anchors, widths, stretch_col):
-        t = QTableWidget(0, len(headers))
-        t.setHorizontalHeaderLabels(headers)
-        t.verticalHeader().setVisible(False)
-        t.setSelectionBehavior(QTableWidget.SelectRows)
-        t.setEditTriggers(QTableWidget.NoEditTriggers)
-        hh = t.horizontalHeader()
-        for i, (a, wd) in enumerate(zip(anchors, widths)):
-            hh.setSectionResizeMode(i, QHeaderView.ResizeToContents if i != stretch_col
-                                    else QHeaderView.Stretch)
-            t.setColumnWidth(i, wd)
-            if a == "e":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            elif a == "center":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignCenter)
-        t.setSelectionMode(QTableWidget.SingleSelection)
-        return t
-
-    def _wrap_table(self, caption, table):
-        card = QFrame(objectName="card")
-        v = QVBoxLayout(card)
-        v.setContentsMargins(10, 8, 10, 8)
-        cap = QLabel(caption, objectName="rightTitle")
-        v.addWidget(cap)
-        v.addWidget(table)
-        return card
 
     def _set_btns(self, on):
         for b in (self._btn_refresh, self._btn_archive, self._btn_delete):

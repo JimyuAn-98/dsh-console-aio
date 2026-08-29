@@ -18,10 +18,11 @@ from core import plugins as core_plugins
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem,
-    QPushButton, QHeaderView, QMessageBox, QComboBox, QPlainTextEdit)
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit,
+    QPushButton, QMessageBox, QComboBox, QTextEdit)
 
 from ui.base import BasePage
+from ui.widgets import ModernList, card_wrap, three_split
 
 
 def _entry_src_text(e):
@@ -39,6 +40,13 @@ def _entry_src_text(e):
     return "\n".join(lines)
 
 
+def _chips_html(chips):
+    # 详情卡徽章 chips 行(QLabel 富文本; Qt 富文本不支持圆角, 用底色块近似)
+    return " ".join(
+        '<span style="background-color:#2f3353; color:%s;">&nbsp;%s&nbsp;</span>' % (color, text)
+        for text, color in chips)
+
+
 _REMOTE_READONLY_MSG = "远程部署下暂不支持写操作（远程只读），请切换回本机部署"
 
 
@@ -51,8 +59,9 @@ class PluginPage(BasePage):
         _dep = getattr(app, "_current_deploy", None)
         if _dep and _dep.get("host"):
             self._remote = dsh_data.DshRemote(_dep)
-        self._entries = []      # 与表格行一一对应的 entry dict
-        self._id_map = {}       # name(包名)->真实 entry id(来自 dsh --dump-config, service 回包)
+        self._entries = []          # 当前列表条目(list 行 data 指向)
+        self._id_map = {}           # name(包名)->真实 entry id(来自 dsh --dump-config, service 回包)
+        self._cordis_states = {}    # entry id -> {name, disabled, yaml(合成原文)}
         self._busy = False
         self._pending = None    # 正在等待的 service op
         self._last_op_msg = None
@@ -90,25 +99,11 @@ class PluginPage(BasePage):
                              objectName="cardHint"))
         root.addLayout(top)
 
-        mid = QHBoxLayout()
-        mid.setSpacing(10)
-        self._table = self._make_table(
-            ["名称", "来源", "描述", "配置", "cordis"], ["w", "w", "w", "center", "center"],
-            [200, 110, 240, 70, 70], stretch_col=2)
-        self._table.itemSelectionChanged.connect(self._on_select)
-        mid.addWidget(self._wrap_table("插件条目", self._table), 3)
-
-        detail_card = QFrame(objectName="card")
-        dv = QVBoxLayout(detail_card)
-        dv.setContentsMargins(10, 8, 10, 8)
-        dv.setSpacing(4)
-        dv.addWidget(QLabel("条目详情（src 区）", objectName="rightTitle"))
-        self._detail_text = QPlainTextEdit()
-        self._detail_text.setReadOnly(True)
-        self._detail_text.setFont(QFont("Consolas", 9))
-        dv.addWidget(self._detail_text)
-        mid.addWidget(detail_card, 2)
-        root.addLayout(mid, 1)
+        mid = three_split(
+            card_wrap("插件", self._make_list()),
+            self._make_detail_card(),
+            self._make_config_card())
+        root.addWidget(mid, 1)
 
         btns = QHBoxLayout()
         btns.setSpacing(6)
@@ -135,31 +130,50 @@ class PluginPage(BasePage):
         self._profile_cb.activated.connect(lambda _i: self._refresh())
         self._refresh_btns()
 
-    def _make_table(self, headers, anchors, widths, stretch_col):
-        t = QTableWidget(0, len(headers))
-        t.setHorizontalHeaderLabels(headers)
-        t.verticalHeader().setVisible(False)
-        t.setSelectionBehavior(QTableWidget.SelectRows)
-        t.setEditTriggers(QTableWidget.NoEditTriggers)
-        hh = t.horizontalHeader()
-        for i, (a, wd) in enumerate(zip(anchors, widths)):
-            hh.setSectionResizeMode(i, QHeaderView.ResizeToContents if i != stretch_col
-                                    else QHeaderView.Stretch)
-            t.setColumnWidth(i, wd)
-            if a == "e":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            elif a == "center":
-                t.horizontalHeaderItem(i).setTextAlignment(Qt.AlignCenter)
-        t.setSelectionMode(QTableWidget.SingleSelection)
-        return t
+    # ── 三栏构建(列表|详情|配置) ──
+    def _make_list(self):
+        self._list = ModernList()
+        self._list.itemSelectionChanged.connect(self._on_select)
+        return self._list
 
-    def _wrap_table(self, caption, table):
+    def _make_detail_card(self):
         card = QFrame(objectName="card")
-        v = QVBoxLayout(card)
-        v.setContentsMargins(10, 8, 10, 8)
-        cap = QLabel(caption, objectName="rightTitle")
-        v.addWidget(cap)
-        v.addWidget(table)
+        dv = QVBoxLayout(card)
+        dv.setContentsMargins(12, 10, 12, 10)
+        dv.setSpacing(6)
+        self._d_name = QLabel("-", objectName="cardTitle")
+        self._d_badges = QLabel("")
+        self._d_badges.setTextFormat(Qt.RichText)
+        self._d_badges.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        dv.addWidget(self._d_name)
+        dv.addWidget(self._d_badges)
+        dv.addWidget(QLabel("描述", objectName="rightTitle"))
+        self._d_desc = QLabel("-", objectName="monName")
+        self._d_desc.setWordWrap(True)
+        dv.addWidget(self._d_desc)
+        dv.addWidget(QLabel("来源", objectName="rightTitle"))
+        self._d_src = QLabel("-", objectName="monName")
+        self._d_src.setWordWrap(True)
+        dv.addWidget(self._d_src)
+        dv.addWidget(QLabel("patch 原始键值", objectName="rightTitle"))
+        self._detail_text = QPlainTextEdit()
+        self._detail_text.setReadOnly(True)
+        self._detail_text.setFont(QFont("Consolas", 9))
+        dv.addWidget(self._detail_text, 1)
+        return card
+
+    def _make_config_card(self):
+        card = QFrame(objectName="card")
+        cv = QVBoxLayout(card)
+        cv.setContentsMargins(12, 10, 12, 10)
+        cv.setSpacing(6)
+        cv.addWidget(QLabel("配置（cordis 合成 · 只读）", objectName="rightTitle"))
+        cv.addWidget(QLabel("来自 dsh --dump-config 的合成 entry 原文（含 bundle 层叠加后的最终配置）。",
+                            objectName="cardHint"))
+        self._config_text = QTextEdit()
+        self._config_text.setReadOnly(True)
+        self._config_text.setFont(QFont("Consolas", 9))
+        cv.addWidget(self._config_text, 1)
         return card
 
     def _dash_repo(self):
@@ -187,7 +201,7 @@ class PluginPage(BasePage):
     def _apply_profiles(self, profiles, err):
         if err:
             self._set_busy(False)
-            self._table.setRowCount(0)
+            self._list.set_rows([])
             self._entries = []
             self._set_status("Profile 列表读取失败: " + err)
             self.app.loge("[插件] Profile 列表读取失败: " + err, "err")
@@ -201,7 +215,7 @@ class PluginPage(BasePage):
             self._refresh()
         else:
             self._set_busy(False)
-            self._table.setRowCount(0)
+            self._list.set_rows([])
             self._entries = []
             self._set_status("未找到可用 profile(~/.dsh/profiles 下没有 cordis.yml / cordis.patch.yml)")
 
@@ -218,21 +232,30 @@ class PluginPage(BasePage):
     def _apply_refresh(self, entries, err):
         self._set_busy(False)
         self._entries = entries
-        self._table.setRowCount(len(entries))
-        for r, e in enumerate(entries):
+        rows = []
+        for e in entries:
+            eid = e.get("id")
+            name = e.get("name") or eid or "?"
             src = "cordis.patch.yml" if e.get("_src") == "patch" else "bundle"
-            self._table.setItem(r, 0, QTableWidgetItem(e.get("name") or e.get("id") or "?"))
-            self._table.setItem(r, 1, QTableWidgetItem(src))
-            self._table.setItem(r, 2, QTableWidgetItem(e.get("description") or "—"))
-            # 配置 = 本地 patch 视图; cordis = dump-config 合成生效状态(None=未知, 远程/dump 失败)
-            self._table.setItem(r, 3, QTableWidgetItem("已停用" if e.get("disabled") else "已启用"))
+            meta = [e.get("description") or "—", src]
+            if e.get("version"):
+                meta.append("v" + str(e.get("version")))
+            if core_plugins.protected(eid):
+                badge = ("受保护", "warn")
+            elif e.get("disabled"):
+                badge = ("已停用", "dim")
+            else:
+                badge = ("启用", "ok")
+            badges = [badge]
+            # 配置态与 cordis 生效态一致时不加徽章, 只提示分歧(例外才可见)
             cordis = e.get("cordis")
-            self._table.setItem(r, 4, QTableWidgetItem(
-                "停用" if cordis == "disabled" else ("启用" if cordis == "enabled" else "—")))
-            if e.get("disabled"):
-                for c in range(5):
-                    self._table.item(r, c).setForeground(Qt.gray)
-        self._table.clearSelection()
+            if cordis == "disabled" and not e.get("disabled"):
+                badges.append(("cordis 停用", "err"))
+            elif cordis == "enabled" and e.get("disabled"):
+                badges.append(("cordis 启用", "accent"))
+            rows.append({"title": name, "meta": " · ".join(meta),
+                         "badges": badges, "data": e})
+        self._list.set_rows(rows)
         self._on_select()
         if err:
             self._set_status("读取失败: " + err)
@@ -248,6 +271,7 @@ class PluginPage(BasePage):
         if op == "plugins-load":
             self._pending = None
             self._id_map = payload.get("id_map") or {}
+            self._cordis_states = payload.get("cordis_states") or {}
             self._apply_refresh(payload.get("entries") or [], payload.get("err", ""))
         elif op == "plugins-toggle":
             self._pending = None
@@ -392,17 +416,56 @@ class PluginPage(BasePage):
 
     # ── 其它 ──
     def _selected_entry(self):
-        # 当前表格选中行对应的 entry dict; 未选中返回 None
-        rows = self._table.selectionModel().selectedRows()
-        if not rows:
-            return None
-        idx = rows[0].row()
-        return self._entries[idx] if 0 <= idx < len(self._entries) else None
+        # 当前选中行对应的 entry dict; 未选中返回 None
+        row = self._list.current_data()
+        return row.get("data") if row else None
 
     def _on_select(self):
-        # 选中条目时右侧显示 src 区, 并控制操作按钮
+        # 选中条目: 详情卡(徽章 chips + 描述/来源/patch 键值) + 配置栏(合成 entry 原文)
         e = self._selected_entry()
-        self._detail_text.setPlainText(_entry_src_text(e) if e else "")
+        if e is None:
+            self._d_name.setText("-")
+            self._d_badges.setText("")
+            self._d_desc.setText("-")
+            self._d_src.setText("-")
+            self._detail_text.setPlainText("")
+            self._config_text.setPlainText("（未选择条目）")
+            self._refresh_btns()
+            return
+        eid = e.get("id")
+        src = "cordis.patch.yml" if e.get("_src") == "patch" else "package.json (dsh.profile.bundles)"
+        if core_plugins.protected(eid):
+            state_chip = ("受保护", "#e5c07b")
+        elif e.get("disabled"):
+            state_chip = ("已停用", "#9a9ab0")
+        else:
+            state_chip = ("启用", "#7ecb6a")
+        if e.get("cordis") == "disabled":
+            cordis_chip = ("cordis 停用", "#e07a7a")
+        elif e.get("cordis") == "enabled":
+            cordis_chip = ("cordis 启用", "#7ecb6a")
+        else:
+            cordis_chip = ("cordis 未知", "#9a9ab0")
+        self._d_name.setText(e.get("name") or eid or "?")
+        chips = [(src, "#9a9ab0")]
+        if e.get("version"):
+            chips.append(("v" + str(e.get("version")), "#9a9ab0"))
+        chips.append(state_chip)
+        chips.append(cordis_chip)
+        self._d_badges.setText(_chips_html(chips))
+        self._d_desc.setText(e.get("description") or "—")
+        self._d_src.setText(src)
+        self._detail_text.setPlainText(_entry_src_text(e))
+        rid = self._id_map.get(eid, eid)
+        st = self._cordis_states.get(rid) or {}
+        yaml = st.get("yaml")
+        if yaml:
+            self._config_text.setPlainText(yaml)
+        else:
+            self._config_text.setPlainText(
+                "# 该条目不在 cordis 合成层\n"
+                "# （纯依赖库/客户端包, 或 dump-config 不可用、远程部署）\n"
+                "# 映射 id: " + str(rid))
         self._refresh_btns()
 
     def _open_patch(self):

@@ -297,6 +297,20 @@ class TestDumpEntryStates:
         monkeypatch.setattr(d, "_dump_config_output", lambda *a, **k: "")
         assert d.dump_entry_states("web") == {"id_map": {}, "states": {}}
 
+    def test_yaml_blocks(self, monkeypatch):
+        # 配置栏数据源: 每条 entry 的原始 YAML 块(到下一个不深于它的 entry 前)
+        r = self._parse(monkeypatch)
+        assert r["states"]["webserver"]["yaml"] == (
+            "- id: webserver\n"
+            "  name: '@deepseek-ai/dsh-web'\n"
+            "  config:\n"
+            "    port: 3080\n"
+            "    disabled: true")
+        # 父 entry 块包含嵌套子条目; # == 分组注释不进块
+        assert "- id: inner-1" in r["states"]["group-x"]["yaml"]
+        assert "# ==" not in r["states"]["group-x"]["yaml"]
+        assert r["states"]["dsh-market"]["yaml"] == "- id: dsh-market\n  name: dshmarket"
+
 
 # ── 路径定位 ──────────────────────────────────────────
 
