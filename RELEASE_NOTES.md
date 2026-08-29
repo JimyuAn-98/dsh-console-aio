@@ -50,6 +50,18 @@
 - **四个纯读页统一走 service**：Agent 模式 / 任务看板 / 模型用量 / LLM 配置的读取与 LLM 保存全部经信号桥；页面不再自起读取线程、不再直接引用数据层
 - **分层重构主体完成**：dsh_core 12 个模块纯 Python 零 Qt、UI 层零子进程业务、后端→UI 全部 Qt 信号-槽，纯单元 294 例全绿
 
+### 修复：插件启用不生效（BUG-001，根因是空 patch 文件）
+
+- **现象**：插件停用正常、启用不生效（dsh web 侧仍是停用态），控制台列表却显示已启用
+- **真实根因**（原记录的 bundle名→entry id 映射此前已实现，非本次根因）：启用删除禁用行后
+  `write_yaml([])` 把 cordis.patch.yml 写成**空文件**；空文档 YAML 解析为 null 而非空数组，
+  dsh 的 patch 层解析直接抛错——运行中的 web HMR 重载失败（旧树保留，启用不生效），
+  且该 profile **重启即启动失败**（dshmarket patch.js 中 "profile is bricked" 警告的场景）
+- **修复**：`core/data.py write_yaml` 空容器写 `[]`/`{}` 合法文档（保护全部 YAML 写路径）；
+  `core/plugins.py` 启用未命中禁用行时追加 `disabled: false` 强启用行（对齐 dshmarket enableRow 语义）
+- **查证结论**：dsh 启停链路无需 build——`dsh plugin` 是纯 pnpm 转发器（apps/cli/src/plugin.ts），
+  dshmarket 自身启停也是纯 patch 文件操作（lib/patch.js）；纯单元 311 例全绿
+
 ## v0.4.0 (未发布)
 
 

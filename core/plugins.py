@@ -143,6 +143,10 @@ def set_disabled(events=None, profile=None, eid=None, disabled=False):
                 # 只剩 id 的裸行直接删除
         if disabled and not touched:
             new_rows.append({"id": eid, "disabled": True})
+        elif not disabled and not touched:
+            # 对齐 dshmarket enableRow: 禁用行不在本 patch(手改丢失或来自更低层
+            # bundle patch)时, 追加 disabled:false 强启用行, 而不是静默空操作
+            new_rows.append({"id": eid, "disabled": False})
         dsh_data.write_cordis_patch(profile, new_rows)
     except OSError as e:
         err = "无法写 cordis.patch.yml：" + str(e)

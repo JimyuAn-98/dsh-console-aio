@@ -133,6 +133,27 @@ class TestSetDisabled:
         rows = dsh_data.read_cordis_patch("web")
         assert all(x.get("id") != "my-ext" for x in rows if isinstance(x, dict))
 
+    def test_enable_to_empty_writes_valid_array(self, tmp_path, monkeypatch):
+        # BUG-001 根因回归: patch 只有一条禁用行时, 启用删空后文件必须是合法的
+        # 顶层 YAML 数组 "[]", 空文件会被 dsh 拒绝加载(HMR 失效/重启启动失败)
+        prof = _fake_profile(tmp_path, monkeypatch)
+        patch = prof / "cordis.patch.yml"
+        patch.write_text("- id: dshmarket\n  disabled: true\n", encoding="utf-8")
+        r = pl.set_disabled(None, "web", "dshmarket", False)
+        assert r["err"] == ""
+        with open(str(patch), "rb") as f:
+            assert f.read() == b"[]\n"
+
+    def test_enable_without_row_force_enables(self, tmp_path, monkeypatch):
+        # 对齐 dshmarket enableRow: 禁用行不在本 patch(手改丢失或来自更低层
+        # bundle patch)时, 追加 disabled:false 强启用行而不是静默空操作
+        _fake_profile(tmp_path, monkeypatch)
+        r = pl.set_disabled(None, "web", "my-ext", False)
+        assert r["err"] == "" and "已启用 my-ext" in r["msg"]
+        rows = dsh_data.read_cordis_patch("web")
+        row = [x for x in rows if isinstance(x, dict) and x.get("id") == "my-ext"]
+        assert row and row[0]["disabled"] is False
+
     def test_protected_refused_in_core(self, tmp_path, monkeypatch):
         _fake_profile(tmp_path, monkeypatch)
         r = pl.set_disabled(None, "web", "@deepseek-ai/dsh-web", True)

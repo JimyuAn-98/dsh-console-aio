@@ -4,7 +4,7 @@
 
 | 编号 | 问题 | 状态 | 备注 |
 |------|------|------|------|
-| BUG-001 | 插件停用/启用不生效：写入 patch 的是 bundle 名，与 cordis entry 的真实 id 不匹配（原 PLANS §9） | 待修 | 修复方向：`dsh --dump-config` 建立 bundle名→entry id 映射后再写 disabled |
+| BUG-001 | 插件停用/启用不生效。原记录方向（bundle名 vs entry id 映射）此前已实现；实修根因：启用删空禁用行后 `write_yaml([])` 写出**空文件**，dsh patch 层解析为 null 拒绝加载 → 运行中 web HMR 失效（启用不生效），profile 重启即启动失败 | 已修复（2026-08-29） | write_yaml 空容器写 `[]`/`{}`；启用未命中禁用行时追加 `disabled: false` 强启用行（对齐 dshmarket enableRow）；本机 web profile 坏文件已修复。查证：启停链路无需 build（dsh plugin 为纯 pnpm 转发器）。排查记录见 `.agents/notes/implemented/bug-fix/2026-08-29-plugin-enable-empty-patch.md` |
 | BUG-002 | `os.kill(pid, 0)` Windows 语义陷阱：signal 0 == CTRL_C_EVENT，实际是向共享控制台广播 Ctrl+C（非 Unix 探活）；在宿主 harness 伪控制台内执行会 SIGINT 掉宿主 web | 已修复（2026-08-29） | `core/tunnel_mgr._pid_alive` 改用 tasklist CSV；上游同一 bug 见 deepseek-ai/deepseek-harness Discussion #4713；排查记录见 `.agents/notes/implemented/bug-fix/2026-08-29-os-kill-ctrlc-harness.md` |
 | BUG-003 | 版本页"更新后不重启"：源码模式重启指向不存在的 app_pyside.py（FileNotFoundError 被吞） | 已修复（阶段2 波1） | 迁移 version 页到 core 时修复 |
 | BUG-004 | 会话归档调用不存在的 `dsh_data.write_workspace`（AttributeError，归档/恢复自迁移起失效） | 已修复（阶段2 波2） | core 信封直写 workspace.json |

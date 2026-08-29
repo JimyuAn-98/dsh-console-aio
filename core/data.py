@@ -261,7 +261,12 @@ def _dump_yaml(data, indent=0):
 def write_yaml(path, data):
     # 备份后写回 YAML, 返回备份路径
     backup_file(path)
-    body = "\n".join(_dump_yaml(data)) + "\n"
+    lines = _dump_yaml(data)
+    if not lines:
+        # 空 list/dict 必须写成合法 YAML 文档: 空文件解析为 null 而非空容器,
+        # dsh patch 层等消费方会拒绝加载(HMR 失效, profile 重启即启动失败)
+        lines = ["[]" if isinstance(data, list) else "{}"]
+    body = "\n".join(lines) + "\n"
     with io.open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(body)
     return path

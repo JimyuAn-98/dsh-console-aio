@@ -206,6 +206,21 @@ class TestDumpYaml:
         with open(bak, encoding="utf-8") as f:
             assert "old: data" in f.read()
 
+    def test_write_yaml_empty_list_is_valid_array(self, tmp_path):
+        # BUG-001 回归: 空 list 不能写成空文件(空文档解析为 null, dsh patch 层拒绝加载)
+        from core.data import write_yaml
+        p = str(tmp_path / "patch.yml")
+        write_yaml(p, [])
+        with open(p, "rb") as f:
+            assert f.read() == b"[]\n"
+
+    def test_write_yaml_empty_dict_is_valid_mapping(self, tmp_path):
+        from core.data import write_yaml
+        p = str(tmp_path / "settings.yml")
+        write_yaml(p, {})
+        with open(p, "rb") as f:
+            assert f.read() == b"{}\n"
+
     def test_special_chars_quoted(self):
         """包含 : # \n 的值应被引号包裹。"""
         from core.data import _dump_scalar
