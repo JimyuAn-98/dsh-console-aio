@@ -24,6 +24,7 @@ from PySide6.QtGui import QTextCursor, QColor, QCursor
 from core import data as dsh_data
 from app.services import DshService
 from ui.theme import build_qss, apply_window_effects
+from ui.acrylic import AcrylicBackdrop
 
 if getattr(sys, 'frozen', False):
     # onefile exe: 用户可见/可写的数据目录 = exe 所在目录(放 config.json 便于分发后编辑)。
@@ -335,7 +336,8 @@ class MainWindow(QMainWindow):
         self._normal_geo = None                # 最大化前几何(还原用)
         self._maxed = False                    # 自维护最大化状态(setGeometry 伪最大化)
         self._btn_max = None                   # 最大化按钮(图标切换 □/❐)
-        # 平台窗口效果(Win11 22H2+ 分层 + Mica; 失败自动回退纯 QSS)
+        self._backdrop = None                  # 自绘亚克力背景(分层窗口时启用)
+        # 平台窗口效果(Win11 22H2+ 分层透明; 失败自动回退纯 QSS)
         self._mica = apply_window_effects(self)
         self.setStyleSheet(self._load_theme())
 
@@ -381,7 +383,7 @@ class MainWindow(QMainWindow):
         self._show_page("overview")
         if not smoke:
             if sys.platform == "win32" and self._mica:
-                theme_txt = "Mica 渐变(build %d)" % sys.getwindowsversion().build
+                theme_txt = "亚克力(自绘模糊, build %d)" % sys.getwindowsversion().build
             elif sys.platform == "win32":
                 theme_txt = "纯 QSS(build %d)" % sys.getwindowsversion().build
             else:
@@ -389,6 +391,11 @@ class MainWindow(QMainWindow):
             self.loge("DSH Console 已启动(v" + APP_VERSION + ") · 主题: " + theme_txt, "ok")
             if sys.platform == "win32":
                 QTimer.singleShot(800, self._log_window_facts)
+            if self._mica:
+                # 自绘亚克力底层背景(抓屏模糊+着色); 放最底层, 面板 rgba 透出
+                self._backdrop = AcrylicBackdrop(self)
+                self._backdrop.lower()
+                QTimer.singleShot(250, self._backdrop.refresh)
 
     # ---- 主题(主题引擎 ui/theme.py, token 驱动) ----
     def _load_theme(self):
@@ -485,6 +492,12 @@ class MainWindow(QMainWindow):
                       % ("开" if layered else "关", v.value if r == 0 else -1, dpi), "ok")
         except Exception as e:
             self.loge("窗口诊断失败: %s" % e, "err")
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self._backdrop is not None:
+            self._backdrop.setGeometry(self.rect())
+            self._backdrop.lower()
 
     def nativeEvent(self, eventType, message):
         # WM_NCHITTEST: 标题栏空白区拖拽(HTCAPTION), 边缘 6px 拉伸, 控件区放行。
