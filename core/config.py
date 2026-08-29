@@ -4,8 +4,25 @@
 # 可被 UI 之外的任何调用方(含单测/CLI)复用。
 
 import os
+import sys
 import json
 import shutil
+
+
+def default_config_path():
+    # config.json 与主程序同目录(源码=仓库根; 打包=exe 所在安装目录, 用户可写)。
+    # 打包运行(onefile)时 __file__ 在临时解压目录(_MEIPASS), 每次启动都会变 —— 必须用
+    # exe 目录(与 dsh-console-aio.py 顶层 BASE_DIR 同规则), 否则配置写进临时目录退出
+    # 即丢失、安装路径里粘贴的 config.json 也不会被读取。
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "config.json")
+
+
+def _default_config_path():
+    return default_config_path()
 
 
 def load_config(path=None):

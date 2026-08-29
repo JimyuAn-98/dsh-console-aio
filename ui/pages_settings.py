@@ -70,15 +70,19 @@ class SettingsPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        # 状态文字在标题右侧(原底部状态条位置取消)
+        # 状态文字在标题右侧(原底部状态条位置取消); 显示配置文件实际路径(打包运行可定位)
         self._status_lbl = QLabel("就绪", objectName="monVal")
         head = QHBoxLayout()
         head.addWidget(QLabel("设置", objectName="cardTitle"))
         head.addStretch(1)
         head.addWidget(self._status_lbl)
         root.addLayout(head)
-        root.addWidget(QLabel("配置在页面内完成, 不弹窗; 保存后端口/命名/监控点即时热重载。",
-                              objectName="cardHint"))
+        self._config_file_lbl = QLabel(
+            "配置在页面内完成, 不弹窗; 保存后端口/命名/监控点即时热重载。配置文件: %s"
+            % (self._config_path or dsh_config.default_config_path()),
+            objectName="cardHint")
+        self._config_file_lbl.setWordWrap(True)
+        root.addWidget(self._config_file_lbl)
 
         bar = QHBoxLayout()
         save = QPushButton("保存设置", objectName="primary")

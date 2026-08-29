@@ -802,3 +802,14 @@ class TestPluginCmd:
         cmd = plugin_cmd("default", "remove", "old-plugin")
         assert "remove" in cmd
         assert "--profile" in cmd
+
+
+class TestDefaultConfigPath:
+    """default_config_path: 源码运行=仓库根/config.json(frozen 分支无法离线模拟, 打包验证)。"""
+
+    def test_source_mode_repo_root(self):
+        from core import config as dsh_config
+        import core
+        expect = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(core.__file__))),
+                              "config.json")
+        assert dsh_config.default_config_path() == expect
