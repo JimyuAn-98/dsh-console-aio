@@ -121,7 +121,7 @@ NAV_ITEMS = [
     ('Agent 模式', 'agents'), ('Profile 管理', 'profiles'), ('插件管理', 'plugins'),
     ('任务看板', 'taskboard'), ('模型用量', 'usage'), ('LLM 配置', 'llm'),
     ('备份与运维', 'ops'), ('SSH 密钥', 'keys'), ('部署管理', 'deployments'),
-    ('日志', 'logs'), ('关于与更新', 'version'),
+    ('日志管理', 'logs'), ('关于与更新', 'version'),
 ]
 
 

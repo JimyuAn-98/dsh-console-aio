@@ -118,6 +118,22 @@ class TestTailer:
         t = logs.Tailer(str(p))
         assert t.read_new() == (["a", "b"], False)
 
+    def test_mixed_encoding_gbk_line(self, tmp_path):
+        # 真实场景回归: out.log 里 node/pnpm 行是 UTF-8, cmd.exe 批处理提示按 GBK 写入,
+        # 逐行探测解码后中文必须正常(UTF-8 严格解码失败才回退 GBK)
+        gbk_line = "终止批处理操作吗(Y/N)?".encode("gbk")
+        p = tmp_path / "mixed.log"
+        with open(p, "wb") as fh:
+            fh.write(b"utf8: ok\n" + gbk_line + b"\r\n")
+        assert logs.read_tail(str(p)) == ["utf8: ok", "终止批处理操作吗(Y/N)?"]
+        t = logs.Tailer(str(p))
+        assert t.read_new() == (["utf8: ok", "终止批处理操作吗(Y/N)?"], False)
+
+    def test_read_tail_empty_file(self, tmp_path):
+        p = tmp_path / "empty.log"
+        p.write_bytes(b"")
+        assert logs.read_tail(str(p)) == []
+
 
 class TestFilterRows:
     ROWS = [("dsh web: http://x", "ok"), ("Error: boom", "err"), ("plain line", "")]

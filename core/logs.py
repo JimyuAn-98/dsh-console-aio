@@ -20,6 +20,15 @@ MAX_TAIL_LINES = 2000     # 初始加载尾部行数
 MAX_BUFFER_ROWS = 5000    # 页面行缓冲上限(超限丢最旧)
 
 
+def _decode_line(raw):
+    # 日志文件是混合编码: node/pnpm 输出 UTF-8, cmd.exe 批处理提示(如"终止批处理
+    # 操作吗")按控制台代码页 GBK 写入。逐行探测: 先按 UTF-8 严格解码, 失败回退 GBK。
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("gbk", "replace")
+
+
 def log_dir():
     # 与 core/dshctl.start_dsh 的落盘目录保持一致
     return os.path.join(os.environ.get("TEMP", "."), "dsh-dash")
@@ -64,7 +73,11 @@ def read_tail(path, max_lines=MAX_TAIL_LINES, max_bytes=2 * 1024 * 1024):
             data = fh.read()
     except OSError:
         return []
-    lines = data.decode("utf-8", "replace").splitlines()
+    if not data:
+        return []
+    if data.endswith(b"\n"):
+        data = data[:-1]
+    lines = [_decode_line(l).rstrip("\r") for l in data.split(b"\n")]
     if capped and lines:
         # seek 可能落在行中间(或多字节字符中间): 首行是残行, 整行丢弃
         lines = lines[1:]
@@ -94,7 +107,7 @@ class Tailer:
         except OSError:
             return [], reset
         nl = data.rfind(b"\n") + 1   # 最后一个 \n 之后的半行不消费
-        lines = [l.decode("utf-8", "replace").rstrip("\r")
+        lines = [_decode_line(l).rstrip("\r")
                  for l in data[:nl].split(b"\n")[:-1]]
         self.offset += nl
         return lines, reset

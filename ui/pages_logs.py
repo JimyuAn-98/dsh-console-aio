@@ -61,7 +61,7 @@ class LogsPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("日志", objectName="cardTitle")
+        title = QLabel("日志管理", objectName="cardTitle")
         root.addWidget(title)
         root.addWidget(QLabel(
             "数据源: 控制台启动的 dsh web 输出(%TEMP%\\dsh-dash)。自行在终端启动的 dsh 不落盘, 此处看不到。",
