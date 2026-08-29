@@ -23,6 +23,9 @@ TOKENS = {
     "bg_elevated_rgba": "rgba(37, 37, 53, 0.55)",
     "bg_log": "#16161f",
     "bg_log_rgba": "rgba(22, 22, 31, 0.75)",
+    # 页面宿主底色(Mica/亚克力模式): 比面板更透一层, 保持层级一致(OverviewPage 等
+    # 空白页不再显得"更透明")
+    "bg_page_rgba": "rgba(30, 30, 46, 0.42)",
     "bg_hover": "#2e2e44",
     "bg_active": "#2f3353",
     # 边框 / 强调
@@ -64,10 +67,10 @@ def build_qss(t=None, mica=False):
     """
     t = t or TOKENS
     if mica:
-        bg_main = "transparent"      # 顶层透明, 底层由 AcrylicBackdrop 绘制
+        bg_main = "transparent"      # 顶层透明, 底层由系统模糊或 AcrylicBackdrop 提供
         bg_panel = t["bg_elevated_rgba"]
         bg_log = t["bg_log_rgba"]
-        bg_page = "transparent"
+        bg_page = t["bg_page_rgba"]
     else:
         bg_main = t["bg"]
         bg_panel = t["bg_elevated"]
@@ -196,6 +199,31 @@ def is_windows_11_22h2():
     try:
         v = sys.getwindowsversion()
         return v.major >= 10 and v.build >= 22621
+    except Exception:
+        return False
+
+
+def try_system_blur(window):
+    """尝试系统级模糊: SetWindowCompositionAttribute ACCENT_ENABLE_BLURBEHIND(3)。
+    参考: 用户本科项目(Qt5, areo.h)验证过的经典方案; Win11 22H2+ 需实测。
+    成功返回 True(调用方可跳过自绘 AcrylicBackdrop); 失败返回 False。
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        class ACCENT_POLICY(ctypes.Structure):
+            _fields_ = [("AccentState", ctypes.c_uint), ("AccentFlags", ctypes.c_uint),
+                        ("GradientColor", ctypes.c_uint), ("AnimationId", ctypes.c_uint)]
+
+        class WCADATA(ctypes.Structure):
+            _fields_ = [("Attrib", ctypes.c_int), ("Data", ctypes.c_void_p),
+                        ("SizeOfData", ctypes.c_size_t)]
+
+        accent = ACCENT_POLICY(3, 0, 0, 0)   # ACCENT_ENABLE_BLURBEHIND
+        data = WCADATA(19, ctypes.addressof(accent), ctypes.sizeof(accent))
+        fn = ctypes.windll.user32.SetWindowCompositionAttribute
+        hwnd = int(window.winId())
+        return bool(fn(hwnd, ctypes.byref(data)))
     except Exception:
         return False
 

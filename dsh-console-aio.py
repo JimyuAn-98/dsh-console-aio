@@ -23,7 +23,7 @@ from PySide6.QtGui import QTextCursor, QColor, QCursor
 
 from core import data as dsh_data
 from app.services import DshService
-from ui.theme import build_qss, apply_window_effects
+from ui.theme import build_qss, apply_window_effects, try_system_blur
 from ui.acrylic import AcrylicBackdrop
 
 if getattr(sys, 'frozen', False):
@@ -339,6 +339,9 @@ class MainWindow(QMainWindow):
         self._backdrop = None                  # 自绘亚克力背景(分层窗口时启用)
         # 平台窗口效果(Win11 22H2+ 分层透明; 失败自动回退纯 QSS)
         self._mica = apply_window_effects(self)
+        # 优先系统级模糊(SetWindowCompositionAttribute, 本科项目验证过的经典方案);
+        # 失败则回退自绘 AcrylicBackdrop(抓壁纸层模糊)
+        self._sys_blur = try_system_blur(self) if self._mica else False
         self.setStyleSheet(self._load_theme())
 
         self._current_page_key = None
@@ -392,10 +395,14 @@ class MainWindow(QMainWindow):
             if sys.platform == "win32":
                 QTimer.singleShot(800, self._log_window_facts)
             if self._mica:
-                # 自绘亚克力底层背景(抓屏模糊+着色); 放最底层, 面板 rgba 透出
-                self._backdrop = AcrylicBackdrop(self)
-                self._backdrop.lower()
-                QTimer.singleShot(250, self._backdrop.refresh)
+                if self._sys_blur:
+                    self.loge("模糊: 系统级(ACCENT_ENABLE_BLURBEHIND)", "ok")
+                else:
+                    # 自绘亚克力底层背景(抓屏模糊+着色); 放最底层, 面板 rgba 透出
+                    self.loge("模糊: 系统级失败, 回退自绘", "warn")
+                    self._backdrop = AcrylicBackdrop(self)
+                    self._backdrop.lower()
+                    QTimer.singleShot(250, self._backdrop.refresh)
 
     # ---- 主题(主题引擎 ui/theme.py, token 驱动) ----
     def _load_theme(self):
