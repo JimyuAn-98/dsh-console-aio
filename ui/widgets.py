@@ -113,10 +113,13 @@ class ModernList(QListWidget):
         return self.row_data(self.currentRow())
 
 
-def three_split(left, mid, right, widths=(300, 430, 360)):
-    # 页面三栏(列表|详情|配置): 可拖拽 QSplitter; 手柄样式沿用全局 QSplitter::handle 规则
+def three_split(left, mid, right, widths=(300, 430, 360), mins=(250, 320, 340)):
+    # 页面三栏(列表|详情|配置): 可拖拽 QSplitter; 手柄样式沿用全局 QSplitter::handle 规则。
+    # mins = 每栏固定最小宽度: 某栏内容再宽也不压缩其他栏(QSplitter 缩不破最小值),
+    # 拖宽某栏时由其右侧各栏吸收(QSplitter 拖拽语义即"向右变")。
     sp = QSplitter(Qt.Orientation.Horizontal, objectName="pageSplit")
-    for w in (left, mid, right):
+    for w, mn in zip((left, mid, right), mins):
+        w.setMinimumWidth(mn)
         sp.addWidget(w)
         sp.setCollapsible(sp.indexOf(w), False)
     sp.setSizes(list(widths))

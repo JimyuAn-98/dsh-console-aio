@@ -158,8 +158,10 @@ class PluginPage(BasePage):
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(6)
         self._d_name = QLabel("-", objectName="cardTitle")
+        self._d_name.setWordWrap(True)   # 长插件名不撑大栏最小宽度
         self._d_badges = QLabel("")
         self._d_badges.setTextFormat(Qt.RichText)
+        self._d_badges.setWordWrap(True)   # 徽章行换行, 否则整行宽成为栏最小宽度挤压其他栏
         self._d_badges.setTextInteractionFlags(Qt.TextSelectableByMouse)
         dv.addWidget(self._d_name)
         dv.addWidget(self._d_badges)

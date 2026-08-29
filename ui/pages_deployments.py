@@ -177,7 +177,7 @@ class DeploymentPage(BasePage):
             card_wrap("部署列表（本机 + config.json deployments）", self._make_list()),
             self._make_detail_card(),
             self._make_oplog_card(),
-            widths=(280, 360, 330))
+            widths=(280, 360, 330), mins=(280, 340, 340))
 
         # ── 操作区 ──
         btns = QHBoxLayout()
