@@ -283,6 +283,42 @@ class RightBar(QFrame):
 
 
 
+# ---------------- 自绘标题栏(无边框窗口): 手动拖拽 + 双击最大化 ----------------
+# 不用 HTCAPTION: 分层(WS_EX_LAYERED)窗口上 WM_NCHITTEST 拖拽不可靠(实测), 手动
+# mouse 事件纯 Qt 实现; 控件(按钮/下拉)自己消费点击, 空白/标签区自然冒泡到本栏。
+class _TopBar(QFrame):
+    def __init__(self, win, parent=None):
+        super().__init__(parent)
+        self.setObjectName("topbar")
+        self._win = win
+        self._drag = None
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and not self._win._maxed:
+            self._drag = e.globalPosition().toPoint() - self._win.frameGeometry().topLeft()
+            e.accept()
+        else:
+            super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._drag is not None:
+            self._win.move(e.globalPosition().toPoint() - self._drag)
+            e.accept()
+        else:
+            super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        self._drag = None
+        super().mouseReleaseEvent(e)
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._win._toggle_maximize()
+            e.accept()
+        else:
+            super().mouseDoubleClickEvent(e)
+
+
 # ---------------- 主窗口 ----------------
 class MainWindow(QMainWindow):
     def __init__(self, smoke=False):
@@ -297,6 +333,8 @@ class MainWindow(QMainWindow):
         self.resize(1160, 800)
         self.setMinimumSize(960, 620)
         self._normal_geo = None                # 最大化前几何(还原用)
+        self._maxed = False                    # 自维护最大化状态(setGeometry 伪最大化)
+        self._btn_max = None                   # 最大化按钮(图标切换 □/❐)
         # 平台窗口效果(Win11 22H2+ 分层 + Mica; 失败自动回退纯 QSS)
         self._mica = apply_window_effects(self)
         self.setStyleSheet(self._load_theme())
@@ -349,6 +387,8 @@ class MainWindow(QMainWindow):
             else:
                 theme_txt = "纯 QSS"
             self.loge("DSH Console 已启动(v" + APP_VERSION + ") · 主题: " + theme_txt, "ok")
+            if sys.platform == "win32":
+                QTimer.singleShot(800, self._log_window_facts)
 
     # ---- 主题(主题引擎 ui/theme.py, token 驱动) ----
     def _load_theme(self):
@@ -371,7 +411,7 @@ class MainWindow(QMainWindow):
 
     # ---- 顶部栏 ----
     def _build_topbar(self):
-        bar = QFrame(objectName="topbar")
+        bar = _TopBar(self)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(16, 10, 16, 10)
         lay.setSpacing(10)
@@ -407,27 +447,44 @@ class MainWindow(QMainWindow):
         # 无边框窗口控制按钮(自绘标题栏; 仅 Windows 无边框模式)
         if self._frameless:
             btn_min = QPushButton("—", objectName="winBtn")
-            btn_max = QPushButton("□", objectName="winBtn")
+            self._btn_max = QPushButton("□", objectName="winBtn")
             btn_close = QPushButton("×", objectName="winBtnClose")
             btn_min.clicked.connect(self.showMinimized)
-            btn_max.clicked.connect(self._toggle_maximize)
+            self._btn_max.clicked.connect(self._toggle_maximize)
             btn_close.clicked.connect(self.close)
-            for b in (btn_min, btn_max, btn_close):
+            for b in (btn_min, self._btn_max, btn_close):
                 b.setFixedSize(34, 28)
                 lay.addWidget(b)
         return bar
 
-    # ---- 无边框窗口: 最大化/还原 + Windows 原生命中测试(拖拽/边缘拉伸) ----
+    # ---- 无边框窗口: 最大化/还原(自维护状态, setGeometry 伪最大化不可靠) ----
     def _toggle_maximize(self):
-        if self.isMaximized():
-            self.showNormal()
-            if self._normal_geo is not None:
-                self.setGeometry(self._normal_geo)
+        if self._maxed:
+            self.setGeometry(self._normal_geo)
+            self._maxed = False
+            self._btn_max.setText("□")
         else:
             self._normal_geo = self.geometry()
             scr = self.screen() or QApplication.primaryScreen()
             if scr is not None:
                 self.setGeometry(scr.availableGeometry())
+            self._maxed = True
+            self._btn_max.setText("❐")
+
+    def _log_window_facts(self):
+        # 启动后诊断: 分层窗口/DPI/DWM backdrop 实际状态(半透明排查用)
+        try:
+            hwnd = int(self.winId())
+            style = ctypes.windll.user32.GetWindowLongPtrW(hwnd, -20)
+            layered = bool(style & 0x80000)
+            dpi = ctypes.windll.user32.GetDpiForWindow(hwnd)
+            v = ctypes.c_int(0)
+            r = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+                hwnd, 38, ctypes.byref(v), ctypes.sizeof(v))
+            self.loge("窗口: 分层=%s DWM-backdrop=%d DPI=%d"
+                      % ("开" if layered else "关", v.value if r == 0 else -1, dpi), "ok")
+        except Exception as e:
+            self.loge("窗口诊断失败: %s" % e, "err")
 
     def nativeEvent(self, eventType, message):
         # WM_NCHITTEST: 标题栏空白区拖拽(HTCAPTION), 边缘 6px 拉伸, 控件区放行。
@@ -442,9 +499,9 @@ class MainWindow(QMainWindow):
                     x = ctypes.c_short(msg.lParam & 0xFFFF).value / dpr
                     y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value / dpr
                     geo = self.geometry()  # 逻辑坐标
-                    if self.isMaximized():
-                        # 最大化时标题栏仍可拖拽(触发系统还原)
-                        return True, (2 if y <= geo.y() + 52 else 1)
+                    if self._maxed:
+                        # 最大化时不拉伸(热区关闭); 标题栏拖拽由 _TopBar 手动处理
+                        return True, 1
                     ex, ey, ew, eh = geo.x(), geo.y(), geo.width(), geo.height()
                     EDGE = 6
                     left = x <= ex + EDGE
@@ -468,12 +525,9 @@ class MainWindow(QMainWindow):
                     elif bottom:
                         hit = 15
                     elif y <= ey + 52:
-                        # 标题栏: 交互控件放行(HTCLIENT), 空白/标题区可拖拽(HTCAPTION)
-                        w = self.childAt(self.mapFromGlobal(QPoint(round(x), round(y))))
-                        if w is None or w is self or w.objectName() in ("titleLbl", "verLbl"):
-                            hit = 2
-                        else:
-                            hit = 1
+                        # 标题栏区: 统一 HTCLIENT, 拖拽由 _TopBar 手动 mouse 事件处理
+                        # (分层窗口上 HTCAPTION 不可靠, 实测)
+                        hit = 1
                     else:
                         hit = 1
                     return True, hit
