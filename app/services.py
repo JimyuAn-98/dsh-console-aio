@@ -251,10 +251,15 @@ class DshService(QObject):
     @classmethod
     def from_env(cls, base_dir=None, parent=None):
         # base_dir 默认取仓库根(config 同目录)。config 走 DSH_AIO_CONFIG(与主程序一致)。
-        import os
+        # 打包运行(onefile)时 __file__ 在临时解压目录, 而 TunnelManager 的 PID 文件等
+        # 需要跨启动持久化 —— base_dir 必须落在 exe 所在安装目录(与主程序 BASE_DIR 同规则)。
+        import os, sys
         if base_dir is None:
-            here = os.path.dirname(os.path.abspath(__file__))
-            base_dir = os.path.dirname(here)  # 仓库根
+            if getattr(sys, "frozen", False):
+                base_dir = os.path.dirname(os.path.abspath(sys.executable))
+            else:
+                here = os.path.dirname(os.path.abspath(__file__))
+                base_dir = os.path.dirname(here)  # 仓库根
         return cls(base_dir, config_path=os.environ.get("DSH_AIO_CONFIG"), parent=parent)
 
 

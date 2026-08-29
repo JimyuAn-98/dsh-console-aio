@@ -1237,6 +1237,22 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     smoke = "--smoke" in sys.argv
+    if "--diag-config" in sys.argv:
+        # 配置诊断(打包调试用): 打印实际生效的解析链路。只输出键名/计数, 不输出值(防真实 IP 入日志)。
+        from core import config as dsh_config
+        print("sys.frozen =", getattr(sys, "frozen", False))
+        print("sys.executable =", sys.executable)
+        print("cwd =", os.getcwd())
+        print("env.DSH_AIO_CONFIG =", os.environ.get("DSH_AIO_CONFIG"))
+        p = dsh_config.default_config_path()
+        print("default_config_path =", p)
+        print("config exists =", os.path.isfile(p))
+        cfg = dsh_config.load_config(None)
+        print("load_config keys =", len(cfg), sorted(cfg.keys())[:8])
+        der = dsh_config.load_derived(None)
+        print("derived dash_port =", der.get("dash_port"))
+        print("derived local_ports =", der.get("local_ports"))
+        return 0
     w = MainWindow(smoke=smoke)
     if smoke:
         # 离屏冒烟: 构造即返回, 不进入事件循环
