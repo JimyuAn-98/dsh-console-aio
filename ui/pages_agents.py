@@ -128,7 +128,10 @@ class AgentPage(BasePage):
             ["名称", "描述", "文件数"], ["w", "w", "center"],
             [150, 210, 60], stretch_col=0)
         self._table.itemSelectionChanged.connect(self._on_select)
-        body.addWidget(self._wrap_table("现有模式", self._table), 1)
+        # 左栏固定宽度(两栏互不挤压); 右栏吃剩余空间, 长内容由文本框内部横向滚动消化
+        left_card = self._wrap_table("现有模式", self._table)
+        left_card.setFixedWidth(420)
+        body.addWidget(left_card)
 
         right = QFrame(objectName="card")
         rv = QVBoxLayout(right)
@@ -136,6 +139,7 @@ class AgentPage(BasePage):
         rv.setSpacing(4)
         rv.addWidget(QLabel("preset.yml（只读）", objectName="rightTitle"))
         self._info_lbl = QLabel("请在左侧选择一个模式", objectName="monName")
+        self._info_lbl.setWordWrap(True)   # 长说明换行, 不撑大右栏最小宽度
         rv.addWidget(self._info_lbl)
         self._detail_text = QPlainTextEdit()
         self._detail_text.setReadOnly(True)
@@ -143,7 +147,7 @@ class AgentPage(BasePage):
         self._detail_text.setLineWrapMode(QPlainTextEdit.NoWrap)
         self._detail_text.setPlainText("请在左侧选择一个模式")
         rv.addWidget(self._detail_text, 1)
-        body.addWidget(right, 2)
+        body.addWidget(right, 1)
 
         btns = QHBoxLayout()
         self._btn_open = QPushButton("打开 .agent-presets 目录")
