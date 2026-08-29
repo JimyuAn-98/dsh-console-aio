@@ -5,6 +5,17 @@
 
 ## v0.6.0 (2026-08-30)
 
+### 发版工程修复（首次 CI 全流程跑通暴露, 已全部修复并真机验证）
+
+- **CI 打包链**：补装运行依赖（PySide6/zstandard, 缺失被 PyInstaller 静默跳过→exe 启动
+  即 ModuleNotFoundError）；补 `pages_logs/pages_settings` hidden-import（懒加载页面分析
+  不到）；补 `ui/theme.qss` 资源；exe 落到 iss 期望的 installer/dist、产物上传路径同步；
+  免安装版停发, 安装包文件名带版本号
+- **打包运行路径**（BUG-009）：config.json/隧道 PID 文件在 onefile 下写进临时解压目录
+  （退出即失）；统一改为 exe 所在安装目录（安装到用户可写目录, 就地保存）
+- 新增 `--diag-config` 配置解析诊断开关；conda 环境本地打包需把 `Library\bin` 加 PATH
+  （ffi.dll 入包）已写入打包注意事项
+
 ### Agent 模式页对齐部署管理风格 + 备份运维页去重
 
 - **Agent 模式页**：旧双表格布局改为与部署管理页同款——左栏窄列表（ModernList，按名字
