@@ -25,6 +25,38 @@ from core import data as dsh_data
 from app.services import DshService
 from ui.theme import build_qss, apply_window_effects, try_system_blur
 
+# 白色齿轮 SVG(内嵌, 无需打包资源文件; QSvgRenderer 渲染为 QIcon)
+_GEAR_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e6e6e6">'
+             '<path d="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 '
+             '-0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 '
+             '-0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81'
+             'c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35'
+             'C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87'
+             'C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 '
+             '0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 '
+             '0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 '
+             '0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 '
+             '1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 '
+             '-0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6'
+             's3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z"/></svg>')
+
+
+def _svg_icon(svg_text, size):
+    # SVG 字符串 -> QIcon(内嵌图标, 免资源文件; QtSvg 缺失时返回 None 由调用方兜底)
+    try:
+        from PySide6.QtCore import QByteArray
+        from PySide6.QtGui import QIcon, QPainter, QPixmap
+        from PySide6.QtSvg import QSvgRenderer
+        r = QSvgRenderer(QByteArray(svg_text.encode("utf-8")))
+        pm = QPixmap(size, size)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        r.render(p)
+        p.end()
+        return QIcon(pm)
+    except Exception:
+        return None
+
 if getattr(sys, 'frozen', False):
     # onefile exe: 用户可见/可写的数据目录 = exe 所在目录(放 config.json 便于分发后编辑)。
     BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
@@ -257,7 +289,12 @@ class RightBar(QFrame):
         head.addWidget(t)
         head.addStretch(1)
         if on_settings:
-            btn_set = QPushButton("⚙", objectName="collapseBtn")
+            btn_set = QPushButton(objectName="collapseBtn")
+            icon = _svg_icon(_GEAR_SVG, 16)
+            if icon is not None:
+                btn_set.setIcon(icon)
+            else:
+                btn_set.setText("⚙")
             btn_set.setFixedSize(24, 22)
             btn_set.setToolTip("监控设置(端口/命名)")
             btn_set.clicked.connect(on_settings)
@@ -342,7 +379,7 @@ class MiniStatusStrip(QFrame):
     def __init__(self, on_expand=None, parent=None):
         super().__init__(parent)
         self.setObjectName("miniStrip")
-        self.setFixedWidth(44)
+        self.setFixedWidth(140)              # 收起态宽度(能放下备注文字)
         self._on_expand = on_expand
         v = QVBoxLayout(self)
         v.setContentsMargins(4, 6, 4, 6)
@@ -371,25 +408,26 @@ class MiniStatusStrip(QFrame):
         self._clear_layout(self._content)
         local = cfg.get("local_name") or "本机"
         ssh = cfg.get("ssh_name") or "公网中转"
-        # 与右栏同构: 分组中文间隔 + 同顺序的「状态点+端口号」(点/号左对齐, 位置一致)
-        self._rows = {}   # ("L"|"R", port) -> (dot, num)
+        # 与右栏同构: 分组中文间隔 + 「状态灯+备注」(备注为空兜底 名称->端口号);
+        # 正文字体与展开右栏一致(12px), 分组标题小一号(9px)
+        self._rows = {}   # ("L"|"R", port) -> (dot, text)
         for tag, title, ports in (("L", local + "端口", cfg.get("local_ports", [])),
                                   ("R", ssh, cfg.get("remote_tunnels", []))):
             if not ports:
                 continue
             sec = QLabel(title, objectName="miniSection")
             self._content.addWidget(sec, 0, Qt.AlignLeft)
-            for port, _, _ in ports:
+            for port, label, note in ports:
                 row = QHBoxLayout()
-                row.setSpacing(3)
+                row.setSpacing(5)
                 dot = QLabel("●", objectName="miniDot")
                 dot.setStyleSheet("color:#555;")
-                num = QLabel(str(port), objectName="miniNum")
+                text = QLabel(note or label or str(port), objectName="miniNum")
+                text.setWordWrap(False)
                 row.addWidget(dot)
-                row.addWidget(num)
-                row.addStretch(1)
+                row.addWidget(text, 1)
                 self._content.addLayout(row)
-                self._rows[(tag, port)] = (dot, num)
+                self._rows[(tag, port)] = (dot, text)
         self._content.addStretch(1)
 
     def reload(self, cfg):
@@ -420,7 +458,7 @@ class StatusPanel(QFrame):
     def __init__(self, on_settings=None, parent=None):
         super().__init__(parent)
         self.setObjectName("statusPanel")
-        self.setMinimumWidth(44)
+        self.setMinimumWidth(210)
         self.setMaximumWidth(280)
         self._mini = MiniStatusStrip(on_expand=self.expand)
         self.right = RightBar(on_collapse=self.collapse, on_settings=on_settings)
@@ -443,10 +481,10 @@ class StatusPanel(QFrame):
         # 先动画(RightBar 保持可见被压缩), 动画结束时才切换窄条 —— 避免动画期间
         # 面板区域露空(露出页面底色)
         self._target = "collapsed"
-        self._start_anim(44)
+        self._start_anim(140)
 
     def expand(self):
-        # 先切回全量(44px 处开始压缩态), 再动画展开 —— 窄条不参与展开动画
+        # 先切回全量(140px 处开始压缩态), 再动画展开 —— 窄条不参与展开动画
         self._target = "expanded"
         self._swap_to_right()
         self._start_anim(240)
@@ -476,9 +514,9 @@ class StatusPanel(QFrame):
 
     def _on_anim_done(self):
         if self._target == "collapsed":
-            self.setMinimumWidth(44)
-            self.setMaximumWidth(44)     # 钉死窄条
-            self._swap_to_mini()         # 44px 处无缝替换为窄条
+            self.setMinimumWidth(140)
+            self.setMaximumWidth(140)     # 钉死窄条
+            self._swap_to_mini()         # 140px 处无缝替换为窄条
         elif self._target == "expanded":
             self.setMinimumWidth(210)
             self.setMaximumWidth(280)

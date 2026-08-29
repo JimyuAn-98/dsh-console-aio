@@ -106,9 +106,9 @@ QFrame#statusPanel {{ border: none; }}
 
 /* 右栏收起窄条(隧道状态迷你视图) */
 QFrame#miniStrip {{ background: {bg_panel}; border-left: 1px solid {t["border"]}; }}
-QLabel#miniDot {{ font-size: 8px; }}
-QLabel#miniNum {{ color: {t["text_dim"]}; font-size: 9px; }}
-QLabel#miniSection {{ color: #6a6a80; font-size: 8px; padding-top: 5px; }}
+QLabel#miniDot {{ font-size: 10px; }}
+QLabel#miniNum {{ color: {t["text"]}; font-size: 12px; }}
+QLabel#miniSection {{ color: #6a6a80; font-size: 9px; padding-top: 5px; }}
 QPushButton#collapseBtn {{
     background: transparent; border: 1px solid transparent; border-radius: {t["radius_sm"]};
     padding: 0; color: {t["text_dim"]}; font-size: 13px;
