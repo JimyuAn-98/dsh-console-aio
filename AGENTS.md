@@ -13,7 +13,7 @@ dsh-console-aio — PySide6（Qt）Windows GUI，面向 dsh 用户的"控制台"
 > 用户反复强调的 4 条方法论，所有改动（含批量 subagent 任务）必须遵守。
 
 1. **文档工作一定要做全**：
-   功能/方案变更同步更新 docs/PLANS.md、RELEASE_NOTES.md、README；
+   功能/方案变更同步更新 docs/ROADMAP.md（路线/状态）、RELEASE_NOTES.md、README；
    关键决策写 .agents/notes；不留下没有文档的改动。
 2. **框架性的东西一定在最开始就定好**：
    写业务字段/页面/模块之前，先定好架构、接口、页面范式；不在中途改框架。
@@ -35,7 +35,8 @@ ui/                 前端页面包（pages_*.py: 会话/Agent/Profile/插件/�
 app/                信号桥层（services.py: DshService, 唯一起后台线程并转 Qt 信号）
 tools/              工具（dump_ui.py 离屏渲染 dump）
 tests/              pytest 测试（纯单元默认跑; 构造 MainWindow 的测试须 -m gui 人工）
-docs/               文档（ARCHITECTURE.md 架构 + UI_LAYERING.md 分层契约 + TESTING.md + PLANS.md）
+docs/               文档（ROADMAP.md 路线 + ARCHITECTURE.md 架构 + UI_LAYERING.md 分层契约 +
+                    TESTING.md + BUGS.md 问题清单 + PLANS.md 历史归档 + VISION 愿景探索）
 installer/          Inno Setup 安装脚本(installer.iss) + 语言文件
 legacy/             旧 .ps1 / 旧 tkinter 主程序（只读历史参考，不再调用）
 .agents/notes/      Agent Note 决策记录（见 .agents/notes/README.md）
@@ -98,7 +99,8 @@ installer/installer.iss                                      # Inno Setup 安装
 
 ## 文档
 
-- 功能/方案变更：同步更新 docs/PLANS.md（第 7 节功能全景 + 状态）与 RELEASE_NOTES.md；README 中英文同步。
+- 功能/方案变更：同步更新 docs/ROADMAP.md（路线与状态）与 RELEASE_NOTES.md；README 中英文同步。
+  历史方案归档进 docs/PLANS.md，已知问题进 docs/BUGS.md。
 - 关键决策（为什么 + 放弃了什么）：写 .agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic.md，格式见 .agents/notes/README.md。
 - 已归档的 note 视为冻结：不编辑、不作为当前权威。
 
