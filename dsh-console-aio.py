@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
     QComboBox, QFrame, QSizePolicy, QAbstractItemView,
-    QMessageBox, QToolTip)
-from PySide6.QtCore import Qt, Signal, QObject, QTimer, QEvent, QPoint
+    QMessageBox, QToolTip, QSplitter, QStackedLayout)
+from PySide6.QtCore import Qt, Signal, QObject, QTimer, QEvent, QPoint, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QTextCursor, QColor, QCursor
 
 from core import data as dsh_data
@@ -225,13 +225,26 @@ class OverviewPage(BasePage):
 
 # ---------------- 右状态栏(监控点) ----------------
 class RightBar(QFrame):
-    def __init__(self, parent=None):
+    def __init__(self, on_collapse=None, parent=None):
         super().__init__(parent)
         self.setObjectName("rightBar")
-        self.setFixedWidth(240)
+        self.setMinimumWidth(210)
+        self.setMaximumWidth(280)
         v = QVBoxLayout(self)
         v.setContentsMargins(12, 12, 12, 12)
         v.setSpacing(8)
+
+        head = QHBoxLayout()
+        t = QLabel("监控", objectName="rightTitle")
+        btn = QPushButton("«", objectName="collapseBtn")
+        btn.setFixedSize(24, 22)
+        btn.setToolTip("收起为窄条")
+        if on_collapse:
+            btn.clicked.connect(on_collapse)
+        head.addWidget(t)
+        head.addStretch(1)
+        head.addWidget(btn)
+        v.addLayout(head)
 
         self._add_section("本机端口")
         self._cells = {}
@@ -280,6 +293,111 @@ class RightBar(QFrame):
         else:
             val.setText("未就绪")
         val.setStyleSheet("color:%s;" % color)
+
+
+# ---------------- 右栏收起窄条(隧道状态迷你视图) ----------------
+class MiniStatusStrip(QFrame):
+    """右栏收起态: 每行「状态点 + 端口号」, 通断一目了然; 点击任意处展开。"""
+
+    def __init__(self, on_expand=None, parent=None):
+        super().__init__(parent)
+        self.setObjectName("miniStrip")
+        self.setFixedWidth(44)
+        self._on_expand = on_expand
+        v = QVBoxLayout(self)
+        v.setContentsMargins(4, 6, 4, 6)
+        v.setSpacing(4)
+        if on_expand:
+            btn = QPushButton("»", objectName="collapseBtn")
+            btn.setFixedSize(26, 22)
+            btn.setToolTip("展开状态栏")
+            btn.clicked.connect(on_expand)
+            v.addWidget(btn, 0, Qt.AlignHCenter)
+        self._rows = {}   # ("L"|"R", port) -> (dot, num)
+        for tag, ports in (("L", CONFIG.get("local_ports", [])),
+                           ("R", CONFIG.get("remote_tunnels", []))):
+            for port, _, _ in ports:
+                row = QHBoxLayout()
+                row.setSpacing(3)
+                dot = QLabel("●", objectName="miniDot")
+                dot.setStyleSheet("color:#555;")
+                num = QLabel(str(port), objectName="miniNum")
+                row.addWidget(dot)
+                row.addWidget(num)
+                row.addStretch(1)
+                v.addLayout(row)
+                self._rows[(tag, port)] = (dot, num)
+        v.addStretch(1)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and self._on_expand:
+            self._on_expand()
+        super().mousePressEvent(e)
+
+    def update_states(self, local, remote):
+        # 与 RightBar 同一数据源(monitor 探测结果): 本机端口 + 远程隧道通断。
+        for (tag, port), (dot, num) in self._rows.items():
+            if tag == "L":
+                ok = bool(local and local.get(port, (False, -1))[0])
+            else:
+                if remote is None:
+                    ok = None          # 探测无数据 -> 保持灰
+                else:
+                    ok = bool(remote.get(port, False))
+            color = "#43d17f" if ok is True else ("#e5574d" if ok is False else "#555")
+            dot.setStyleSheet("color:%s;" % color)
+
+
+class StatusPanel(QFrame):
+    """右栏容器: 全量 RightBar <-> 窄条 MiniStatusStrip, 展开/收起带宽度动画。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("statusPanel")
+        self.setMinimumWidth(44)
+        self.setMaximumWidth(280)
+        self._mini = MiniStatusStrip(on_expand=self.expand)
+        self.right = RightBar(on_collapse=self.collapse)
+        self._stack = QStackedLayout(self)
+        self._stack.addWidget(self.right)
+        self._stack.addWidget(self._mini)
+        self._stack.setCurrentWidget(self.right)
+        self._anim = QPropertyAnimation(self, b"maximumWidth", self)
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.finished.connect(self._on_anim_done)
+        self._target = None
+
+    def collapse(self):
+        self._target = "collapsed"
+        self.setMinimumWidth(0)          # 松开下限, 让 max 动画能缩到 44
+        self._stack.setCurrentWidget(self._mini)
+        self._anim.stop()
+        self._anim.setStartValue(self.width())
+        self._anim.setEndValue(44)
+        self._anim.start()
+
+    def expand(self):
+        self._target = "expanded"
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(280)
+        self._stack.setCurrentWidget(self.right)
+        self._anim.stop()
+        self._anim.setStartValue(self.width())
+        self._anim.setEndValue(240)
+        self._anim.start()
+
+    def _on_anim_done(self):
+        if self._target == "collapsed":
+            self.setMinimumWidth(44)
+            self.setMaximumWidth(44)     # 钉死窄条(分栏不可再拖)
+        elif self._target == "expanded":
+            self.setMinimumWidth(210)
+            self.setMaximumWidth(280)
+        self._target = None
+
+    def update_states(self, local, remote):
+        self._mini.update_states(local, remote)
 
 
 
@@ -586,7 +704,8 @@ class MainWindow(QMainWindow):
         lay.setSpacing(0)
 
         self.nav = QListWidget(objectName="nav")
-        self.nav.setFixedWidth(172)
+        self.nav.setMinimumWidth(140)
+        self.nav.setMaximumWidth(320)
         self.nav.setSelectionMode(QAbstractItemView.SingleSelection)
         for label, _ in NAV_ITEMS:
             self.nav.addItem(QListWidgetItem(label))
@@ -595,14 +714,23 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget(objectName="pageHostBg")
 
-        lay.addWidget(self.nav)
-        lay.addWidget(self.stack, 1)
-        lay.addWidget(self._build_right())
+        # 分栏(可拖拽): 左导航 | 页面 | 右状态栏(可收起为窄条)
+        splitter = QSplitter(Qt.Orientation.Horizontal, objectName="mainSplit")
+        splitter.addWidget(self.nav)
+        splitter.addWidget(self.stack)
+        splitter.addWidget(self._build_right())
+        splitter.setStretchFactor(1, 1)
+        for i in range(3):
+            splitter.setCollapsible(i, False)
+        splitter.setSizes([172, 700, 240])
+
+        lay.addWidget(splitter)
         return body
 
     def _build_right(self):
-        self.right = RightBar()
-        return self.right
+        self._status_panel = StatusPanel()
+        self.right = self._status_panel.right
+        return self._status_panel
 
     # ---- 日志区 ----
     def _build_log(self):
@@ -810,6 +938,7 @@ class MainWindow(QMainWindow):
     def _apply_monitor(self, local, ssh_count, remote):
         # 主线程 UI 更新(无 IO): 右侧栏单元格配色 + 底部状态栏汇总 + 隧道卡片状态同步
         self._sync_card_states(local, remote)
+        self._status_panel.update_states(local, remote)
         for port, (ok, ms) in (local or {}).items():
             if port == "__ssh__":
                 continue

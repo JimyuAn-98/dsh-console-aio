@@ -97,6 +97,22 @@ QPushButton#winBtn {{
 }}
 QPushButton#winBtn:hover {{ background: rgba(255, 255, 255, 0.12); color: {t["text"]}; border-color: transparent; }}
 QPushButton#winBtnClose:hover {{ background: #e81123; color: #ffffff; border-color: #e81123; }}
+
+/* 分栏(可拖拽) */
+QSplitter::handle {{ background: transparent; }}
+QSplitter::handle:hover {{ background: rgba(79, 110, 247, 0.30); }}
+QSplitter::handle:horizontal {{ width: 3px; }}
+QFrame#statusPanel {{ border: none; }}
+
+/* 右栏收起窄条(隧道状态迷你视图) */
+QFrame#miniStrip {{ background: {bg_panel}; border-left: 1px solid {t["border"]}; }}
+QLabel#miniDot {{ font-size: 8px; }}
+QLabel#miniNum {{ color: {t["text_dim"]}; font-size: 9px; }}
+QPushButton#collapseBtn {{
+    background: transparent; border: 1px solid transparent; border-radius: {t["radius_sm"]};
+    color: {t["text_dim"]}; font-size: 13px;
+}}
+QPushButton#collapseBtn:hover {{ background: rgba(255, 255, 255, 0.12); color: {t["text"]}; border-color: transparent; }}
 QComboBox#deploy {{
     background: #2f2f45; border: 1px solid {t["border_strong"]}; border-radius: {t["radius_sm"]};
     padding: 4px 10px; min-width: 130px; color: {t["text"]};
