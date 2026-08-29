@@ -379,7 +379,7 @@ class MiniStatusStrip(QFrame):
     def __init__(self, on_expand=None, parent=None):
         super().__init__(parent)
         self.setObjectName("miniStrip")
-        self.setFixedWidth(140)              # 收起态宽度(能放下备注文字)
+        self.setFixedWidth(120)              # 收起态宽度(状态灯+名字)
         self._on_expand = on_expand
         v = QVBoxLayout(self)
         v.setContentsMargins(4, 6, 4, 6)
@@ -481,10 +481,10 @@ class StatusPanel(QFrame):
         # 先动画(RightBar 保持可见被压缩), 动画结束时才切换窄条 —— 避免动画期间
         # 面板区域露空(露出页面底色)
         self._target = "collapsed"
-        self._start_anim(140)
+        self._start_anim(120)
 
     def expand(self):
-        # 先切回全量(140px 处开始压缩态), 再动画展开 —— 窄条不参与展开动画
+        # 先切回全量(120px 处开始压缩态), 再动画展开 —— 窄条不参与展开动画
         self._target = "expanded"
         self._swap_to_right()
         self._start_anim(240)
@@ -514,9 +514,9 @@ class StatusPanel(QFrame):
 
     def _on_anim_done(self):
         if self._target == "collapsed":
-            self.setMinimumWidth(140)
-            self.setMaximumWidth(140)     # 钉死窄条
-            self._swap_to_mini()         # 140px 处无缝替换为窄条
+            self.setMinimumWidth(120)
+            self.setMaximumWidth(120)     # 钉死窄条
+            self._swap_to_mini()         # 120px 处无缝替换为窄条
         elif self._target == "expanded":
             self.setMinimumWidth(210)
             self.setMaximumWidth(280)
