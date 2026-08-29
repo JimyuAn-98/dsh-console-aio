@@ -98,9 +98,9 @@ QPushButton#winBtn {{
 QPushButton#winBtn:hover {{ background: rgba(255, 255, 255, 0.12); color: {t["text"]}; border-color: transparent; }}
 QPushButton#winBtnClose:hover {{ background: #e81123; color: #ffffff; border-color: #e81123; }}
 
-/* 分栏(可拖拽) */
-QSplitter::handle {{ background: transparent; }}
-QSplitter::handle:hover {{ background: rgba(79, 110, 247, 0.30); }}
+/* 分栏(可拖拽); 手柄必须有非零 alpha(分层窗口按 alpha 命中测试, 透明处鼠标会穿透) */
+QSplitter::handle {{ background: {bg_panel}; }}
+QSplitter::handle:hover {{ background: rgba(79, 110, 247, 0.35); }}
 QSplitter::handle:horizontal {{ width: 3px; }}
 QFrame#statusPanel {{ border: none; }}
 

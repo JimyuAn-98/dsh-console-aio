@@ -361,6 +361,7 @@ class StatusPanel(QFrame):
         self._stack = QStackedLayout(self)
         self._stack.addWidget(self.right)
         self._stack.addWidget(self._mini)
+        self._stack.setAlignment(self._mini, Qt.AlignRight)   # 收起动画时窄条贴右缘
         self._stack.setCurrentWidget(self.right)
         self._anim = QPropertyAnimation(self, b"maximumWidth", self)
         self._anim.setDuration(180)
@@ -844,9 +845,12 @@ class MainWindow(QMainWindow):
     # ---- 控件检查模式 ----
     def eventFilter(self, obj, event):
         # F12 开关; 开启时左键点击把控件完整路径打进日志区。
-        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_F12:
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_F12 \
+                and not event.isAutoRepeat():
             self._inspect = not self._inspect
-            self.set_status("控件检查模式: %s" % ("开" if self._inspect else "关"))
+            state = "开" if self._inspect else "关"
+            self.set_status("控件检查模式: " + state)
+            self.loge("控件检查模式: " + state, "warn")   # 日志区持久可见(状态栏会被监控覆盖)
             return False
         if self._inspect and event.type() == QEvent.Type.MouseButtonPress \
                 and event.button() == Qt.MouseButton.LeftButton:
