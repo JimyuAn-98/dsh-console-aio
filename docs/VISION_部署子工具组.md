@@ -75,3 +75,87 @@ tools/screenshot_ui.py         → 每轮 GUI 改动的验证工具（渲染 PNG
 2. 隧道规划器与 config.json 拓扑的关系（多套拓扑切换要不要一起做）
 3. GUI 现代化是否引入图标资源/字体（零依赖 vs 打包体积）
 4. "远程写操作"与现有红线（远程拒写）的关系——是放开一部分受控写，还是保持只读？
+
+---
+
+# 第二轮：用户新想法（2026-08-29 夜-晨）
+
+## 六、配置驱动的 UI（自定义监测端口 + 三处机器命名）
+
+**现状痛点**：config.json 的 local_ports/remote_tunnels 端口能改，但 GUI（右栏监控点、隧道卡片、
+部署下拉）是**启动时读 CONFIG 构建**的——改完必须重启才生效；"本机/实验室/远程服务器"名字是
+硬编码/半硬编码（ITEMS desc、RightBar label、部署列表），GUI 不跟随。
+
+**方向**：
+- **前提工程 = 配置热重载**（docs/PLANS.md 已有 [规划] 项）：CONFIG 从"模块级常量"变为"事件源"，
+  `configChanged` 信号 → 重建右栏监控点 / 隧道卡片 / 部署列表 / 监控探测点。这是"自定义一切"的地基。
+- **监测端口可自定义**：local_ports / remote_tunnels 在 GUI 内**增删改**（不只改端口号），
+  右侧栏、卡片圆点、监控探测全部跟随。
+- **三处机器命名进配置**：
+  - 本机：deployments[0].name（已有"本机"默认值）
+  - 实验室：lab_server/lab_user 增加 name 字段（如"实验室 204"）
+  - 中转服务器：ssh_server 增加 name 字段（如"公网中转"）
+  - ITEMS 卡片/右栏/日志里的硬编码"实验室/公网"字样全部改为取配置名。
+
+## 七、GUI 现代化（Mica / 光效 / 分栏 / 表格展开 / 品牌）
+
+### 7.1 深色亚克力 / Windows 11 深色 Mica
+- **Mica**：Win11 22H2+，经 ctypes 调 `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)`，
+  或直接用 [win32mica](https://github.com/marticliment/win32mica)（PyPI，已验证可用）。
+- **Acrylic**：`SetWindowCompositionAttribute`（Win10 1809+，注意性能开销）。
+- **回退策略**：旧系统/不可用 → 纯色深色 QSS（现有主题兜底），不崩不卡。
+- **主题引擎**：QSS 参数化（Python 生成），支持 Mica 深色 / 纯色深色 / 浅色切换。
+
+### 7.2 hover 光效
+- 方案 A（推荐主力）：QSS `::hover` 状态（边框渐变、光晕感渐变底色）——零成本、可批量。
+- 方案 B（点缀）：重点控件挂 `QGraphicsDropShadowEffect`（如主按钮/卡片选中态）——
+  ⚠️ 已知性能坑（Qt 论坛多次报告全控件滥用会卡），**只用于少量控件**。
+- 方案 C：自绘 paintEvent（最可控，成本最高）。
+
+### 7.3 可拖拽分栏 + 展开/收起动画
+- **QSplitter 原生支持拖拽**（现有布局可改造成 splitter 分栏：左导航 | 中栏 | 右栏，可拖拽调宽）。
+- 展开/收起：`QPropertyAnimation` 控制 splitter sizes 或控件尺寸，配快捷键（如 Ctrl+B 收左栏）。
+- **布局记忆**：分栏尺寸/展开状态持久化到 settings.yaml。
+
+### 7.4 表格页多栏展开风格
+- 方案：列表-详情-配置 **三栏**（QSplitter），或 QTreeView 可展开行（master-detail）。
+- 适用页面：插件（列表 → 配置详情）、会话（分组 → 会话 → 详情）、用量（模型 → 日期 → 明细）、
+  部署（清单 → 单机状态 → 日志）。
+
+### 7.5 插件管理对齐 dsh web
+- 现状：我们 plugins 页已有列表/启停/安装卸载（cordis insert/patch 视角）。
+- **补齐**：每个插件的**配置状态**（组合后 config 内容，只读展示）、**cordis 状态徽章**
+  （insert / patch / disabled / 缺失 / 异常）、与 dsh web 插件管理页逐项对齐
+  （实现时对照 D:\Applications\deepseek-harness 的 web 插件管理实现取数）。
+
+### 7.6 品牌：DSH 大写
+- 大标题 "**DSH Console / DSH 控制台**"，全 UI 文案统一大写 DSH（与 dsh web 一致），
+  标题栏/关于页/日志起始行同步。
+
+## 八、功能补充（我帮补的横向清单）
+
+1. **全局命令面板 Ctrl+K**：搜索页面/操作/隧道，键盘直达（OTP 式高效操作）。
+2. **配置导出/导入**：当前 config.json / 隧道拓扑 / 部署清单可导出为一份 JSON，GUI↔CLI 共享
+   （OTP 的 deploy.xml 思想；未来 CLI 模式 `dsh-console deploy --config xxx.json`）。
+3. **日志查看器**：web/隧道/控制台日志 tail + 过滤 + 着色（替代"打开文件"）。
+4. **数据可视化**：用量按模型/日期的图表（QtCharts 或自绘），会话明细钻取。
+5. **诊断报告一键生成**：环境 + 隧道连通性 + 远程部署状态 → 汇总报告（可复制/导出）。
+6. **托盘常驻 + 全局快捷键**：最小化到托盘，隧道状态托盘提示。
+7. **多主题切换**（Mica/纯色/浅色）+ 布局记忆（见上）。
+8. **远程部署子工具组**（第一轮愿景，不变）。
+
+## 九、技术可行性注记
+
+- Mica：win32mica（PyPI）/ DWM 属性，Win11 22H2+；回退方案必须有。
+- 动画：QPropertyAnimation（PySide6 官方支持）。
+- hover 光效：QSS ::hover 为主，QGraphicsDropShadowEffect 少量使用（性能教训：全控件滥用卡顿）。
+- 热重载：CONFIG 事件化（configChanged 信号 → 重建视图），中等重构，是 P0 前提。
+
+## 十、建议实施顺序（修订）
+
+- **P0（地基）**：配置热重载 + 三处命名进配置 + 监测点 GUI 编辑 —— 为"自定义一切"打底
+- **P1（外观）**：Mica/主题引擎 + hover 光效 + 分栏拖拽/动画 + 表格多栏展开 + DSH 品牌 —— 离屏渲染验证
+- **P2（功能对齐）**：插件管理增强（配置/cordis 状态）+ 日志查看器
+- **P3（进阶）**：命令面板 + 配置导出导入 + 诊断报告 + 图表
+- **P4（愿景主线）**：隧道规划器 + 远程部署子工具组
+
