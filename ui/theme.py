@@ -20,9 +20,9 @@ TOKENS = {
     # 当前 Mica 方案(非分层 + DWM backdrop)不使用。
     "bg_rgba": "rgba(30, 30, 46, 0.55)",
     "bg_elevated": "#252535",
-    "bg_elevated_rgba": "rgba(37, 37, 53, 0.65)",
+    "bg_elevated_rgba": "rgba(37, 37, 53, 0.55)",
     "bg_log": "#16161f",
-    "bg_log_rgba": "rgba(22, 22, 31, 0.80)",
+    "bg_log_rgba": "rgba(22, 22, 31, 0.75)",
     "bg_hover": "#2e2e44",
     "bg_active": "#2f3353",
     # 边框 / 强调

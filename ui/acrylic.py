@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (QApplication, QGraphicsBlurEffect,
 # 观感参数(调这里改效果)
 BLUR_RADIUS = 12      # 小图(1/3 尺寸)上的模糊半径, 等效全尺寸 ~36px
 DOWNSAMPLE = 3        # 抓取图缩小倍数(性能)
-TINT = QColor(18, 18, 30, 200)    # 深色亚克力着色(tint); 抓屏失败时也用它兜底(保持半透明)
+TINT = QColor(18, 18, 30, 150)    # 深色亚克力着色(tint); alpha 越浅, 模糊背景越明显
 
 
 class AcrylicBackdrop(QWidget):
