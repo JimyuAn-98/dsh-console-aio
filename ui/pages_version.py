@@ -38,8 +38,12 @@ class VersionPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("dsh-console-aio · 版本管理", objectName="cardTitle")
-        root.addWidget(title)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("dsh-console-aio · 版本管理", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
         hint = QLabel("检查更新读取 GitHub main 分支 version.json; "
                       "一键更新会下载代码并替换本地程序文件(自动备份)。",
                       objectName="cardHint")
@@ -87,8 +91,6 @@ class VersionPage(BasePage):
         lv.addWidget(self._log_text)
         root.addWidget(log_card, 1)
 
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
 
     # ---- 本地更新日志(离线可用, 小文件同步直读) ----
     def _load_local_log(self):

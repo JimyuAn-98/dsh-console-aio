@@ -13,9 +13,9 @@ from core import data as dsh_data
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit,
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit, QScrollArea,
     QPushButton, QMessageBox, QDialog, QLineEdit, QFormLayout,
-    QGridLayout)
+    QGridLayout, QWidget)
 
 from core import deployments as core_deployments
 from ui.base import BasePage
@@ -160,10 +160,16 @@ class DeploymentPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("部署管理（多部署只读总览）", objectName="cardTitle")
-        root.addWidget(title)
+        # 状态文字在标题右侧(原底部状态条位置让给横向滚动条)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("部署管理（多部署只读总览）", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
         hint = QLabel("部署信息只存本地 config.json；远程只读操作，写操作后续版本提供。",
                       objectName="cardHint")
+        hint.setWordWrap(True)
         root.addWidget(hint)
 
         # ── 三栏: 部署列表 | 详情 | 操作日志 ──
@@ -172,7 +178,6 @@ class DeploymentPage(BasePage):
             self._make_detail_card(),
             self._make_oplog_card(),
             widths=(280, 360, 330))
-        root.addWidget(mid, 1)
 
         # ── 操作区 ──
         btns = QHBoxLayout()
@@ -190,11 +195,20 @@ class DeploymentPage(BasePage):
         note = QLabel("本机不可删除；状态来自 deployment_snapshot(在线/离线/未测试)",
                       objectName="cardHint")
         btns.addWidget(note)
-        root.addLayout(btns)
 
-        # ── 页面内状态行 ──
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
+        # 三栏横向可扩展: 视口不足时出横向滚动条, 底部位置让给滚动条
+        mid.setMinimumWidth(1020)
+        content = QWidget()
+        cv = QVBoxLayout(content)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
+        cv.addWidget(mid, 1)
+        cv.addLayout(btns)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
 
     # ── 三栏构建(部署|详情|操作日志) ──
     def _make_list(self):

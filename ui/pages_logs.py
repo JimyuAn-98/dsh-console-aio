@@ -61,8 +61,13 @@ class LogsPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("日志管理", objectName="cardTitle")
-        root.addWidget(title)
+        # 状态文字在标题右侧(原底部状态条位置取消)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("日志管理", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
         root.addWidget(QLabel(
             "数据源: 控制台启动的 dsh web 输出(%TEMP%\\dsh-dash)。自行在终端启动的 dsh 不落盘, 此处看不到。",
             objectName="cardHint"))
@@ -99,9 +104,6 @@ class LogsPage(BasePage):
             self._tabs.addTab(sv.view, "dsh-web." + stream + ".log")
         self._tabs.currentChanged.connect(lambda _i: self._render_current())
         root.addWidget(self._tabs, 1)
-
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
 
         for sv in self._views.values():
             self._bootstrap(sv)

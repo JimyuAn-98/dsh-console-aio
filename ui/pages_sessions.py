@@ -17,7 +17,8 @@ from core import data as dsh_data
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QMessageBox, QTextEdit)
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QMessageBox, QTextEdit,
+    QScrollArea, QWidget)
 
 from ui.base import BasePage
 from ui.widgets import ModernList, card_wrap, three_split
@@ -69,10 +70,16 @@ class SessionPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("会话与工作区管理", objectName="cardTitle")
-        root.addWidget(title)
+        # 状态文字在标题右侧(原底部状态条位置让给横向滚动条)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("会话与工作区管理", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
         hint = QLabel("会话数据存放在 ~/.dsh/sessions；归档只写 workspace.json，不移动数据。",
                       objectName="cardHint")
+        hint.setWordWrap(True)
         root.addWidget(hint)
 
         wsf = QFrame(objectName="card")
@@ -87,7 +94,6 @@ class SessionPage(BasePage):
             card_wrap("会话分组", self._make_list(is_group=True)),
             card_wrap("会话", self._make_list(is_group=False)),
             self._make_detail_card())
-        root.addWidget(mid, 1)
 
         btns = QHBoxLayout()
         self._btn_refresh = QPushButton("刷新")
@@ -99,10 +105,20 @@ class SessionPage(BasePage):
         for b in (self._btn_refresh, self._btn_archive, self._btn_delete):
             btns.addWidget(b)
         btns.addStretch(1)
-        root.addLayout(btns)
 
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
+        # 三栏横向可扩展: 视口不足时出横向滚动条, 底部位置让给滚动条
+        mid.setMinimumWidth(1020)
+        content = QWidget()
+        cv = QVBoxLayout(content)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
+        cv.addWidget(mid, 1)
+        cv.addLayout(btns)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
 
     # ── 三栏构建(分组|会话|详情) ──
     def _make_list(self, is_group):

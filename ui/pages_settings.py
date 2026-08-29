@@ -8,11 +8,12 @@
 
 import threading
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFormLayout, QLineEdit,
-    QPushButton, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QWidget)
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QFormLayout, QLineEdit,
+    QPushButton, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+    QScrollArea, QWidget)
 
 from core import config as dsh_config
 from core import env as core_env
@@ -69,14 +70,15 @@ class SettingsPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        root.addWidget(QLabel("设置", objectName="cardTitle"))
+        # 状态文字在标题右侧(原底部状态条位置取消)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("设置", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
         root.addWidget(QLabel("配置在页面内完成, 不弹窗; 保存后端口/命名/监控点即时热重载。",
                               objectName="cardHint"))
-
-        self._tabs = QTabWidget(objectName="card")
-        self._tabs.addTab(self._build_tunnel_tab(), "隧道与部署")
-        self._tabs.addTab(self._build_monitor_tab(), "监控与命名")
-        root.addWidget(self._tabs, 1)
 
         bar = QHBoxLayout()
         save = QPushButton("保存设置", objectName="primary")
@@ -85,10 +87,24 @@ class SettingsPage(BasePage):
         self._save_lbl = QLabel("", objectName="cardHint")
         bar.addWidget(self._save_lbl)
         bar.addStretch(1)
-        root.addLayout(bar)
 
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
+        # 内容纵向可滚动(配置项多, 视口不足时出纵向滚动条)
+        self._tabs = QTabWidget(objectName="card")
+        self._tabs.addTab(self._build_tunnel_tab(), "隧道与部署")
+        self._tabs.addTab(self._build_monitor_tab(), "监控与命名")
+        content = QWidget()
+        cv = QVBoxLayout(content)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
+        cv.addWidget(self._tabs, 1)
+        cv.addLayout(bar)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
 
     # ── Tab 1: 隧道与部署(原 ConfigDialog) ──
     def _build_tunnel_tab(self):

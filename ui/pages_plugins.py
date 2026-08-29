@@ -18,8 +18,8 @@ from core import plugins as core_plugins
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit,
-    QPushButton, QMessageBox, QComboBox, QTextEdit)
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit, QScrollArea,
+    QPushButton, QMessageBox, QComboBox, QTextEdit, QWidget)
 
 from ui.base import BasePage
 from ui.widgets import ModernList, card_wrap, three_split
@@ -76,8 +76,13 @@ class PluginPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("插件管理", objectName="cardTitle")
-        root.addWidget(title)
+        # 状态文字在标题右侧(原底部状态条位置让给横向滚动条)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("插件管理", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
         hint = QLabel("停用/启用写入 cordis.patch.yml；安装/卸载经官方 dsh plugin 命令执行。",
                       objectName="cardHint")
         root.addWidget(hint)
@@ -95,15 +100,16 @@ class PluginPage(BasePage):
         self._btn_open_patch.clicked.connect(self._open_patch)
         top.addWidget(self._btn_open_patch)
         top.addStretch(1)
-        top.addWidget(QLabel("已装插件来自 package.json bundles · 改动写入 cordis.patch.yml · cordis 列=dump-config 生效状态",
-                             objectName="cardHint"))
+        _top_hint = QLabel("已装插件来自 package.json bundles · 改动写入 cordis.patch.yml · cordis 列=dump-config 生效状态",
+                           objectName="cardHint")
+        _top_hint.setWordWrap(True)
+        top.addWidget(_top_hint)
         root.addLayout(top)
 
         mid = three_split(
             card_wrap("插件", self._make_list()),
             self._make_detail_card(),
             self._make_config_card())
-        root.addWidget(mid, 1)
 
         btns = QHBoxLayout()
         btns.setSpacing(6)
@@ -122,10 +128,20 @@ class PluginPage(BasePage):
         btns.addWidget(QLabel("操作针对选中条目；停用/启用写入 cordis.patch.yml(写前自动备份, HMR 约 1 秒生效)",
                               objectName="cardHint"))
         btns.addStretch(1)
-        root.addLayout(btns)
 
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
+        # 三栏横向可扩展: 视口不足时出横向滚动条(未来加栏不挤压), 底部位置让给滚动条
+        mid.setMinimumWidth(1020)
+        content = QWidget()
+        cv = QVBoxLayout(content)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
+        cv.addWidget(mid, 1)
+        cv.addLayout(btns)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(content)
+        root.addWidget(scroll, 1)
 
         self._profile_cb.activated.connect(lambda _i: self._refresh())
         self._refresh_btns()

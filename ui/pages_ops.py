@@ -55,8 +55,12 @@ class OpsPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("备份与运维", objectName="cardTitle")
-        root.addWidget(title)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("备份与运维", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
 
         # ---- 备份分区 ----
         bak = QFrame(objectName="card")
@@ -111,8 +115,6 @@ class OpsPage(BasePage):
             "控制台不读取、不写入、不展示密钥明文。", objectName="cardHint"))
         root.addWidget(cred)
 
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
 
     def _make_table(self, headers, anchors, widths, stretch_col):
         t = QTableWidget(0, len(headers))

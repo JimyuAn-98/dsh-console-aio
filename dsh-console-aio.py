@@ -234,6 +234,8 @@ class OverviewPage(BasePage):
         head = QHBoxLayout()
         head.addWidget(QLabel("部署总览", objectName="cardTitle"))
         head.addStretch(1)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head.addWidget(self._status_lbl)
         refresh = QPushButton("刷新", objectName="primary")
         refresh.clicked.connect(self.refresh)
         head.addWidget(refresh)
@@ -280,9 +282,6 @@ class OverviewPage(BasePage):
         self._tunnel_lbl.setTextFormat(Qt.RichText)
         self._tunnel_lbl.setWordWrap(True)
         root.addWidget(card_wrap("隧道状态", self._tunnel_lbl))
-
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
 
     def refresh(self):
         self._set_status("正在读取总览数据...")
@@ -1259,7 +1258,12 @@ class TunnelsPage(BasePage):
         v.setContentsMargins(20, 20, 20, 20)
         v.setSpacing(6)
         title = QLabel("隧道 / dsh 服务操控", objectName="cardTitle")
-        v.addWidget(title)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(title)
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        v.addLayout(head)
 
         self._cards = {}
         grid = QVBoxLayout()

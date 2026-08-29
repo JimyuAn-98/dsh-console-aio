@@ -61,8 +61,12 @@ class ProfilePage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("Profile 管理", objectName="cardTitle")
-        root.addWidget(title)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("Profile 管理", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
         hint = QLabel("dsh 用 dsh --profile <名> 启动；dsh web 等价 dsh --profile web。"
                       "web 是默认 Profile，不可删除。", objectName="cardHint")
         root.addWidget(hint)
@@ -93,8 +97,6 @@ class ProfilePage(BasePage):
         btns.addStretch(1)
         root.addLayout(btns)
 
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
 
     def _make_table(self, headers, anchors, widths, stretch_col):
         t = QTableWidget(0, len(headers))

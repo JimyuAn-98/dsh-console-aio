@@ -45,8 +45,12 @@ class TaskboardPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("任务看板", objectName="cardTitle")
-        root.addWidget(title)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("任务看板", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
         hint = QLabel("这是 dsh 的定时任务/调度系统数据(~/.dsh/task-board/): ledger 为任务账本,"
                       "scheduler 为定时调度器(时区/最近心跳), recentRequests 为最近请求。\n"
                       "只有创建过定时任务(dsh web 或 CLI)才有内容; 当前为空属正常。",
@@ -86,8 +90,6 @@ class TaskboardPage(BasePage):
         btns.addStretch(1)
         root.addLayout(btns)
 
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
 
     # ── 读取(service 信号桥) ──
     def _refresh(self):

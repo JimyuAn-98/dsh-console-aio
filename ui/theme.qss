@@ -141,6 +141,10 @@ QComboBox QAbstractItemView {
     color: #e6e6e6; outline: 0; padding: 4px;
 }
 
+/* 滚动区容器: 透明融入页面/卡片(内容自身带卡片底) */
+QScrollArea { border: none; background: transparent; }
+QScrollArea > QWidget > QWidget { background: transparent; }
+
 /* 日志区 */
 QFrame#logWrap { background: #252535; border-top: 1px solid #33334a; }
 QLabel#logTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; }

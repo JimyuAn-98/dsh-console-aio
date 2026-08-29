@@ -232,6 +232,10 @@ QComboBox QAbstractItemView {{
     color: {t["text"]}; outline: 0; padding: 4px;
 }}
 
+/* 滚动区容器: 透明融入页面/卡片(内容自身带卡片底) */
+QScrollArea {{ border: none; background: transparent; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; }}
+
 /* 日志区 */
 QFrame#logWrap {{ background: {bg_panel}; border-top: 1px solid {t["border"]}; }}
 QLabel#logTitle {{ color: {t["text_dim"]}; font-size: 12px; padding: 2px 4px; }}

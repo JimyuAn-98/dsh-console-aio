@@ -84,8 +84,12 @@ class LlmPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        title = QLabel("LLM / 模型配置", objectName="cardTitle")
-        root.addWidget(title)
+        self._status_lbl = QLabel("就绪", objectName="monVal")
+        head = QHBoxLayout()
+        head.addWidget(QLabel("LLM / 模型配置", objectName="cardTitle"))
+        head.addStretch(1)
+        head.addWidget(self._status_lbl)
+        root.addLayout(head)
         hint = QLabel("查看/切换 agent-default-model，只读展示自定义 providers。",
                       objectName="cardHint")
         root.addWidget(hint)
@@ -134,8 +138,6 @@ class LlmPage(BasePage):
                       objectName="cardHint")
         root.addWidget(foot)
 
-        self._status_lbl = QLabel("就绪", objectName="statusBar")
-        root.addWidget(self._status_lbl)
 
     def _make_table(self, headers, anchors, widths, stretch_col):
         t = QTableWidget(0, len(headers))
