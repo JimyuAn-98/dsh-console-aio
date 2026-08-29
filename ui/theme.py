@@ -104,11 +104,8 @@ QSplitter::handle:hover {{ background: rgba(79, 110, 247, 0.35); }}
 QSplitter::handle:horizontal {{ width: 3px; }}
 QFrame#statusPanel {{ border: none; }}
 
-/* 右栏收起窄条(隧道状态迷你视图) */
+/* 右栏收起窄条(展开态压缩版: 状态灯+名字, 样式复用 monDot/monName/rightTitle) */
 QFrame#miniStrip {{ background: {bg_panel}; border-left: 1px solid {t["border"]}; }}
-QLabel#miniDot {{ font-size: 10px; }}
-QLabel#miniNum {{ color: {t["text"]}; font-size: 12px; }}
-QLabel#miniSection {{ color: #6a6a80; font-size: 9px; padding-top: 5px; }}
 QPushButton#collapseBtn {{
     background: transparent; border: 1px solid transparent; border-radius: {t["radius_sm"]};
     padding: 0; color: {t["text_dim"]}; font-size: 13px;

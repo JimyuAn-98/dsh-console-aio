@@ -408,26 +408,26 @@ class MiniStatusStrip(QFrame):
         self._clear_layout(self._content)
         local = cfg.get("local_name") or "本机"
         ssh = cfg.get("ssh_name") or "公网中转"
-        # 与右栏同构: 分组中文间隔 + 「状态灯+备注」(备注为空兜底 名称->端口号);
-        # 正文字体与展开右栏一致(12px), 分组标题小一号(9px)
+        # 展开态的压缩版: 只留「状态灯+名字」, 去掉延迟/备注/设置;
+        # 样式复用右栏 monDot/monName/rightTitle(字体天然一致)
         self._rows = {}   # ("L"|"R", port) -> (dot, text)
         for tag, title, ports in (("L", local + "端口", cfg.get("local_ports", [])),
                                   ("R", ssh, cfg.get("remote_tunnels", []))):
             if not ports:
                 continue
-            sec = QLabel(title, objectName="miniSection")
+            sec = QLabel(title, objectName="rightTitle")
             self._content.addWidget(sec, 0, Qt.AlignLeft)
             for port, label, note in ports:
                 row = QHBoxLayout()
                 row.setSpacing(5)
-                dot = QLabel("●", objectName="miniDot")
+                dot = QLabel("●", objectName="monDot")
                 dot.setStyleSheet("color:#555;")
-                text = QLabel(note or label or str(port), objectName="miniNum")
-                text.setWordWrap(False)
+                text = QLabel(label or str(port), objectName="monName")
                 row.addWidget(dot)
                 row.addWidget(text, 1)
                 self._content.addLayout(row)
                 self._rows[(tag, port)] = (dot, text)
+            self._content.addSpacing(6)
         self._content.addStretch(1)
 
     def reload(self, cfg):
