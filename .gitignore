@@ -49,3 +49,4 @@ config.json.bak
 dump_ui.json
 dump_ui.xml
 ui_dump/
+dist-preview/

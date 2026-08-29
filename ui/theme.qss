@@ -76,6 +76,71 @@ QLabel#cardTitle { font-size: 15px; font-weight: bold; color: #ffffff; }
 QLabel#cardHint { color: #9a9ab0; font-size: 12px; }
 QFrame#pageHostBg { background: #1e1e2e; }
 
+/* 输入框(单行): 圆角 + 聚焦 accent 描边 */
+QLineEdit {
+    background: #16161f; border: 1px solid #3d3d5c; border-radius: 6px;
+    padding: 5px 10px; color: #e6e6e6; selection-background-color: #4f6ef7;
+}
+QLineEdit:hover { border-color: #5858a0; }
+QLineEdit:focus { border-color: #4f6ef7; background: #252535; }
+QLineEdit:disabled { color: #6a6a80; background: #24243a; }
+
+/* 多行文本(只读详情/日志类控件代码里自设等宽字体, 此处不覆盖 font-family) */
+QTextEdit, QPlainTextEdit {
+    background: #16161f; border: 1px solid #2c2c40; border-radius: 10px;
+    padding: 6px; color: #e6e6e6; selection-background-color: #4f6ef7;
+}
+QTextEdit:focus, QPlainTextEdit:focus { border-color: #4f6ef7; }
+
+/* 表格(设置端口表/环境检查等仍用表格处): 无网格 + 扁平表头 + accent 选中 */
+QTableWidget {
+    background: transparent; border: 1px solid #2c2c40; border-radius: 10px;
+    gridline-color: transparent; alternate-background-color: #232338;
+    selection-background-color: rgba(79, 110, 247, 70);
+    selection-color: #ffffff; outline: 0;
+}
+QTableWidget::item { padding: 4px 8px; border: none; }
+QTableWidget::item:selected { background: rgba(79, 110, 247, 70); }
+QHeaderView::section {
+    background: transparent; color: #9a9ab0; border: none;
+    border-bottom: 1px solid #33334a; padding: 6px 8px;
+    font-size: 12px; font-weight: bold;
+}
+QTableCornerButton::section { background: transparent; border: none; }
+
+/* 标签页: 下划线式选中 */
+QTabWidget::pane { border: none; }
+QTabBar::tab {
+    background: transparent; color: #9a9ab0; padding: 6px 14px;
+    border: none; border-bottom: 2px solid transparent; margin-right: 2px;
+}
+QTabBar::tab:hover { color: #e6e6e6; }
+QTabBar::tab:selected { color: #ffffff; border-bottom: 2px solid #4f6ef7; }
+
+/* 复选框: 圆角方块指示器, 选中=accent 实心 */
+QCheckBox { spacing: 6px; }
+QCheckBox::indicator {
+    width: 16px; height: 16px; border: 1px solid #3d3d5c;
+    border-radius: 4px; background: #16161f;
+}
+QCheckBox::indicator:hover { border-color: #5858a0; }
+QCheckBox::indicator:checked { background: #4f6ef7; border-color: #4f6ef7; }
+QCheckBox::indicator:disabled { background: #2a2a3c; border-color: #33334a; }
+
+/* 下拉框(通用; #deploy 专属规则更具体不受影响) */
+QComboBox {
+    background: #2f2f45; border: 1px solid #3d3d5c; border-radius: 6px;
+    padding: 4px 10px; color: #e6e6e6;
+}
+QComboBox:hover { border-color: #5858a0; }
+QComboBox:focus { border-color: #4f6ef7; }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView {
+    background: #2f2f45; border: 1px solid #3d3d5c;
+    selection-background-color: #4f6ef7; selection-color: #ffffff;
+    color: #e6e6e6; outline: 0; padding: 4px;
+}
+
 /* 日志区 */
 QFrame#logWrap { background: #252535; border-top: 1px solid #33334a; }
 QLabel#logTitle { color: #9a9ab0; font-size: 12px; padding: 2px 4px; }

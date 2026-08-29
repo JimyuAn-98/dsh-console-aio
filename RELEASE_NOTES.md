@@ -131,6 +131,18 @@
 - 真机离屏冒烟：3080 在线、会话 59/21 归档/70.4MB（修复前恒 0）、6 模型累计费用、
   隧道圆点全部正确；纯单元 341 例全绿
 
+### 主题美化：表格/输入框/标签页/复选框/下拉框现代化
+
+- **全局 QSS 升级**（theme.py 模板 + theme.qss 双路径同步）：QLineEdit 圆角+聚焦 accent
+  描边；QTextEdit/QPlainTextEdit 圆角暗底（不覆盖代码自设的等宽字体）；QTableWidget
+  无网格+扁平表头+accent 选中+交替行底色；QTabBar 下划线式选中；QCheckBox 圆角方块
+  指示器（选中=accent 实心）；QComboBox 通用暗色下拉（#deploy 专属规则不受影响）
+- **设置页微调**：端口表隐藏行号列 + 交替行底色（离屏渲染自查时抓到未设
+  alternate-background-color 掉回浅色调色板的问题）
+- 覆盖范围：设置/日志页标签、密钥/Profile/LLM/Agent/运维页与 EnvDialog 的表格、
+  全部输入框与下拉框；离屏渲染 PNG 自查布局与配色（中文字体在 offscreen 平台不可见，
+  以真机验收为准）；341 例全绿
+
 ## v0.4.0 (未发布)
 
 ### 新增：多部署管理（dsh 控制台新方向）

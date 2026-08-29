@@ -167,6 +167,71 @@ QLabel#cardTitle {{ font-size: 15px; font-weight: bold; color: {t["text_bright"]
 QLabel#cardHint {{ color: {t["text_dim"]}; font-size: 12px; }}
 QFrame#pageHostBg {{ background: {bg_page}; }}
 
+/* 输入框(单行): 圆角 + 聚焦 accent 描边 */
+QLineEdit {{
+    background: {bg_log}; border: 1px solid {t["border_strong"]}; border-radius: {t["radius_sm"]};
+    padding: 5px 10px; color: {t["text"]}; selection-background-color: {t["accent"]};
+}}
+QLineEdit:hover {{ border-color: {t["border_hover"]}; }}
+QLineEdit:focus {{ border-color: {t["accent"]}; background: {bg_panel}; }}
+QLineEdit:disabled {{ color: #6a6a80; background: #24243a; }}
+
+/* 多行文本(只读详情/日志类控件代码里自设等宽字体, 此处不覆盖 font-family) */
+QTextEdit, QPlainTextEdit {{
+    background: {bg_log}; border: 1px solid #2c2c40; border-radius: {t["radius"]};
+    padding: 6px; color: {t["text"]}; selection-background-color: {t["accent"]};
+}}
+QTextEdit:focus, QPlainTextEdit:focus {{ border-color: {t["accent"]}; }}
+
+/* 表格(设置端口表/环境检查等仍用表格处): 无网格 + 扁平表头 + accent 选中 */
+QTableWidget {{
+    background: transparent; border: 1px solid #2c2c40; border-radius: {t["radius"]};
+    gridline-color: transparent; alternate-background-color: #232338;
+    selection-background-color: rgba(79, 110, 247, 70);
+    selection-color: #ffffff; outline: 0;
+}}
+QTableWidget::item {{ padding: 4px 8px; border: none; }}
+QTableWidget::item:selected {{ background: rgba(79, 110, 247, 70); }}
+QHeaderView::section {{
+    background: transparent; color: {t["text_dim"]}; border: none;
+    border-bottom: 1px solid {t["border"]}; padding: 6px 8px;
+    font-size: 12px; font-weight: bold;
+}}
+QTableCornerButton::section {{ background: transparent; border: none; }}
+
+/* 标签页: 下划线式选中 */
+QTabWidget::pane {{ border: none; }}
+QTabBar::tab {{
+    background: transparent; color: {t["text_dim"]}; padding: 6px 14px;
+    border: none; border-bottom: 2px solid transparent; margin-right: 2px;
+}}
+QTabBar::tab:hover {{ color: {t["text"]}; }}
+QTabBar::tab:selected {{ color: {t["text_bright"]}; border-bottom: 2px solid {t["accent"]}; }}
+
+/* 复选框: 圆角方块指示器, 选中=accent 实心 */
+QCheckBox {{ spacing: 6px; }}
+QCheckBox::indicator {{
+    width: 16px; height: 16px; border: 1px solid {t["border_strong"]};
+    border-radius: 4px; background: {bg_log};
+}}
+QCheckBox::indicator:hover {{ border-color: {t["border_hover"]}; }}
+QCheckBox::indicator:checked {{ background: {t["accent"]}; border-color: {t["accent"]}; }}
+QCheckBox::indicator:disabled {{ background: #2a2a3c; border-color: {t["border"]}; }}
+
+/* 下拉框(通用; #deploy 专属规则更具体不受影响) */
+QComboBox {{
+    background: #2f2f45; border: 1px solid {t["border_strong"]}; border-radius: {t["radius_sm"]};
+    padding: 4px 10px; color: {t["text"]};
+}}
+QComboBox:hover {{ border-color: {t["border_hover"]}; }}
+QComboBox:focus {{ border-color: {t["accent"]}; }}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox QAbstractItemView {{
+    background: #2f2f45; border: 1px solid {t["border_strong"]};
+    selection-background-color: {t["accent"]}; selection-color: #ffffff;
+    color: {t["text"]}; outline: 0; padding: 4px;
+}}
+
 /* 日志区 */
 QFrame#logWrap {{ background: {bg_panel}; border-top: 1px solid {t["border"]}; }}
 QLabel#logTitle {{ color: {t["text_dim"]}; font-size: 12px; padding: 2px 4px; }}

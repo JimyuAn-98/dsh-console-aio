@@ -266,6 +266,8 @@ class SettingsPage(BasePage):
         t.setHorizontalHeaderLabels(["端口", "名称", "备注"])
         t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         t.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        t.verticalHeader().setVisible(False)
+        t.setAlternatingRowColors(True)
         t.setMaximumHeight(220)
         return t
 
