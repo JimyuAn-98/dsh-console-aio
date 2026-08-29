@@ -1,4 +1,4 @@
-# 本文件由 ui/theme.py 的 build_qss(mica=False) 生成(token 驱动); 手动覆盖用, 重新生成: python -c "from ui.theme import build_qss; open('ui/theme.qss','w').write(build_qss())"
+# 由 ui/theme.py build_qss(mica=False) 生成(含 winBtn 样式)
 
 * {
     font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
@@ -6,12 +6,19 @@
     color: #e6e6e6;
 }
 QMainWindow, QWidget#central, QWidget#body { background: #1e1e2e; }
-
 /* 顶部栏 */
 QFrame#topbar { background: #252535; border-bottom: 1px solid #33334a; }
 QLabel#titleLbl { font-size: 17px; font-weight: bold; color: #ffffff; }
 QLabel#verLbl { color: #9a9ab0; font-size: 12px; }
 QFrame#vsep { background: #3d3d5c; border: none; width: 1px; }
+
+/* 无边框窗口控制按钮(自绘标题栏) */
+QPushButton#winBtn {
+    background: transparent; border: none; border-radius: 6px;
+    padding: 6px 12px; color: #9a9ab0; font-size: 13px;
+}
+QPushButton#winBtn:hover { background: rgba(255, 255, 255, 0.12); color: #e6e6e6; }
+QPushButton#winBtnClose:hover { background: #e81123; color: #ffffff; }
 QComboBox#deploy {
     background: #2f2f45; border: 1px solid #3d3d5c; border-radius: 6px;
     padding: 4px 10px; min-width: 130px; color: #e6e6e6;

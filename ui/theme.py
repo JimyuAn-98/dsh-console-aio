@@ -203,26 +203,36 @@ def is_windows_11_22h2():
 
 def apply_window_effects(window):
     """对顶层窗口应用平台效果(须配合无边框窗口, 见 build_qss 注释):
-    Win11 22H2+ 启用 WA_TranslucentBackground(分层) + DWM Mica backdrop。
+    Win11 22H2+ 启用 WA_TranslucentBackground(分层) + DWM Mica backdrop + 暗色标题栏。
 
-    返回 True 表示 Mica 模式已启用(调用方应使用 build_qss(mica=True) 的主题)。
-    失败(旧系统/非 Windows/非无边框)静默回退, 不抛异常。
+    各步骤独立容错: 只要分层透明成功即返回 True(调用方用 build_qss(mica=True));
+    DWM 属性失败不影响主题选择。非 Windows/旧系统返回 False(纯 QSS 回退)。
     """
     if not is_windows_11_22h2():
         return False
     try:
         from PySide6.QtCore import Qt  # 惰性导入: 本模块顶层保持纯 Python
         window.setAttribute(Qt.WA_TranslucentBackground, True)
+        window.setAttribute(Qt.WA_NoSystemBackground, True)
+    except Exception:
+        return False
+    try:
         hwnd = int(window.winId())
         DWMWA_USE_IMMERSIVE_DARK_MODE = 20
         DWMWA_SYSTEMBACKDROP_TYPE = 38
         DWMSBT_MAINWINDOW = 2
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
-            ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int))
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
-            ctypes.byref(ctypes.c_int(DWMSBT_MAINWINDOW)), ctypes.sizeof(ctypes.c_int))
-        return True
+        try:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int))
+        except Exception:
+            pass
+        try:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
+                ctypes.byref(ctypes.c_int(DWMSBT_MAINWINDOW)), ctypes.sizeof(ctypes.c_int))
+        except Exception:
+            pass
     except Exception:
-        return False
+        pass
+    return True

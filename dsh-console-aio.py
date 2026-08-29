@@ -431,13 +431,17 @@ class MainWindow(QMainWindow):
 
     def nativeEvent(self, eventType, message):
         # WM_NCHITTEST: 标题栏空白区拖拽(HTCAPTION), 边缘 6px 拉伸, 控件区放行。
+        # ⚠ 坐标换算: lParam 是物理像素, Qt geometry() 是逻辑像素(高分屏 DPI 缩放下
+        # 直接比较会导致热区错位——实测 150% 缩放下右缘热区膨胀到半屏、左/上缘消失)。
         if sys.platform == "win32" and not self.smoke:
             try:
                 msg = ctypes.wintypes.MSG.from_address(int(message))
                 if msg.message == 0x0084:  # WM_NCHITTEST
-                    x = ctypes.c_short(msg.lParam & 0xFFFF).value
-                    y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
-                    geo = self.geometry()
+                    dpi = ctypes.windll.user32.GetDpiForWindow(int(self.winId())) or 96
+                    dpr = dpi / 96.0
+                    x = ctypes.c_short(msg.lParam & 0xFFFF).value / dpr
+                    y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value / dpr
+                    geo = self.geometry()  # 逻辑坐标
                     if self.isMaximized():
                         # 最大化时标题栏仍可拖拽(触发系统还原)
                         return True, (2 if y <= geo.y() + 52 else 1)
@@ -465,7 +469,7 @@ class MainWindow(QMainWindow):
                         hit = 15
                     elif y <= ey + 52:
                         # 标题栏: 交互控件放行(HTCLIENT), 空白/标题区可拖拽(HTCAPTION)
-                        w = self.childAt(self.mapFromGlobal(QPoint(x, y)))
+                        w = self.childAt(self.mapFromGlobal(QPoint(round(x), round(y))))
                         if w is None or w is self or w.objectName() in ("titleLbl", "verLbl"):
                             hit = 2
                         else:
