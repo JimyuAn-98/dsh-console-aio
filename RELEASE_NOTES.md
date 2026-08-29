@@ -1,7 +1,9 @@
 
 # Release Notes
 
-## v0.5.0 (未发布)
+## v0.6.0 (未发布)
+
+## v0.5.0 (2026-08-30)
 
 ### UI 迁移到 PySide6（现代暗色主题, 可打包 exe 分发）
 
@@ -157,9 +159,7 @@
   1400 宽自动铺满）
 - 341 例全绿
 
-## v0.4.0 (未发布)
-
-### 新增：多部署管理（dsh 控制台新方向）
+### 多部署管理（原 v0.4.0 规划, 未单独发版, 随本版一并发布）
 
 - 架构：dsh_data.py 新增 DshRemote 抽象（本机直接文件系统 / 远程 SSH 只读命令 + 文件拉取），部署清单存 config.json 的 deployments（gitignored）
 - 部署管理窗口（mgmt_deployments.py）：部署 CRUD、连接测试、只读状态总览（dsh 版本 / 会话数 / 大小 / 插件数 / profile 数 / agent 预设数 / 在线离线）

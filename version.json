@@ -1,4 +1,4 @@
 {
   "version": "0.5.0",
-  "notes": "v0.5.0: PySide6 迁移 + UI 前后端分层重构(dsh_core 业务层 + DshService 信号桥); 详见 RELEASE_NOTES.md"
+  "notes": "v0.5.0: PySide6 整体迁移 + UI 前后端分层重构; P0 配置驱动 / P1 外观(三栏现代列表+主题美化+横向可扩展) / P2 插件对齐+日志管理 / 设置页 / 概览页重设计; 修复插件启用不生效等 8 项; 详见 RELEASE_NOTES.md"
 }
