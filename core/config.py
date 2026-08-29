@@ -26,9 +26,9 @@ def _default_config_path():
 
 
 def load_config(path=None):
-    """读取配置: 优先显式 path, 其次 DSH_AIO_CONFIG, 最后 BASE_DIR/config.json。"""
+    """读取配置: 优先显式 path, 其次 DSH_AIO_CONFIG, 最后 default_config_path()。"""
     if path is None:
-        path = os.environ.get('DSH_AIO_CONFIG') or _default_config_path()
+        path = os.environ.get('DSH_AIO_CONFIG') or default_config_path()
     try:
         with open(path, encoding='utf-8') as f:
             return json.load(f) or {}
@@ -40,7 +40,7 @@ def save_config(cfg, path=None):
     # 写回配置(调用方传入合并后的完整 cfg); 写前复制 .bak(AGENTS.md 约定)。
     # 成功返回 True; OSError(权限/占用)返回 False 由调用方提示。
     if path is None:
-        path = os.environ.get('DSH_AIO_CONFIG') or _default_config_path()
+        path = os.environ.get('DSH_AIO_CONFIG') or default_config_path()
     try:
         if os.path.exists(path):
             shutil.copy2(path, path + ".bak")
@@ -49,13 +49,6 @@ def save_config(cfg, path=None):
         return True
     except OSError:
         return False
-
-
-def _default_config_path():
-    # 主程序约定: config.json 与主程序同目录。
-    here = os.path.dirname(os.path.abspath(__file__))
-    # 本包在仓库根/core 下, 上级即为仓库根(主程序所在)。
-    return os.path.join(os.path.dirname(here), 'config.json')
 
 
 def derived(cfg, allow_empty_ports=False):

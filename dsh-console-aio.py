@@ -1246,9 +1246,31 @@ def main():
         print("env.DSH_AIO_CONFIG =", os.environ.get("DSH_AIO_CONFIG"))
         p = dsh_config.default_config_path()
         print("default_config_path =", p)
+        print("_default_config_path =", dsh_config._default_config_path())
         print("config exists =", os.path.isfile(p))
+        try:
+            with open(p, encoding="utf-8") as f:
+                raw = f.read()
+            print("read bytes =", len(raw))
+            cfg = json.loads(raw)
+            print("json keys =", len(cfg))
+        except Exception as e:
+            import traceback
+            print("load EXC:", type(e).__name__, "|", str(e)[:300])
+            traceback.print_exc()
         cfg = dsh_config.load_config(None)
         print("load_config keys =", len(cfg), sorted(cfg.keys())[:8])
+        import inspect
+        print("core.config.__file__ =", getattr(dsh_config, "__file__", "?"))
+        print("---- 实际运行的 load_config 源码 ----")
+        try:
+            print(inspect.getsource(dsh_config.load_config))
+        except Exception as e:
+            print("(getsource 失败:", e, ")")
+        import dis
+        print("---- co_consts / co_names ----")
+        print("consts =", dsh_config.load_config.__code__.co_consts)
+        print("names =", dsh_config.load_config.__code__.co_names)
         der = dsh_config.load_derived(None)
         print("derived dash_port =", der.get("dash_port"))
         print("derived local_ports =", der.get("local_ports"))
