@@ -104,6 +104,19 @@
   对象身份断裂 —— ModernList 改为 Python 侧自持行数据（浅拷贝保身份），Qt 侧副本仅供绘制
 - 纯单元 338 例全绿（+1 例 yaml 块抓取）；四页离屏构造冒烟（FakeApp 注入假数据全路径）通过
 
+### 设置页（弹窗收敛第一步，配置弹窗 → 标签页）
+
+- **新「设置」导航页**（QTabWidget 两标签）：「隧道与部署」（场景模板 + SSH 测试 + ①-④
+  全部配置字段，原 ConfigDialog）+「监控与命名」（三处机器命名 + 本机端口/公网隧道
+  增删改表，原 MonitorSettingsDialog）——愿景 §二.5"配置在页面内完成，不层层弹窗"落地
+- **入口整合**：顶栏「配置」按钮与右栏 ⚙ 监控设置改为**导航到设置页**（⚙ 预选监控标签），
+  ConfigDialog / MonitorSettingsDialog 退役删除
+- **保存即热重载**：以磁盘 config.json 为基准合并两页字段 → core save_config(自动 .bak)
+  → `reload_config()`（原 `_reload_config` 公开化）——端口/命名/监控点即时生效，不再
+  "完整生效需重启"；隧道 SSH 参数下次启动隧道生效（状态栏明示）
+- 测试：ConfigDialog 三个用例迁为 SettingsPage 等价用例（构造回填/模板填充/保存合并+
+  热重载/非法整数拒绝），配置读写 monkeypatch 拦截绝不写真实 config.json；339 例全绿
+
 ## v0.4.0 (未发布)
 
 ### 新增：多部署管理（dsh 控制台新方向）

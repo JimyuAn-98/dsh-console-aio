@@ -25,7 +25,6 @@ from core import env as core_env
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(_BASE_DIR, "config.json")
 
-
 def _resolve_app(app, parent):
     # app 显式传入优先; 否则 parent 若是主窗口(有 loge)则复用; 兼容 None。
     if app is not None:
@@ -33,7 +32,6 @@ def _resolve_app(app, parent):
     if parent is not None and hasattr(parent, "loge"):
         return parent
     return None
-
 
 def _load_config():
     # 读 config.json; 缺失/损坏返回 {} (防御模式, 缺 key 不崩)。
@@ -48,7 +46,6 @@ def _load_config():
         pass
     return {}
 
-
 class _DialogBase(QDialog):
     # QDialog 公共基类: 提供与 BasePage.safe_emit 一致的线程安全发射。
     # 对话框销毁后对已删 QObject emit 会抛 RuntimeError, 吞掉防后台线程崩溃。
@@ -57,198 +54,6 @@ class _DialogBase(QDialog):
             sig.emit(*args)
         except RuntimeError:
             pass
-
-
-class ConfigDialog(_DialogBase):
-    # 配置向导: 分组 + 场景模板 + SSH 测试 + 完整隧道参数编辑。
-    # 保存后 self.result 持有用户改动字段(dict), 由上层合并写回 config.json。
-
-    _ssh_done = Signal(str, bool)   # (结果文案, 是否成功)
-
-    HELP = {
-        "ssh_server": "公网可达的中转服务器 IP/域名(需已配置免密 SSH 登录)",
-        "ssh_user": "中转服务器上用于建隧道的用户名(需已配置免密)",
-        "ssh_port": "SSH 连接端口(仅用于测试, 默认 22)",
-        "dash_repo": "本机 dsh 仓库绝对路径, 如 D:/Applications/deepseek-harness",
-        "dash_port": "本机 dsh GUI 端口(默认 3080)",
-        "dash_cmd": "启动命令(空格分隔): pnpm.cmd dsh web",
-        "forward_ports": "在家正向隧道本机端口, 逗号分隔: 8090,8022,8091",
-        "lab_server": "实验室服务器 IP(局域网直连用)",
-        "lab_user": "实验室服务器 SSH 用户名",
-        "lab_port": "实验室 dsh 本机映射端口(默认 3090)",
-        "reverse_port": "本机 dsh 暴露到中继的端口(公网服务器:端口 → 本机)",
-        "poll_seconds": "本机健康检查间隔(秒)",
-        "remote_poll_seconds": "SSH 直查中继监听状态的间隔(秒)",
-    }
-
-    TEMPLATES = {
-        "在家→中继隧道": {"ssh_server": "YOUR_PUBLIC_IP", "ssh_user": "YOUR_USER",
-                          "forward_ports": "8090,8022,8091", "reverse_port": "8091"},
-        "实验室→直连实验室dsh": {"lab_server": "YOUR_LAB_IP", "lab_user": "YOUR_USER",
-                           "lab_port": "3090"},
-        "本机→中继反向": {"reverse_port": "8091"},
-    }
-
-    LABELS = {
-        "ssh_server": "服务器 IP/域名", "ssh_user": "用户名", "ssh_port": "SSH 端口",
-        "dash_repo": "仓库路径", "dash_port": "端口", "dash_cmd": "启动命令",
-        "forward_ports": "在家正向端口", "lab_server": "实验室 IP",
-        "lab_user": "实验室用户", "lab_port": "实验室映射端口",
-        "reverse_port": "反向端口", "poll_seconds": "本机轮询(秒)",
-        "remote_poll_seconds": "远端轮询(秒)",
-    }
-
-    def __init__(self, cfg, parent=None, app=None):
-        super().__init__(parent)
-        self.app = _resolve_app(app, parent)
-        self.setWindowTitle("隧道配置向导")
-        self.result = None
-        self._cfg = cfg if isinstance(cfg, dict) else {}
-        self._vars = {}
-        self._build()
-        self._ssh_done.connect(self._on_ssh_done)
-
-    def _build(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(15, 12, 15, 12)
-        root.setSpacing(8)
-
-        root.addWidget(QLabel("场景模板 (一键填充, 把占位符改成真实 IP/用户名)"))
-        tpl_row = QHBoxLayout()
-        for name in list(self.TEMPLATES) + ["自定义"]:
-            btn = QPushButton(name)
-            btn.clicked.connect(lambda _=False, n=name: self._apply(n))
-            tpl_row.addWidget(btn)
-        tpl_row.addStretch(1)
-        root.addLayout(tpl_row)
-
-        form = QFormLayout()
-        self._form = form
-        self._sec("① 公网中转服务器")
-        self._field("ssh_server", None)
-        self._field("ssh_user", None)
-        self._field("ssh_port", "22")
-        self._test_btn = QPushButton("测试 SSH 连接")
-        self._test_btn.clicked.connect(self._test_ssh)
-        self._test_lbl = QLabel("")
-        self._test_lbl.setWordWrap(True)
-        form.addRow(self._test_btn, self._test_lbl)
-        self._sec("② 本机 dsh")
-        self._field("dash_repo", None)
-        self._field("dash_port", None)
-        self._field("dash_cmd", None)
-        self._sec("③ 隧道参数")
-        self._field("forward_ports", None)
-        self._field("lab_server", None)
-        self._field("lab_user", None)
-        self._field("lab_port", None)
-        self._field("reverse_port", None)
-        self._sec("④ 轮询与超时")
-        self._field("poll_seconds", None)
-        self._field("remote_poll_seconds", None)
-        root.addLayout(form)
-
-        bbox = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        bbox.button(QDialogButtonBox.Save).setText("保存")
-        bbox.button(QDialogButtonBox.Cancel).setText("取消")
-        bbox.accepted.connect(self._on_save)
-        bbox.rejected.connect(self.reject)
-        root.addWidget(bbox)
-        self.resize(560, 660)
-
-    def _sec(self, title):
-        # 分组标题(跨整行显示, 与旧版 ① ② ③ ④ 分段一致)。
-        lbl = QLabel(title)
-        lbl.setStyleSheet("font-weight: bold; color: #0af;")
-        self._form.addRow(lbl)
-
-    def _field(self, key, placeholder):
-        # 一个配置字段: QFormLayout 行, 帮助文本做成鼠标悬停 tooltip。
-        label = QLabel(self.LABELS[key] + ":")
-        default = self._cfg.get(key)
-        if key == "dash_cmd" and isinstance(default, list):
-            default = " ".join(default)
-        if placeholder and default in (None, ""):
-            default = placeholder
-        edit = QLineEdit()
-        edit.setText(str(default if default is not None else ""))
-        label.setToolTip(self.HELP[key])
-        edit.setToolTip(self.HELP[key])
-        self._vars[key] = edit
-        self._form.addRow(label, edit)
-
-    def _apply(self, name):
-        # 场景模板一键填充; 自定义/未知模板不动作。
-        tpl = self.TEMPLATES.get(name)
-        if not tpl:
-            return
-        for k, val in tpl.items():
-            if k in self._vars:
-                self._vars[k].setText(val)
-
-    def _test_ssh(self):
-        # SSH 测试: 后台线程调 core(免密/超时细节在 core.env), 信号回主线程更新标签。
-        host = self._vars["ssh_server"].text().strip()
-        user = self._vars["ssh_user"].text().strip()
-        port = self._vars["ssh_port"].text().strip() or "22"
-        if not host or not user:
-            self._set_test("请先填服务器 IP 和用户名", False)
-            return
-        self._test_btn.setEnabled(False)
-        self._set_test("测试中…", None)
-
-        def worker():
-            r = core_env.test_ssh(host, user, port)
-            if r["err"]:
-                msg, ok = "测试异常: " + r["err"], False
-            elif r["ok"]:
-                msg, ok = "✅ SSH 连接成功, 免密可用", True
-            else:
-                msg, ok = "❌ 失败 - 检查 IP/用户名/免密配置: " + r["detail"], False
-            self.safe_emit(self._ssh_done, msg, ok)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _set_test(self, msg, ok):
-        # 主线程更新测试结果标签: ok=None 灰色, True 绿, False 红。
-        self._test_lbl.setText(msg)
-        if ok is None:
-            self._test_lbl.setStyleSheet("color: #888;")
-        elif ok:
-            self._test_lbl.setStyleSheet("color: #3c3;")
-        else:
-            self._test_lbl.setStyleSheet("color: #c33;")
-
-    def _on_ssh_done(self, msg, ok):
-        self._test_btn.setEnabled(True)
-        self._set_test(msg, ok)
-
-    def _on_save(self):
-        # 收集用户改动字段(与旧版逐字段解析一致); 非法整数提示并不关闭。
-        try:
-            cfg = {}
-            cfg["ssh_server"] = self._vars["ssh_server"].text().strip() or "YOUR_PUBLIC_IP"
-            cfg["ssh_user"] = self._vars["ssh_user"].text().strip() or "tunnel"
-            cfg["dash_repo"] = self._vars["dash_repo"].text().strip()
-            cfg["dash_port"] = int(self._vars["dash_port"].text().strip())
-            cfg["dash_cmd"] = self._vars["dash_cmd"].text().strip().split()
-            # forward_ports 支持 "8090,8022,8091" 或 "[8090, 8022, 8091]" 两种写法
-            _fp_raw = self._vars["forward_ports"].text().strip().strip("[]").replace(" ", "")
-            cfg["forward_ports"] = [int(x) for x in _fp_raw.split(",") if x]
-            cfg["poll_seconds"] = int(self._vars["poll_seconds"].text().strip())
-            cfg["remote_poll_seconds"] = int(self._vars["remote_poll_seconds"].text().strip())
-            cfg["lab_server"] = self._vars["lab_server"].text().strip()
-            cfg["lab_user"] = self._vars["lab_user"].text().strip()
-            lp = self._vars["lab_port"].text().strip()
-            cfg["lab_port"] = int(lp) if lp else int(self._cfg.get("lab_port", 3090))
-            rp = self._vars["reverse_port"].text().strip()
-            cfg["reverse_port"] = int(rp) if rp else int(self._cfg.get("reverse_port", 8091))
-        except ValueError:
-            QMessageBox.critical(self, "输入错误", "端口/轮询间隔/端口列表必须为整数.")
-            return
-        self.result = cfg
-        self.accept()
-
 
 class InstallDialog(_DialogBase):
     # 安装向导: 环境预检 -> git clone -> pnpm install -> pnpm build -> 写 config。
@@ -412,112 +217,6 @@ class InstallDialog(_DialogBase):
         self._cancel_btn.setEnabled(not on)
         self._url.setEnabled(not on)
         self._dir.setEnabled(not on)
-
-
-class MonitorSettingsDialog(QDialog):
-    """监控设置(P0): 编辑本机监测端口与公网隧道(端口/名称/备注)。
-    保存写 config.json(带 .bak 备份, core.config.save_config); 主窗口收到 saved 后热重载。"""
-
-    def __init__(self, cfg, config_path, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("监控设置")
-        self.resize(560, 460)
-        self.saved = False
-        self._config_path = config_path
-        lay = QVBoxLayout(self)
-
-        hint = QLabel("编辑监测端口与机器命名(保存后即时生效, 无需重启)", objectName="cardHint")
-        lay.addWidget(hint)
-
-        # 三处机器命名(自定义)
-        form = QFormLayout()
-        self._in_local = QLineEdit(cfg.get("local_name") or "本机")
-        self._in_lab = QLineEdit(cfg.get("lab_name") or "实验室")
-        self._in_ssh = QLineEdit(cfg.get("ssh_name") or "公网中转")
-        form.addRow("本机名称", self._in_local)
-        form.addRow("实验室名称", self._in_lab)
-        form.addRow("公网中转名称", self._in_ssh)
-        lay.addLayout(form)
-
-        self._tabs = QTabWidget()
-        self._local_tbl = self._make_table()
-        self._remote_tbl = self._make_table()
-        self._tabs.addTab(self._local_tbl, "本机端口")
-        self._tabs.addTab(self._remote_tbl, "公网隧道")
-        lay.addWidget(self._tabs)
-
-        btns = QHBoxLayout()
-        add = QPushButton("添加一行")
-        add.clicked.connect(lambda: self._current_tbl().insertRow(self._current_tbl().rowCount()))
-        dele = QPushButton("删除选中")
-        dele.clicked.connect(self._del_row)
-        btns.addWidget(add)
-        btns.addWidget(dele)
-        btns.addStretch(1)
-        lay.addLayout(btns)
-
-        box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save
-                               | QDialogButtonBox.StandardButton.Cancel)
-        box.button(QDialogButtonBox.StandardButton.Save).setText("保存")
-        box.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        box.accepted.connect(self._on_save)
-        box.rejected.connect(self.reject)
-        lay.addWidget(box)
-
-        self._fill(self._local_tbl, cfg.get("local_ports", []))
-        self._fill(self._remote_tbl, cfg.get("remote_tunnels", []))
-
-    def _make_table(self):
-        t = QTableWidget(0, 3)
-        t.setHorizontalHeaderLabels(["端口", "名称", "备注"])
-        t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        t.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        return t
-
-    def _current_tbl(self):
-        return self._local_tbl if self._tabs.currentIndex() == 0 else self._remote_tbl
-
-    def _fill(self, tbl, rows):
-        for port, name, note in rows:
-            r = tbl.rowCount()
-            tbl.insertRow(r)
-            tbl.setItem(r, 0, QTableWidgetItem(str(port)))
-            tbl.setItem(r, 1, QTableWidgetItem(name))
-            tbl.setItem(r, 2, QTableWidgetItem(note))
-
-    def _collect(self, tbl):
-        rows = []
-        for r in range(tbl.rowCount()):
-            try:
-                port = int((tbl.item(r, 0) or QTableWidgetItem("")).text().strip())
-            except ValueError:
-                port = 0
-            name = (tbl.item(r, 1) or QTableWidgetItem("")).text().strip()
-            note = (tbl.item(r, 2) or QTableWidgetItem("")).text().strip()
-            if port > 0:
-                rows.append([port, name, note])
-        return rows
-
-    def _del_row(self):
-        tbl = self._current_tbl()
-        for idx in sorted({i.row() for i in tbl.selectedIndexes()}, reverse=True):
-            tbl.removeRow(idx)
-
-    def _on_save(self):
-        from core import config as dsh_config
-        cfg = dsh_config.load_config(self._config_path)
-        cfg["local_ports"] = self._collect(self._local_tbl)
-        cfg["remote_tunnels"] = self._collect(self._remote_tbl)
-        cfg["local_name"] = self._in_local.text().strip() or "本机"
-        cfg["lab_name"] = self._in_lab.text().strip() or "实验室"
-        cfg["ssh_name"] = self._in_ssh.text().strip() or "公网中转"
-        if not dsh_config.save_config(cfg, self._config_path):
-            QMessageBox.warning(self, "保存失败",
-                                "config.json 写入失败(可能被占用), 请检查后重试")
-            return
-        self.saved = True
-        self.accept()
-
 
 class EnvDialog(_DialogBase):
     # 独立"环境检查"窗口: 展示 git/node/npm/pnpm 版本与推荐基准,

@@ -121,7 +121,7 @@ NAV_ITEMS = [
     ('Agent 模式', 'agents'), ('Profile 管理', 'profiles'), ('插件管理', 'plugins'),
     ('任务看板', 'taskboard'), ('模型用量', 'usage'), ('LLM 配置', 'llm'),
     ('备份与运维', 'ops'), ('SSH 密钥', 'keys'), ('部署管理', 'deployments'),
-    ('日志管理', 'logs'), ('关于与更新', 'version'),
+    ('日志管理', 'logs'), ('设置', 'settings'), ('关于与更新', 'version'),
 ]
 
 
@@ -724,26 +724,8 @@ class MainWindow(QMainWindow):
 
     # ---- 顶栏对话框入口(配置向导/环境检查/安装向导) ----
     def _open_config(self):
-        global CONFIG
-        import copy
-        from ui.dialogs import ConfigDialog
-        dlg = ConfigDialog(copy.deepcopy(CONFIG), parent=self, app=self)
-        dlg.exec()
-        if not getattr(dlg, "result", None):
-            return
-        try:
-            dsh_data.backup_file(CONFIG_PATH)
-            with open(CONFIG_PATH, encoding='utf-8') as f:
-                cfg = json.load(f) or {}
-        except Exception:
-            cfg = {}
-        cfg.update(dlg.result)
-        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-        CONFIG = cfg
-        self.loge("配置已保存", "ok")
-        self._refresh_deploy_list()
-        self.set_status("配置已保存（隧道/端口等参数完整生效需重启）")
+        # P1 弹窗收敛: 配置在「设置」页内完成(标签页), 不再弹 ConfigDialog
+        self._show_page("settings")
 
     def _open_env(self):
         from ui.dialogs import EnvDialog
@@ -863,8 +845,11 @@ class MainWindow(QMainWindow):
         elif key == "logs":
             from ui.pages_logs import LogsPage
             page = LogsPage(self)
+        elif key == "settings":
+            from ui.pages_settings import SettingsPage
+            page = SettingsPage(self)
         else:
-            # 兜底(正常不可达: 14 个导航 key 全部有真实页面)
+            # 兜底(正常不可达: 15 个导航 key 全部有真实页面)
             page = QLabel("未知页面: " + key)
         self.stack.addWidget(page)
 
@@ -896,12 +881,11 @@ class MainWindow(QMainWindow):
 
     # ---- P0 配置驱动: 监控设置 + 热重载 ----
     def _open_monitor_settings(self):
-        from ui.dialogs import MonitorSettingsDialog
-        dlg = MonitorSettingsDialog(CONFIG, CONFIG_PATH, parent=self)
-        if dlg.exec() and dlg.saved:
-            self._reload_config()
+        # P1 弹窗收敛: 右栏 ⚙ -> 设置页"监控与命名"标签(不再弹模态)
+        self._pending_settings_tab = "monitor"
+        self._show_page("settings")
 
-    def _reload_config(self):
+    def reload_config(self):
         # 热重载: 重读 config -> 重建卡片/右栏/窄条/部署列表, service 探测点跟随。
         global CONFIG
         CONFIG = _load_config()

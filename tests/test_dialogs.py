@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-# ui/dialogs.py 对话框构造冒烟测试。
-# 验证: ConfigDialog / InstallDialog / EnvDialog 构造不崩溃。
-# 环境: QT_QPA_PLATFORM=offscreen。
+# ui/pages_settings.py 设置页 + ui/dialogs.py 剩余对话框构造冒烟测试。
+# 验证: SettingsPage 构造/模板/保存合并路径 + InstallDialog / EnvDialog 构造不崩溃。
+# 环境: QT_QPA_PLATFORM=offscreen; 配置读写 monkeypatch 拦截, 绝不写真实 config.json。
 
 import os
 import sys
@@ -23,61 +23,89 @@ def qapp_mod():
     return app
 
 
-class TestConfigDialog:
-    """ConfigDialog: 配置向导构造冒烟。"""
+class _FakeApp:
+    # 设置页依赖的最小 app: 热重载调用记账
+    _pending_settings_tab = None
 
-    def test_construction(self, qapp_mod):
-        from ui.dialogs import ConfigDialog
-        cfg = {
-            "ssh_server": "YOUR_PUBLIC_IP",
-            "ssh_user": "YOUR_USER",
-            "dash_repo": "",
-            "dash_port": 3080,
-            "dash_cmd": ["pnpm.cmd", "dsh", "web"],
-            "forward_ports": [8090, 8022, 8091],
-            "lab_server": "",
-            "lab_user": "",
-            "lab_port": 3090,
-            "reverse_port": 8091,
-            "poll_seconds": 4,
-            "remote_poll_seconds": 20,
-        }
-        dlg = ConfigDialog(cfg)
-        assert dlg.windowTitle() == "隧道配置向导"
-        assert dlg.result is None
-        dlg.close()
+    def __init__(self):
+        self.reloaded = False
+
+    def reload_config(self):
+        self.reloaded = True
+
+    def loge(self, *a):
+        pass
+
+    def log(self, *a):
+        pass
+
+
+class TestSettingsPage:
+    """SettingsPage: 配置弹窗标签化(A1)后的构造/模板/保存合并。"""
+
+    CFG = {
+        "ssh_server": "YOUR_PUBLIC_IP", "ssh_user": "YOUR_USER",
+        "dash_repo": "D:/x", "dash_port": 3080,
+        "dash_cmd": ["pnpm.cmd", "dsh", "web"],
+        "forward_ports": [8090, 8022, 8091], "lab_server": "", "lab_user": "",
+        "lab_port": 3090, "reverse_port": 8091, "poll_seconds": 4,
+        "remote_poll_seconds": 20, "local_name": "本机", "lab_name": "实验室",
+        "ssh_name": "公网中转", "local_ports": [[3080, "dsh web", ""]],
+        "remote_tunnels": [[8091, "reverse", ""]],
+    }
+
+    def test_construction_prefill(self, qapp_mod, monkeypatch):
+        from ui.pages_settings import SettingsPage
+        import core.config as dsh_config
+        monkeypatch.setattr(dsh_config, "load_config", lambda path=None: dict(self.CFG))
+        page = SettingsPage(_FakeApp())
+        assert page._vars["dash_port"].text() == "3080"
+        assert page._vars["dash_cmd"].text() == "pnpm.cmd dsh web"
+        assert page._local_tbl.rowCount() == 1
+        assert page._in_local.text() == "本机"
+        page.close()
         qapp_mod.processEvents()
 
-    def test_template_fill(self, qapp_mod):
-        from ui.dialogs import ConfigDialog
-        cfg = {}
-        dlg = ConfigDialog(cfg)
-        # 应用模板
-        dlg._apply("在家→中继隧道")
-        assert dlg._vars["ssh_server"].text() == "YOUR_PUBLIC_IP"
-        dlg.close()
+    def test_template_fill(self, qapp_mod, monkeypatch):
+        from ui.pages_settings import SettingsPage
+        import core.config as dsh_config
+        monkeypatch.setattr(dsh_config, "load_config", lambda path=None: {})
+        page = SettingsPage(_FakeApp())
+        page._apply("在家→中继隧道")
+        assert page._vars["ssh_server"].text() == "YOUR_PUBLIC_IP"
+        page.close()
         qapp_mod.processEvents()
 
-    def test_save_with_valid_data(self, qapp_mod):
-        from ui.dialogs import ConfigDialog
-        cfg = {
-            "dash_port": 3080,
-            "forward_ports": [8090, 8022, 8091],
-            "lab_port": 3090,
-            "reverse_port": 8091,
-            "poll_seconds": 4,
-            "remote_poll_seconds": 20,
-        }
-        dlg = ConfigDialog(cfg)
-        # 填入有效数据
-        dlg._vars["dash_port"].setText("3080")
-        dlg._vars["poll_seconds"].setText("4")
-        dlg._vars["remote_poll_seconds"].setText("20")
-        dlg._vars["forward_ports"].setText("8090,8022,8091")
-        dlg._on_save()
-        assert dlg.result is not None
-        assert dlg.result["dash_port"] == 3080
-        dlg.close()
+    def test_save_merges_and_reloads(self, qapp_mod, monkeypatch):
+        from ui.pages_settings import SettingsPage
+        import core.config as dsh_config
+        monkeypatch.setattr(dsh_config, "load_config", lambda path=None: dict(self.CFG))
+        saved = {}
+        monkeypatch.setattr(dsh_config, "save_config",
+                            lambda cfg, path=None: saved.update(cfg) or True)
+        app = _FakeApp()
+        page = SettingsPage(app)
+        page._on_save()
+        assert saved["dash_port"] == 3080
+        assert saved["local_ports"] == [[3080, "dsh web", ""]]
+        assert saved["ssh_server"] == "YOUR_PUBLIC_IP"
+        assert app.reloaded is True
+        page.close()
+        qapp_mod.processEvents()
+
+    def test_save_invalid_integer_refused(self, qapp_mod, monkeypatch):
+        from ui.pages_settings import SettingsPage
+        import core.config as dsh_config
+        monkeypatch.setattr(dsh_config, "load_config", lambda path=None: dict(self.CFG))
+        saved = {}
+        monkeypatch.setattr(dsh_config, "save_config",
+                            lambda cfg, path=None: saved.update(cfg) or True)
+        page = SettingsPage(_FakeApp())
+        page._vars["dash_port"].setText("abc")
+        page._on_save()
+        assert saved == {}   # 非法整数不落盘
+        assert "整数" in page._save_lbl.text()
+        page.close()
         qapp_mod.processEvents()
 
 
