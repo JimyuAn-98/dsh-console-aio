@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
     QComboBox, QFrame, QSizePolicy, QAbstractItemView,
-    QMessageBox, QToolTip, QSplitter, QStackedLayout)
+    QMessageBox, QToolTip, QSplitter)
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QEvent, QPoint, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QTextCursor, QColor, QCursor
 
