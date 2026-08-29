@@ -14,8 +14,7 @@ from PySide6.QtWidgets import (QApplication, QGraphicsBlurEffect,
 # 观感参数(调这里改效果)
 BLUR_RADIUS = 12      # 小图(1/3 尺寸)上的模糊半径, 等效全尺寸 ~36px
 DOWNSAMPLE = 3        # 抓取图缩小倍数(性能)
-TINT = QColor(18, 18, 30, 200)    # 深色亚克力着色(tint)
-FALLBACK = QColor(24, 24, 36)     # 抓取失败时的纯色兜底
+TINT = QColor(18, 18, 30, 200)    # 深色亚克力着色(tint); 抓屏失败时也用它兜底(保持半透明)
 
 
 class AcrylicBackdrop(QWidget):
@@ -40,11 +39,17 @@ class AcrylicBackdrop(QWidget):
         try:
             scr = self._win.screen() or QApplication.primaryScreen()
             if scr is None:
+                self._win.loge("亚克力: 无屏幕可用", "err")
                 return
             geo = self._win.frameGeometry()
             if geo.width() <= 0 or geo.height() <= 0:
                 return
             pix = scr.grabWindow(0, geo.x(), geo.y(), geo.width(), geo.height())
+            if pix.isNull():
+                self._win.loge("亚克力: 抓屏返回空图", "err")
+                self._img = None
+                self.update()
+                return
             img = pix.toImage()
             w, h = img.width(), img.height()
             sw = max(1, w // DOWNSAMPLE)
@@ -70,7 +75,9 @@ class AcrylicBackdrop(QWidget):
             # 放大回原尺寸
             self._img = out.scaled(w, h, Qt.AspectRatioMode.IgnoreAspectRatio,
                                    Qt.TransformationMode.SmoothTransformation)
-        except Exception:
+            self._win.loge("亚克力: 抓屏 %dx%d 模糊完成" % (w, h), "ok")
+        except Exception as e:
+            self._win.loge("亚克力抓屏失败: %s" % e, "err")
             self._img = None
         self.update()
 
@@ -79,5 +86,6 @@ class AcrylicBackdrop(QWidget):
         if self._img is not None and not self._img.isNull():
             p.drawImage(self.rect(), self._img)
         else:
-            p.fillRect(self.rect(), FALLBACK)
+            # 兜底用半透明 tint(保持透明通道, 避免不透明盖住分层窗口)
+            p.fillRect(self.rect(), TINT)
         p.end()
