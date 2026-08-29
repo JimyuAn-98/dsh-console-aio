@@ -5,6 +5,9 @@
 # QGraphicsBlurEffect 高斯模糊 -> 深色着色 -> 放大, 绘制为窗口底层背景;
 # 面板用 rgba 半透明, 透出模糊背景, 呈现"深色亚克力"效果。
 # 窗口移动/缩放时防抖重绘(120ms)。抓取失败回退纯色。
+# 调试: 设环境变量 DSH_ACRYLIC_TEST=1 时画亮色渐变测试图, 验证渲染链路。
+
+import os
 
 from PySide6.QtCore import Qt, QTimer, QEvent
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
@@ -36,6 +39,23 @@ class AcrylicBackdrop(QWidget):
 
     def refresh(self):
         self._timer.stop()
+        # 调试开关: DSH_ACRYLIC_TEST=1 时用亮色渐变代替抓屏, 验证 backdrop 渲染链路
+        if os.environ.get("DSH_ACRYLIC_TEST"):
+            w, h = self._win.width(), self._win.height()
+            img = QImage(max(1, w), max(1, h), QImage.Format.Format_ARGB32)
+            p = QPainter(img)
+            p.fillRect(img.rect(), QColor(255, 80, 160))
+            p.fillRect(img.rect(), QColor(0, 220, 255))
+            # 左粉右青渐变(便于肉眼确认是否渲染)
+            for i in range(max(1, w)):
+                t = i / max(1, w - 1)
+                p.setPen(QColor(int(255 * (1 - t)), int(80 + 140 * t), int(160 + 95 * t)))
+                p.drawLine(i, 0, i, h)
+            p.end()
+            self._img = img
+            self._win.loge("亚克力: 测试渐变模式(WxH=%dx%d)" % (w, h), "ok")
+            self.update()
+            return
         try:
             scr = self._win.screen() or QApplication.primaryScreen()
             if scr is None:
