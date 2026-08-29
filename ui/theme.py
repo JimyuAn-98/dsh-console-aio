@@ -108,6 +108,7 @@ QFrame#statusPanel {{ border: none; }}
 QFrame#miniStrip {{ background: {bg_panel}; border-left: 1px solid {t["border"]}; }}
 QLabel#miniDot {{ font-size: 8px; }}
 QLabel#miniNum {{ color: {t["text_dim"]}; font-size: 9px; }}
+QLabel#miniSection {{ color: #6a6a80; font-size: 8px; padding-top: 5px; }}
 QPushButton#collapseBtn {{
     background: transparent; border: 1px solid transparent; border-radius: {t["radius_sm"]};
     padding: 0; color: {t["text_dim"]}; font-size: 13px;

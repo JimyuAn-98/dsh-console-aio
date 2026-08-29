@@ -313,9 +313,14 @@ class MiniStatusStrip(QFrame):
             btn.setToolTip("展开状态栏")
             btn.clicked.connect(on_expand)
             v.addWidget(btn, 0, Qt.AlignHCenter)
+        # 与右栏同构: 分组中文间隔 + 同顺序的「状态点+端口号」(点/号左对齐, 位置一致)
         self._rows = {}   # ("L"|"R", port) -> (dot, num)
-        for tag, ports in (("L", CONFIG.get("local_ports", [])),
-                           ("R", CONFIG.get("remote_tunnels", []))):
+        for tag, title, ports in (("L", "本机端口", CONFIG.get("local_ports", [])),
+                                  ("R", "公网隧道", CONFIG.get("remote_tunnels", []))):
+            if not ports:
+                continue
+            sec = QLabel(title, objectName="miniSection")
+            v.addWidget(sec, 0, Qt.AlignLeft)
             for port, _, _ in ports:
                 row = QHBoxLayout()
                 row.setSpacing(3)
