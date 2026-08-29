@@ -159,3 +159,23 @@ tools/screenshot_ui.py         → 每轮 GUI 改动的验证工具（渲染 PNG
 - **P3（进阶）**：命令面板 + 配置导出导入 + 诊断报告 + 图表
 - **P4（愿景主线）**：隧道规划器 + 远程部署子工具组
 
+## 十一、跨平台 GUI 策略（2026-08-29 决定：一套自适应套件）
+
+**结论：一套设计系统（token + 组件库）+ 平台效果适配层；不做三套独立 UI。**
+
+- 单一 PySide6 代码库，UI 逻辑约 80% 平台无关；多套套件 = 三倍维护成本，小项目不可承受。
+- 拆分维度是"设计 token（颜色/圆角/间距/字体栈）"与"平台效果适配器"：
+
+| 层 | Windows 11 | macOS | Linux |
+|---|---|---|---|
+| 背景效果 | Mica（DWM, 22H2+） | vibrancy（原生集成成本高 → 先半透明近似或纯色） | 纯 QSS 深色（尊重系统暗色） |
+| 字体栈 | Microsoft YaHei UI | PingFang SC | Noto Sans CJK（QSS 多字体回退） |
+| 标题栏 | 无边框自绘（配 Mica） | **原生标题栏**（红绿灯） | 原生 |
+| 动效/组件 | QPropertyAnimation + 同一组件库 | 同左 | 同左 |
+
+- **真正拦路虎在 core 层**：powershell/tasklist/taskkill/ssh.exe/pnpm.cmd 全为 Windows 专属；
+  GUI 跨平台需要 core 平台抽象（进程/隧道/路径）。
+- **渐进路线**：UI 层现在就跨平台就绪（平台探测 + 适配器接口，P1 主题引擎内建）；
+  core 层 Windows 优先，等真有 Linux/macOS 用户再抽平台层。P1 阶段 Linux/macOS 即可走纯 QSS 回退运行。
+
+
