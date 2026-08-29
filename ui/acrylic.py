@@ -20,6 +20,62 @@ DOWNSAMPLE = 3        # 抓取图缩小倍数(性能)
 TINT = QColor(18, 18, 30, 150)    # 深色亚克力着色(tint); alpha 越浅, 模糊背景越明显
 
 
+def _desktop_hwnd():
+    """返回桌面壁纸层窗口句柄(Progman 或其 WorkerW 兄弟), 不含任何应用窗口。
+    经典做法: Progman + 0x052C 消息确保 WorkerW 存在; WorkerW 需带 SHELLDLL_DefView 子窗。
+    """
+    import ctypes.wintypes as wt
+    u = ctypes.windll.user32
+    progman = u.FindWindowW("Progman", None)
+    if progman:
+        u.SendMessageTimeoutW(progman, 0x052C, 0xD, 0, 0x0002, 1000,
+                              ctypes.byref(ctypes.c_ulong()))
+        if u.FindWindowExW(progman, None, "SHELLDLL_DefView", None):
+            return progman
+    found = []
+
+    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+    def _cb(h, l):
+        cls = ctypes.create_unicode_buffer(64)
+        u.GetClassNameW(h, cls, 64)
+        if cls.value == "WorkerW" and u.FindWindowExW(h, None, "SHELLDLL_DefView", None):
+            found.append(h)
+            return False
+        return True
+
+    u.EnumWindows(_cb, 0)
+    return found[0] if found else None
+
+
+def capture_wallpaper():
+    """捕获桌面壁纸层(不含应用窗口, 避免亚克力自反馈)。返回 QPixmap 或 None。"""
+    import ctypes.wintypes as wt
+    u = ctypes.windll.user32
+    g = ctypes.windll.gdi32
+    hwnd = _desktop_hwnd()
+    if not hwnd:
+        return None
+    hdc = u.GetWindowDC(hwnd)
+    if not hdc:
+        return None
+    try:
+        rect = wt.RECT()
+        u.GetWindowRect(hwnd, ctypes.byref(rect))
+        w, h = rect.right - rect.left, rect.bottom - rect.top
+        if w <= 0 or h <= 0:
+            return None
+        mem = g.CreateCompatibleDC(hdc)
+        bmp = g.CreateCompatibleBitmap(hdc, w, h)
+        g.SelectObject(mem, bmp)
+        g.BitBlt(mem, 0, 0, w, h, hdc, 0, 0, 0x00CC0020)  # SRCCOPY
+        pm = QPixmap.fromWinHBITMAP(int(bmp))
+        g.DeleteObject(bmp)
+        g.DeleteDC(mem)
+        return pm
+    finally:
+        u.ReleaseDC(hwnd, hdc)
+
+
 class AcrylicBackdrop(QWidget):
     """窗口底层背景: 抓取屏幕后方 -> 高斯模糊 + 深色着色 -> 绘制。"""
 
@@ -57,19 +113,25 @@ class AcrylicBackdrop(QWidget):
             self.update()
             return
         try:
-            scr = self._win.screen() or QApplication.primaryScreen()
-            if scr is None:
-                self._win.loge("亚克力: 无屏幕可用", "err")
-                return
-            geo = self._win.frameGeometry()
-            if geo.width() <= 0 or geo.height() <= 0:
-                return
-            pix = scr.grabWindow(0, geo.x(), geo.y(), geo.width(), geo.height())
-            if pix.isNull():
-                self._win.loge("亚克力: 抓屏返回空图", "err")
-                self._img = None
-                self.update()
-                return
+            pix = capture_wallpaper()
+            if pix is None or pix.isNull():
+                # 回退: 窗口透明化后抓屏(避免抓到自己的亚克力背景形成反馈)
+                scr = self._win.screen() or QApplication.primaryScreen()
+                if scr is None:
+                    self._win.loge("亚克力: 壁纸层与屏幕均不可用", "err")
+                    return
+                geo = self._win.frameGeometry()
+                self._win.setWindowOpacity(0.0)
+                QApplication.processEvents()
+                try:
+                    pix = scr.grabWindow(0, geo.x(), geo.y(), geo.width(), geo.height())
+                finally:
+                    self._win.setWindowOpacity(1.0)
+                if pix.isNull():
+                    self._win.loge("亚克力: 抓屏返回空图", "err")
+                    self._img = None
+                    self.update()
+                    return
             img = pix.toImage()
             w, h = img.width(), img.height()
             sw = max(1, w // DOWNSAMPLE)
