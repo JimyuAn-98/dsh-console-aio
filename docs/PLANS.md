@@ -1,66 +1,47 @@
-# 方案与实施记录（PLANS）
+# 方案与实施记录（PLANS）— 历史归档
 
-本目录记录 dsh-console-aio 的规划方案、目标与非目标、实施状态。方便回溯，避免方案遗忘。
-
-各条目标注：**[规划]** 未开始 / **[进行中]** / **[已完成]** / **[决定不做]**。
+> 本文档为**历史方案与决策记录**（已完成/归档内容）。
+> 当前路线与状态见 `docs/ROADMAP.md`；已知问题见 `docs/BUGS.md`；愿景探索见
+> `docs/VISION_部署子工具组.md`。
 
 ---
 
-## 1. 配置编辑器方案（原"ABC 方案"）
+## 1. 配置编辑器方案（原"ABC 方案"）[已完成]
 
 > 背景：早期讨论把"手改 config.json"降低门槛时，提出过 A/B/C 三级渐进方案。
 > 用户最终选择：**方案 A + 轻量版 B**，并**已完成**。
 
-- **方案 A — 配置向导（增强现有配置对话框）** **[已完成]**
+- **方案 A — 配置向导（增强现有配置对话框）** [已完成]
   - 原 7 字段平铺对话框 → 分组向导：① 公网中转服务器 ② 本机 dsh ③ 隧道参数 ④ 轮询
   - 每个字段带灰色帮助文字；新增"测试 SSH 连接"按钮（在线验证免密）。
-- **方案 B — 隧道创建向导 + 拓扑模板** **[已完成(轻量版)]**
+- **方案 B — 隧道创建向导 + 拓扑模板** [已完成(轻量版)]
   - 内置 3 个场景模板（在家→中继 / 实验室→直连 / 本机→中继反向），一键填充端口映射。
   - 完整版（任意新增/删除隧道卡片、动态生成卡片）**暂未实现**，作为后续可选。
-- **方案 C — 连接向导 + 一键诊断 + 自动化（含 ssh-copy-id、自动装公钥）** **[规划/未做]**
-  - 后续若要做"深度排障自动化"，在方案 C 基础上扩展。
+- **方案 C — 连接向导 + 一键诊断 + 自动化** [规划/未做]
 
 ---
 
-## 2. 一键安装 dsh（全新环境辅助）
+## 2. 一键安装 dsh（全新环境辅助）[已完成]
 
-> 用户：辅助本地全新安装 dsh。[已完成]
-
-- 顶部 **【安装 dsh】** 按钮 → 安装向导（InstallDialog）
+- 顶部**【安装 dsh】**按钮 → 安装向导（InstallDialog）
 - 默认仓库地址：官方 deepseek-harness（可改）
-- 环境预检 → git clone → pnpm install → pnpm build → 写 dash_repo 到 config.json
+- 流程：环境预检 → git clone → pnpm install → pnpm build → 写 dash_repo 到 config.json
 
 ---
 
-## 3. 环境监测独立窗口（运维辅助） [已完成]
+## 3. 环境监测独立窗口（运维辅助）[已完成]
 
-> 用户：环境监测做成**独立窗口**；推荐版本以**当前开发机为基准**（当前能跑 = 基准）；卸载走提示。
-
-- **目标**：独立"环境检查"窗口，随时可看 git / node / npm / pnpm 的版本与状态。
-- **推荐版本**：以当前开发电脑实际安装版本为基准（能跑即基准），直接写版本号（如 v24.19 / 11.17），不额外说明来源。
-- **安装目录**：InstallDialog 目标目录改为"浏览…"按钮调用系统文件夹选择（filedialog.askdirectory）。
-- **操作（更新/安装/卸载三按钮）**：
-  - 每个工具一行，带 更新/安装/卸载 三个按钮；点击后先说明将执行什么，确认（是/否）后才执行。
-  - 更新：git → git update-git-for-windows；npm → npm install -g npm@latest；pnpm → pnpm add -g pnpm@latest；node → 提示用 nvm-windows 或官网。
-  - 安装：git/node → 打开官网下载页；pnpm → npm install -g pnpm；npm → 提示随 Node.js。
-  - 卸载：统一打开系统"设置-应用-安装的应用"页（ms-settings:appsfeatures），不自动执行卸载。
-  - 命令执行在后台线程（CREATE_NO_WINDOW + 超时），完成后弹结果框。
+- 独立"环境检查"窗口；推荐版本以**当前开发机为基准**；卸载走系统设置提示。
+- 每个工具一行（git/node/npm/pnpm），带 更新/安装/卸载 三按钮，点击先说明将执行什么、确认后执行。
+- 更新：git → `git update-git-for-windows`；npm → `npm install -g npm@latest`；
+  pnpm → `pnpm add -g pnpm@latest`；node → 提示用 nvm-windows 或官网。
+- 安装：git/node → 官网下载页；pnpm → `npm install -g pnpm`；npm → 随 Node.js。
+- 卸载：统一打开系统"设置-应用"页，不自动卸载。
+- 命令后台线程执行（CREATE_NO_WINDOW + 超时），完成后弹结果框。
 
 ---
 
-## 4. 其他想法 / 候选
-
-- PyInstaller 打包单文件 exe（build_win.bat 已备） [规划]
-- 多套拓扑配置切换 [规划]
-- 配置热重载（保存后免重启）[规划]
-
----
-
-*最近更新：2025（dsh-console-aio）*
-
----
-
-## 5. 历史脱敏（重要安全操作） [已完成]
+## 4. 历史脱敏（重要安全操作）[已完成]
 
 > 2025-08-25：早期 3 个 commit（初版 / 脱敏legacy / 配置向导）含真实 IP 与用户名，已用 git-filter-repo 全局重写历史。
 
@@ -73,191 +54,69 @@
 
 ---
 
-## 6. 宏大计划：进化成"dsh 控制台"（dsh Console） [实现中·v2 启动]
+## 5. v2 宏大计划：进化成"dsh 控制台"（2025-08-25）[已实现]
 
-> 用户愿景：从"隧道管理工具"进化为专为 dsh 设计的控制台软件，帮小白用户上手 dsh。
-> 2025-08-25 调研了本地 deepseek-harness checkout，确认以下机制全部真实存在，路线可落地。
-
-### 调研结论（机制依据）
+> 用户愿景：从"隧道管理工具"进化为专为 dsh 设计的控制台软件。已实现为 13 页
+> PySide6 控制台（v0.3.0+）；后续路线见 `docs/ROADMAP.md`。以下**机制调研结论**仍有参考价值。
 
 - **Profile 机制**：`dsh --profile <name>` 是真实命令（`dsh web` 等价于 `dsh --profile web`）。
-  profile 位于 `~/.dsh/profiles/<name>/`，包含：cordis.yml（配置树）、cordis.patch.yml（补丁）、package.json + node_modules + pnpm-workspace.yaml（独立依赖）。
-  → profile 管理 = 列出/切换/创建 ~/.dsh/profiles 下的目录，用 `dsh --profile <name>` 启动。
-- **插件机制**：cordis.yml 用 `insert:` 行加载插件（id + npm 包名，如 @deepseek-ai/dsh-cordis-host-runner）；
-  profile 目录有 `.dsh-market/`（插件市场目录）；插件安装 = 改 profile 的 package.json + cordis.yml insert + pnpm install。
-  → 插件管理 = 读取/编辑 cordis.yml（YAML 增删 insert 行）+ 管理 profile 依赖。
-- **主题机制**：~/.dsh/settings.yaml 已有 UI 配置项（skin-background、dsh-better-sidebar、ui-onboarding 等）；
-  web 主题由 ui-theme 包（--dsw-* CSS token，light/dark）实现。
-  → 主题管理 = 读写 settings.yaml 的 UI 配置 + 提供预览。
-- **运行时监控**：dsh 运行时产物在 ~/.dsh/sessions/（会话）、storages/（存储）、remote-web-ui（远端访问配置）。
-  → 运行时监控 = 进程状态 + 3080 端口 + web 日志流 + 会话/任务看板。
-
-### 分阶段路线（小步快跑）
-
-- **阶段 0（已完成）**：隧道管理 + 健康监控 + 一键安装 dsh + 环境检查。
-- **阶段 1：dsh 运行时监控**
-  - dsh 进程状态卡片（PID / 启动时间 / 端口），web 日志实时流（复用 _stream_cmd 思想，tail 日志文件）
-  - 会话/存储占用概览
-- **阶段 2：dsh profile 管理**
-  - 列出 ~/.dsh/profiles 下的 profile，显示当前使用的 profile
-  - 一键切换默认 profile（写 config.json 或 settings.yaml），复制/新建 profile
-- **阶段 3：dsh 插件管理**
-  - 解析当前 profile 的 cordis.yml，列出已加载插件
-  - 从 .dsh-market 或 npm 搜索插件 → 安装（改 cordis.yml + package.json + pnpm install，流式日志）→ 卸载/启停
-  - 危险操作确认 + 配置备份（复制 cordis.yml）
-- **阶段 4：dsh web 主题管理**
-  - 读 settings.yaml 的 UI 配置项，提供主题切换（light/dark、皮肤开关）
-  - 主题预览（打开 web UI 或截图级预览）
-- **阶段 5：小白引导**
-  - 首次使用向导（检测环境 → 装 dsh → 配置中转 → 建隧道 → 打开 web）
-  - 一键诊断（环境/SSH 免密/端口/进程逐项检查并报告）
-  - FAQ 内嵌
-
-### 工程约束
-- UI 已迁移到 PySide6（暗色主题 QSS）；打包用 PyInstaller（含 Qt 库）。不再要求零依赖。
-- 所有写操作前备份（cordis.yml / settings.yaml / config.json 复制 .bak）。
-- 敏感信息（IP/用户名/凭据）只在本机 ~/.dsh 与 gitignored 文件，不进仓库。
-- 每个阶段先出"只读展示"，确认后再加"写操作"。
+  profile 位于 `~/.dsh/profiles/<name>/`：cordis.yml + cordis.patch.yml + package.json + node_modules。
+- **插件机制**：cordis.yml 用 `insert:` 行加载插件（id + npm 包名）；`.dsh-market/` 为市场目录；
+  安装 = 改 package.json + cordis.yml insert + pnpm install。
+- **主题机制**：`~/.dsh/settings.yaml` 的 UI 配置项（skin-background、dsh-better-sidebar 等）；
+  web 主题由 ui-theme 包（--dsw-* CSS token）实现。
+- **运行时监控**：dsh 运行时产物在 `~/.dsh/sessions/`、`storages/`、`remote-web-ui`。
 
 ---
 
-## 7. 功能全景清单（dsh 控制台 候选功能域）
+## 6. 功能全景清单（v0.3.0 时代调研）[已实现 ✅]
 
-> 2025-08-25 调研 ~/.dsh 与 dsh CLI 后整理。标注 [优先] 为推荐先做的。
+> 2025-08-25 调研 ~/.dsh 与 dsh CLI 后整理的功能域全景，v0.3.0 已全部实现（数据源说明保留参考）。
 
-### A. 会话与工作区（用户已提） [v0.3.0 已实现: mgmt_sessions.py]
-- **Session 管理** [优先]：~/.dsh/sessions/<编码工作目录>/session-<uuid>/session.jsonl.zstd
-  - 按工作目录浏览会话；查看会话数量/大小；删除；导出（解压 jsonl）。
-- **Workspace 管理** [优先]：storages/workspace.json（workspaceIds 列表）
-  - 列出/重命名/新建 workspace；设置默认工作目录。
-- **归档 Session 管理**：workspace.json 的 archivedSessionIds
-  - 列出归档会话；恢复（移出归档）；彻底删除。
-- **Agent 模式管理** [优先]：~/.dsh/.agent-presets/<名>/（preset.yml + agent.cordis.yml + .mjs 钩子）
-  - 列出可用模式（anchored-standard / liangshen 等）；查看说明；切换默认；复制新建。
+### A. 会话与工作区（mgmt_sessions.py）
+- Session：`~/.dsh/sessions/<编码工作目录>/session-<uuid>/session.jsonl.zstd`（浏览/删除/导出）
+- Workspace：`storages/workspace.json`（workspaceIds）
+- 归档 Session：archivedSessionIds（恢复/彻底删除）
+- Agent 模式：`~/.dsh/.agent-presets/<名>/`（preset.yml + agent.cordis.yml + .mjs 钩子）
 
-### B. 配置与外观（用户已提） [v0.3.0 已实现: mgmt_profiles / mgmt_plugins / mgmt_theme / mgmt_llm]
-- **Profile 管理** [优先]：$DSH_HOME/profiles/<名>/（dsh --profile <名> 启动）
-  - 列出/切换/新建/复制 profile；显示当前 profile；dsh web 等价 --profile web。
-- **插件管理** [优先]：`dsh plugin --profile <名> add <package>` + cordis.yml insert 行 + .dsh-market/
-  - 列出已加载插件（解析 cordis.yml insert）；安装/卸载（dsh plugin 命令转发 pnpm，流式日志）；启停（注释 insert 行）。
-- **主题/皮肤管理**：settings.yaml 的 UI 配置（skin-background / dsh-better-sidebar / ui-onboarding 等）+ ui-theme(--dsw-* token)
-  - 切换皮肤开关/侧边栏配置；light/dark；主题预览。
-- **LLM / 模型配置** [优先]：settings.yaml 的 agent-default-model + llm-pi-ai.providers
-  - 查看/切换默认模型（provider / model / reasoningEffort），可选模型来自内置 provider 与自定义 provider 的 models 列表
-  - 自定义 provider 管理：列出（baseURL / api 协议 / models），新增/编辑/删除（写前备份 settings.yaml）
-  - **密钥安全设计**：apiKeyEnv 只存环境变量名，密钥在系统环境变量里 → 控制台只显示"使用了哪个环境变量、是否已设置"，引导用户配置环境变量，绝不读写密钥明文
+### B. 配置与外观（mgmt_profiles / mgmt_plugins / mgmt_llm）
+- Profile：`$DSH_HOME/profiles/<名>/`（列出/切换/复制）
+- 插件：`dsh plugin --profile <名> add <package>` + cordis.yml insert + .dsh-market/
+- LLM/模型：settings.yaml 的 agent-default-model + llm-pi-ai.providers；
+  **密钥安全**：apiKeyEnv 只存环境变量名，绝不读写密钥明文
 
-### C. 运行时与任务（新增发现） [v0.3.0 已实现: mgmt_taskboard / mgmt_usage]
-- **任务看板** [优先]：task-board/ledger-v2.json + scheduler-v2.json（tasks / scheduler / recentRequests）
-  - 查看任务列表/状态；暂停恢复定时调度；新建简单定时任务。
-- **运行时监控**（已有健康监控的深化）：dsh 进程 PID/端口/启动时间；web 日志流；sessions 存储占用。
-- **模型/Provider 配置**：settings.yaml 的 agent-default-model（provider/model/reasoningEffort）+ llm-pi-ai providers
-  - 查看当前默认模型；切换 provider/模型（改 settings.yaml，备份后写）。
-- **模型用量 / 价格统计** [优先]：数据源 = 解压全部 ~/.dsh/sessions/*/session-*/session.jsonl.zstd
-  - `request/header` 事件提供 provider + model；`assistant/chunk`(type=usage) 提供 inputTokens / outputTokens
-  - 聚合：按模型 / 按天 / 按会话；显示 token 总量、调用次数
-  - 价格估算：内置主流模型单价表（可编辑），输出估算费用
-  - 后台线程解压扫描（~/.dsh/sessions 约几十 MB 可控），结果缓存
+### C. 运行时与任务（mgmt_taskboard / mgmt_usage）
+- 任务看板：`task-board/ledger-v2.json` + `scheduler-v2.json`
+- 模型用量：解压 sessions 的 jsonl.zstd，`request/header` + `assistant/chunk`(usage) 聚合
 
-### D. 安全与运维（新增发现） [v0.3.0 已实现: mgmt_ops]
-- **凭据管理**：.credentials.yaml —— 只做"是否存在/最后修改时间"提示，不明文展示密钥；引导用户自行编辑。
-- **SSH 配置**：dsh-ssh.json —— 查看/编辑 dsh 自身 SSH 参数。
-- **远端 Web 访问**：settings.yaml remote-web-ui.publicBaseUrl —— 查看/修改公网访问地址。
-- **备份/迁移** [优先]：一键备份整个 ~/.dsh（zip，排除凭据）；导入/恢复。
-- **日志管理**：dsh web 日志文件查看/清理（TEMP/dsh-dash/*.log）。
-- **数据统计**：.anonymous-user-id —— 查看/关闭匿名统计。
-- **pet 开关**：settings.yaml pet.enabled。
+### D. 安全与运维（mgmt_ops）
+- 凭据：.credentials.yaml 只做存在性提示；SSH 配置 dsh-ssh.json；备份 zip 排除凭据；
+  日志 TEMP/dsh-dash/*.log；pet 开关 settings.yaml
 
-
-### E. SSH 密钥管理（新增, 2026-08-25） [规划中]
-- **安全红线（重中之重）**：
-  - 私钥内容（~/.ssh/id_* 等无 .pub 后缀文件）**绝不读取、绝不写入任何日志/剪贴板/文件/仓库**
-  - 只展示: 文件名 / 最后修改时间 / 算法与**指纹**（ssh-keygen -lf 输出, 不泄露私钥）
-  - 公钥（.pub）是公开信息, 可展示与复制
-  - 生成密钥: ssh-keygen -t ed25519（用户确认路径/口令选项）
-  - 部署到远程: 展示公钥 + 提示用户手动 ssh-copy-id（不代执行, 避免口令交互泄露）
-  - known_hosts: 只读展示主机名列表
-- 功能: 密钥列表(名称/算法/指纹/时间) / 生成新密钥 / 查看公钥 / 复制公钥 / 打开 .ssh 目录
-- 实现: mgmt_keys.py (KeysPage)
-
-### 建议实施顺序 [v0.3.0 全部完成 ✅]
-1. Session + Workspace + 归档（同一批数据域，UI 类似）→ mgmt_sessions.py
-2. Agent 模式管理 → mgmt_agents.py
-3. Profile + 插件管理（dsh plugin 命令现成）→ mgmt_profiles.py + mgmt_plugins.py
-4. 任务看板 → mgmt_taskboard.py
-5. 主题 + LLM/模型配置 → mgmt_theme.py + mgmt_llm.py + mgmt_usage.py
-6. 备份/迁移 + 凭据提示 → mgmt_ops.py
-
-架构: core/data.py 数据层(零依赖最小YAML解析器/写前备份) + 主程序顶部 dsh 管理菜单动态加载, 见 docs/ARCHITECTURE.md
+### E. SSH 密钥管理（mgmt_keys.py）
+- 红线：私钥内容**绝不读取**，只展示 文件名/时间/算法/指纹；公钥可复制；
+  生成 ed25519；部署提示手动 ssh-copy-id
 
 ---
 
-## 8. 多部署管理（v0.4 方向） [实现中]
+## 7. 多部署管理（v0.4 方向）[已实现为 deployments 页]
 
-> 用户愿景(2026-08-25): 在隧道基础上, 成为"对所有部署的 dsh 的管理"控制台——
-> 统一查看/管理分布在各机器上的 dsh 实例(家里PC/公司机/实验室服务器/云主机)。
-> 差异化定位: dsh-desktop(anywhere-labs)是"跑 dsh 的桌面端", 我们是"管 dsh 的控制台"。
+> 用户愿景：在隧道基础上成为"对所有部署的 dsh 的管理"控制台。当前已实现 deployments
+> 页（CRUD/连接测试/只读快照）；**远程部署子工具组**（隧道之上的安装/更新/日志）列入
+> `docs/ROADMAP.md` P4。
 
-### 调研结论
-- dsh-desktop: 把 dsh web + 插件系统封装成桌面应用(单机), 无多部署管理。
-- 我们的 SSH 隧道架构已打通多机网络层(现成基础设施)。
-- core/data.py 是纯函数路径操作, 可加"远程抽象"复用全部数据域接口。
-
-### 架构设计(见 docs/ARCHITECTURE.md 第 5 节)
-- DshRemote 抽象: 本地模式=直接文件系统; 远程模式=SSH 执行只读命令 + 文件拉取(cat)。
-- 部署清单: config.json 的 deployments 数组(gitignored, 含主机信息): {name, host, user, port, dsh_home}
-- 复用现有 SSH 免密凭据; 远程写操作一律确认 + 流式日志。
-
-### 分阶段
-- **阶段 A(本次)**: 部署管理窗口(mgmt_deployments.py)
-  - 部署 CRUD + 连接测试 + 只读状态总览(每部署: dsh 版本/web状态/会话数大小/插件数/profile 数)
-  - 远程数据: ssh cat 小文件 + ls/du 统计; 不做远程解压用量(无 python 环境风险)
-- **阶段 B**: 各管理窗口加部署选择器(远程化 session/plugin/LLM 等); 远程用量统计(远程 zstd)
-- **阶段 C**: 统一状态总览卡片(健康监控升级到 dsh 层); 部署间隧道联动
-
-### 安全原则
-- 只读优先; 远程写操作确认 + 日志; 部署信息只存 gitignored 的 config.json
----
-
-## 9. 已知问题（Bug 清单）
-
-- **[BUG-001] 插件停用/启用不生效（2026-08-25 用户实测）**
-  - 现象: 停用 dshmarket 后, 刷新 dsh web 页面和重启 dsh web 都不生效。
-  - 状态: 已确认待修(v0.4 收尾后处理), 原因初步定位: entry id 不匹配。
-  - 分析: 插件列表显示的是 bundle 名(npm 包名, 如 dshmarket), 但 cordis loader entry 的 id 是插件自身声明的 id
-    (dsh-market 官方示例: - id: dsh-market, name: dshmarket, config: ... 说明 id != 包名)。
-    我们写入 patch 的是 bundle 名(匹配不上真实 entry), 导致 disabled 不生效。
-  - 修复方向: 用 dsh --profile X --dump-config 获取组合后的真实 entry id 列表, 建立 bundle名->entry id 映射;
-    停用/启用写入正确的 id。或读取插件 package.json 中声明的 id。
+- 架构：DshRemote 抽象（本地=文件系统；远程=SSH 只读命令 + cat 拉取），部署清单在
+  gitignored 的 config.json deployments 数组；复用 SSH 免密凭据；远程写操作一律确认。
+- 安全原则：只读优先；部署信息只存 gitignored 文件。
 
 ---
 
-## 10. 自动化测试套件（pytest）[2026-08-28 加入]
+## 8. UI 前后端分层重构简史（2026-08-28 ~ 2026-08-29）[已完成]
 
-- `tests/` 提供 pytest 测试: test_core.data(数据层) / test_core.tunnel_mgr(隧道) / test_version_page(版本比较) /
-  test_dialogs(对话框) / test_core(业务层: config 派生/隧道组装/信号桥) / test_gui_ui(纯 UI) /
-  test_gui_smoke(GUI 冒烟)。运行: `python -m pytest tests/`。
-- **安全边界**(新增): 默认 `-m "not gui"`, 只执行纯单元 + 纯 UI 测试(隔离 tmp 数据/假配置)。
-  涉及真实 MainWindow 监控线程 / SSH / 端口 / 进程的 GUI 冒烟(test_gui_smoke)默认跳过,
-  仅 `python -m pytest tests/ -m gui` 手动执行——**切勿在 dsh(端口 3080)运行中自动触发**。
-- 决策详见 .agents/notes/implemented/testing/2026-08-28-test-suite-safe-boundary.md。
-
----
-
-## 11. UI 前后端分层重构 [进行中·阶段0 完成 2026-08-28]
-
-- **目标**: 经典 Qt 分层 —— 纯 Python 业务层(core, 严禁 import PySide) + 信号桥接口层
-  (app/services.DshService) + 只做展示/订阅的 UI 层。后端->UI 一律 Qt 信号-槽(硬约束)。
-- 设计与迁移计划见 docs/UI_LAYERING.md; 决策记录见
-  .agents/notes/implemented/architecture/2026-08-28-ui-layering-signal-bridge.md。
-- **阶段0 已完成**: core(config/dshctl/tunnels) + DshService 五信号桥;
-  隧道页/主窗口监控从内联业务改走 service(_run_dsh/_dsh_start/_dsh_stop/_run_python_tunnel/
-  _start_persist/_stop_py_tunnel/_build_tunnel_obj/_probe 三件套全部删除);
-  config.derived 增加 allow_empty_ports 隔离分支(测试用假配置不再被兜底回真实端口)。
-- **后续阶段**: 阶段2 全部完成(波0 result 信号 + 波1 version/keys + 波2 ops/profiles/
-  sessions + 波3 plugins/deployments), 阶段3 完成(dialogs 业务下沉 core/env.py,
-  三份 _stream_cmd 归一), 阶段4 完成(2026-08-29: dsh_data.py 归并 core/data.py,
-  四个纯读页 agents/taskboard/usage/llm 统一经 service)。分波依据 ui 全量审计
-  (2026-08-28, subagent 产出)。
-- **验证边界**: core 可独立纯单元测试(tests/test_core.py, 零真实资源);
-  GUI 交互(隧道启停/监控/3080 无恙)由用户人工在 GUI 验证, 绝不自动跑构造 MainWindow 的测试。
+- 阶段0：dsh_core（config/dshctl/tunnels）+ DshService 信号桥 + dsh 更新流恢复
+- 阶段1：主窗口/隧道页/监控走 service；_stream_cmd 收敛 dshctl.stream_cmd
+- 阶段2：11 个页面业务逐波下沉 core（波1 version/keys，波2 ops/profiles/sessions，
+  波3 plugins/deployments，波4 dialogs→env）
+- 阶段3/4：数据层归并 core/data.py（删 dsh_data shim）、四个纯读页统一经 service
+- 最终形态：core 纯 Python 零 Qt；UI 零子进程业务；全信号-槽；纯单元 307 例。
+  迁移细节见 `docs/UI_LAYERING.md` 与 `.agents/notes/`。

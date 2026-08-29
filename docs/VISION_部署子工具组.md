@@ -1,6 +1,7 @@
 # 愿景：OTP 式部署子工具组（探索笔记，2026-08-29 夜）
 
 > 用户睡前随口一提的长期方向，先记下来、探索清楚，供后续会话展开。
+> 路线状态表见 docs/ROADMAP.md（本文为愿景/探索细节）。
 > 参照物：**Office Tool Plus (OTP)** —— https://github.com/YerongAI/Office-Tool
 > （UI 设计参考：https://deepwiki.com/YerongAI/Office-Tool/9-user-interface-reference ）
 
@@ -87,7 +88,7 @@ tools/screenshot_ui.py         → 每轮 GUI 改动的验证工具（渲染 PNG
 硬编码/半硬编码（ITEMS desc、RightBar label、部署列表），GUI 不跟随。
 
 **方向**：
-- **前提工程 = 配置热重载**（docs/PLANS.md 已有 [规划] 项）：CONFIG 从"模块级常量"变为"事件源"，
+- **前提工程 = 配置热重载**（P0 已完成 2026-08-29）：CONFIG 从"模块级常量"变为"事件源"，
   `configChanged` 信号 → 重建右栏监控点 / 隧道卡片 / 部署列表 / 监控探测点。这是"自定义一切"的地基。
 - **监测端口可自定义**：local_ports / remote_tunnels 在 GUI 内**增删改**（不只改端口号），
   右侧栏、卡片圆点、监控探测全部跟随。
