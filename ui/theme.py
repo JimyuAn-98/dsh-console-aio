@@ -14,9 +14,10 @@ import sys
 
 # ── 设计 token(主题唯一真源; 手动微调改这里, 重开即生效) ──
 TOKENS = {
-    # 背景(不透明 / Mica 半透明两套, 由 build_qss(mica=...) 选用)
-    # ⚠ Mica 模式的 alpha 不能太高: 0.86+ 在深色背景下与实心几乎无差别(实测教训)。
+    # 背景(不透明; Mica 模式下顶层走 transparent, 由 DWM 材质透出)
     "bg": "#1e1e2e",
+    # 以下 rgba 为"无边框 + 分层窗口"丙烯酸路线的预留 token(见 build_qss 注释),
+    # 当前 Mica 方案(非分层 + DWM backdrop)不使用。
     "bg_rgba": "rgba(30, 30, 46, 0.55)",
     "bg_elevated": "#252535",
     "bg_elevated_rgba": "rgba(37, 37, 53, 0.65)",
@@ -54,11 +55,23 @@ TOKENS = {
 
 
 def build_qss(t=None, mica=False):
-    """由 token 生成完整 QSS。mica=True 时主要表面用半透明背景(DWM Mica 透出)。"""
+    """由 token 生成完整 QSS。
+
+    Mica 方案说明(2026-08-29 实测): Qt 6.11 在 Windows 上带原生标题栏的窗口不会进入
+    分层模式(WA_TranslucentBackground 无效, EXSTYLE 无 WS_EX_LAYERED)——逐像素 alpha
+    的丙烯酸路线需要无边框窗口(未来再做)。当前用"非分层 + DWM backdrop
+    (DWMSBT_MAINWINDOW) + 顶层背景 transparent"实现真 Mica: 顶层不画背景,
+    DWM 的 Mica 材质从空白区透出; 面板保持不透明保证可读性。
+    """
     t = t or TOKENS
-    bg_main = t["bg_rgba"] if mica else t["bg"]
-    bg_panel = t["bg_elevated_rgba"] if mica else t["bg_elevated"]
-    bg_log = t["bg_log_rgba"] if mica else t["bg_log"]
+    if mica:
+        bg_main = "transparent"      # 顶层空白区 -> DWM Mica 透出
+        bg_panel = t["bg_elevated"]  # 面板不透明(非分层窗口无逐像素 alpha)
+        bg_log = t["bg_log"]
+    else:
+        bg_main = t["bg"]
+        bg_panel = t["bg_elevated"]
+        bg_log = t["bg_log"]
     return f"""
 * {{
     font-family: {t["font"]};
@@ -180,16 +193,19 @@ def is_windows_11_22h2():
 
 
 def apply_window_effects(window):
-    """对顶层窗口应用平台效果: Win11 22H2+ 启用暗色标题栏 + Mica 背景。
+    """对顶层窗口应用平台效果: Win11 22H2+ 启用暗色标题栏 + DWM Mica 背景。
 
-    返回 True 表示 Mica 已启用(调用方应使用 build_qss(mica=True) 的半透明主题)。
-    失败(旧系统/非 Windows/offscreen)静默回退, 不抛异常。
+    ⚠ 不使用 WA_TranslucentBackground: 带原生标题栏的窗口在 Qt 6.11/Windows 上不会进入
+    分层模式(实测 EXSTYLE 无 WS_EX_LAYERED), 逐像素 alpha 需无边框窗口(丙烯酸路线, 未来做)。
+    当前方案 = 非分层窗口 + DwmSetWindowAttribute(backdrop=MAINWINDOW) + 顶层 QSS transparent,
+    由 build_qss(mica=True) 配合。
+
+    返回 True 表示 Mica 已启用(调用方应使用 build_qss(mica=True) 的主题)。
+    失败(旧系统/非 Windows)静默回退, 不抛异常。
     """
     if not is_windows_11_22h2():
         return False
     try:
-        from PySide6.QtCore import Qt  # 惰性导入: 本模块顶层保持纯 Python
-        window.setAttribute(Qt.WA_TranslucentBackground, True)
         hwnd = int(window.winId())
         DWMWA_USE_IMMERSIVE_DARK_MODE = 20
         DWMWA_SYSTEMBACKDROP_TYPE = 38
