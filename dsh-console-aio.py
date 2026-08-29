@@ -335,7 +335,13 @@ class MainWindow(QMainWindow):
         self._refresh_deploy_list()
         self._show_page("overview")
         if not smoke:
-            self.loge("DSH Console 已启动(v" + APP_VERSION + ")", "ok")
+            if sys.platform == "win32" and self._mica:
+                mica_txt = "Mica 开(build %d)" % sys.getwindowsversion().build
+            elif sys.platform == "win32":
+                mica_txt = "Mica 关(build %d, 回退纯 QSS)" % sys.getwindowsversion().build
+            else:
+                mica_txt = "Mica 关(非 Windows)"
+            self.loge("DSH Console 已启动(v" + APP_VERSION + ") · " + mica_txt, "ok")
 
     # ---- 主题(主题引擎 ui/theme.py, token 驱动) ----
     def _load_theme(self):

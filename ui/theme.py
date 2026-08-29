@@ -15,12 +15,13 @@ import sys
 # ── 设计 token(主题唯一真源; 手动微调改这里, 重开即生效) ──
 TOKENS = {
     # 背景(不透明 / Mica 半透明两套, 由 build_qss(mica=...) 选用)
+    # ⚠ Mica 模式的 alpha 不能太高: 0.86+ 在深色背景下与实心几乎无差别(实测教训)。
     "bg": "#1e1e2e",
-    "bg_rgba": "rgba(30, 30, 46, 0.86)",
+    "bg_rgba": "rgba(30, 30, 46, 0.55)",
     "bg_elevated": "#252535",
-    "bg_elevated_rgba": "rgba(37, 37, 53, 0.78)",
+    "bg_elevated_rgba": "rgba(37, 37, 53, 0.65)",
     "bg_log": "#16161f",
-    "bg_log_rgba": "rgba(22, 22, 31, 0.90)",
+    "bg_log_rgba": "rgba(22, 22, 31, 0.80)",
     "bg_hover": "#2e2e44",
     "bg_active": "#2f3353",
     # 边框 / 强调
