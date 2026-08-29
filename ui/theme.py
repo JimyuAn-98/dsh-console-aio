@@ -110,7 +110,7 @@ QLabel#miniDot {{ font-size: 8px; }}
 QLabel#miniNum {{ color: {t["text_dim"]}; font-size: 9px; }}
 QPushButton#collapseBtn {{
     background: transparent; border: 1px solid transparent; border-radius: {t["radius_sm"]};
-    color: {t["text_dim"]}; font-size: 13px;
+    padding: 0; color: {t["text_dim"]}; font-size: 13px;
 }}
 QPushButton#collapseBtn:hover {{ background: rgba(255, 255, 255, 0.12); color: {t["text"]}; border-color: transparent; }}
 QComboBox#deploy {{

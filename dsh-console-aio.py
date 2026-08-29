@@ -358,11 +358,12 @@ class StatusPanel(QFrame):
         self.setMaximumWidth(280)
         self._mini = MiniStatusStrip(on_expand=self.expand)
         self.right = RightBar(on_collapse=self.collapse)
-        self._stack = QStackedLayout(self)
-        self._stack.addWidget(self.right)
-        self._stack.addWidget(self._mini)
-        self._stack.setAlignment(self._mini, Qt.AlignRight)   # 收起动画时窄条贴右缘
-        self._stack.setCurrentWidget(self.right)
+        # 普通布局 + 显式右对齐(窄条贴面板右缘; QStackedLayout 的 alignment 实测不生效)
+        self._lay = QVBoxLayout(self)
+        self._lay.setContentsMargins(0, 0, 0, 0)
+        self._lay.setSpacing(0)
+        self._lay.addWidget(self.right)
+        self._lay.setAlignment(self._mini, Qt.AlignRight)
         self._anim = QPropertyAnimation(self, b"maximumWidth", self)
         self._anim.setDuration(180)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -372,7 +373,10 @@ class StatusPanel(QFrame):
     def collapse(self):
         self._target = "collapsed"
         self.setMinimumWidth(0)          # 松开下限, 让 max 动画能缩到 44
-        self._stack.setCurrentWidget(self._mini)
+        self._lay.removeWidget(self.right)
+        self._lay.addWidget(self._mini)
+        self.right.hide()
+        self._mini.show()
         self._anim.stop()
         self._anim.setStartValue(self.width())
         self._anim.setEndValue(44)
@@ -382,7 +386,10 @@ class StatusPanel(QFrame):
         self._target = "expanded"
         self.setMinimumWidth(0)
         self.setMaximumWidth(280)
-        self._stack.setCurrentWidget(self.right)
+        self._lay.removeWidget(self._mini)
+        self._lay.addWidget(self.right)
+        self._mini.hide()
+        self.right.show()
         self._anim.stop()
         self._anim.setStartValue(self.width())
         self._anim.setEndValue(240)
@@ -477,6 +484,7 @@ class MainWindow(QMainWindow):
         # ---- 控件检查模式(悬停显示身份, 左键点击打印路径; --inspect 启动 / F12 切换) ----
         self._inspect = "--inspect" in sys.argv
         self._last_inspect_w = None
+        self._last_f12 = 0.0                   # F12 去抖(驱动可能重复投递按键)
         if not smoke:
             QApplication.instance().installEventFilter(self)
             self._inspect_timer = QTimer(self)
@@ -845,8 +853,12 @@ class MainWindow(QMainWindow):
     # ---- 控件检查模式 ----
     def eventFilter(self, obj, event):
         # F12 开关; 开启时左键点击把控件完整路径打进日志区。
-        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_F12 \
-                and not event.isAutoRepeat():
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_F12:
+            import time
+            now = time.monotonic()
+            if event.isAutoRepeat() or now - self._last_f12 < 0.3:
+                return False              # 去抖: 一次物理按键只切换一次
+            self._last_f12 = now
             self._inspect = not self._inspect
             state = "开" if self._inspect else "关"
             self.set_status("控件检查模式: " + state)
