@@ -19,11 +19,13 @@ from PySide6.QtWidgets import (
     QComboBox, QFrame, QSizePolicy, QAbstractItemView,
     QMessageBox, QToolTip, QSplitter)
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QEvent, QPoint, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QTextCursor, QColor, QCursor, QIcon, QPixmap
+from PySide6.QtGui import (QTextCursor, QColor, QCursor, QIcon, QPixmap,
+                           QShortcut, QKeySequence)
 
 from core import data as dsh_data
 from app.services import DshService
 from ui import theme as dsh_theme
+from ui.palette import CommandPalette
 from ui.theme import build_qss, apply_window_effects, try_system_blur
 from ui.widgets import ModernList, card_wrap
 
@@ -786,6 +788,9 @@ class MainWindow(QMainWindow):
         self.bridge.on_status(self._set_status)
         self._refresh_deploy_list()
         self._show_page("overview")
+        # 全局命令面板(Ctrl+K): 页面/部署/动作键盘直达(OTP 式)
+        sc_palette = QShortcut(QKeySequence("Ctrl+K"), self)
+        sc_palette.activated.connect(self._open_palette)
         if not smoke:
             if sys.platform == "win32" and self._mica:
                 theme_txt = "亚克力(自绘模糊, build %d)" % sys.getwindowsversion().build
@@ -1134,6 +1139,19 @@ class MainWindow(QMainWindow):
         if isinstance(page, OverviewPage):
             page.refresh()
         self.loge("已请求刷新", "ok")
+
+    def _open_palette(self):
+        # 命令面板: 打开时组装(页面随 NAV_ITEMS / 部署随当前清单, 无需注册表);
+        # run 在面板 accept 后执行(见 CommandPalette._run_item)。
+        cmds = [{"title": "页面: %s" % label, "meta": "跳转",
+                 "run": (lambda key=key: self._show_page(key))}
+                for label, key in NAV_ITEMS]
+        cmds += [{"title": "部署: %s" % (d.get("name") or "?"), "meta": "切换部署",
+                  "run": (lambda idx=idx: self.deploy.setCurrentIndex(idx))}
+                 for idx, d in enumerate(self._deployments)]
+        cmds.append({"title": "动作: 立即刷新", "meta": "refresh",
+                     "run": self._force_refresh})
+        CommandPalette(self).open(cmds)
 
     # ---- P0 配置驱动: 监控设置 + 热重载 ----
     def _open_monitor_settings(self):

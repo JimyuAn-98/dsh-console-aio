@@ -118,8 +118,10 @@ class UsagePage(BasePage):
         note = QLabel("估算费用按内置单价(元/百万 token)计算; 价格修改仅本次运行生效, 不写入文件。",
                       objectName="cardHint")
 
-        # 三栏横向可扩展(与其他三栏页同款): 视口不足时出横向滚动条, 不再互相挤压
+        # 三栏横向可扩展(与其他三栏页同款): 视口不足时出横向滚动条, 不再互相挤压;
+        # 纵向给足最低高度——上方趋势卡加入后视口剩余不够, 页面纵向滚动而不是压扁三栏
         mid.setMinimumWidth(950)
+        mid.setMinimumHeight(430)
         content = QWidget()
         cv = QVBoxLayout(content)
         cv.setContentsMargins(0, 0, 0, 0)
