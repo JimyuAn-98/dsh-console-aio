@@ -130,7 +130,7 @@ class UsagePage(BasePage):
         # 保持 950 并自己出横向滚动条, 而标题/信息条/趋势卡等仍自适应窗口宽度
         # (不会被三栏最小宽撑破); 视口够宽时三栏照常拉伸铺满
         mid.setMinimumWidth(950)
-        mid.setMinimumHeight(430)
+        mid.setMinimumHeight(560)
         mid_host = QScrollArea()
         mid_host.setWidgetResizable(True)
         mid_host.setFrameShape(QFrame.NoFrame)
