@@ -73,6 +73,7 @@ class UsagePage(BasePage):
         cv.addWidget(title)
         hint = QLabel("解压扫描全部会话的 session.jsonl.zstd 聚合 token 用量(较慢, 后台执行); "
                       "远程部署统计暂不支持, 会明确提示。", objectName="cardHint")
+        hint.setWordWrap(True)   # 不换行会以整行宽度撑破内容最小宽, 窄窗口出外层横滚
         cv.addWidget(hint)
 
         info = QFrame(objectName="card")
@@ -123,17 +124,26 @@ class UsagePage(BasePage):
 
         note = QLabel("估算费用按内置单价(元/百万 token)计算; 价格修改仅本次运行生效, 不写入文件。",
                       objectName="cardHint")
+        note.setWordWrap(True)
 
-        # 三栏横向可扩展(与其他三栏页同款); 纵向最低高度保证呼吸感——整页滚动兜底
+        # 三栏独立横向滚动容器: widgetResizable 尊重子项最小宽 —— 视口 < 950 时三栏
+        # 保持 950 并自己出横向滚动条, 而标题/信息条/趋势卡等仍自适应窗口宽度
+        # (不会被三栏最小宽撑破); 视口够宽时三栏照常拉伸铺满
         mid.setMinimumWidth(950)
         mid.setMinimumHeight(430)
-        cv.addWidget(mid, 1)
+        mid_host = QScrollArea()
+        mid_host.setWidgetResizable(True)
+        mid_host.setFrameShape(QFrame.NoFrame)
+        mid_host.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        mid_host.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        mid_host.setWidget(mid)
+        cv.addWidget(mid_host, 1)
         cv.addWidget(note)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)   # 三栏最宽 950+, 窄窗口横向可滚
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)   # 横向只发生在三栏容器内
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
 
