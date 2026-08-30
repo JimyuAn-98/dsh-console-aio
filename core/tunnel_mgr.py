@@ -59,6 +59,21 @@ def tcp_ok(host, port, timeout=0.8):
         s.close()
 
 
+def tunnels_snapshot(base_dir):
+    # 隧道常驻进程快照(诊断报告等只读场景): {key: {"pid": int, "alive": bool}}。
+    # pid 文件的记录值是 dict(含 sig/host/user 等, 此处只取 pid 字段, 明文不入快照);
+    # 兼容旧裸 int 记录; 单条坏记录跳过不拖垮快照; 文件缺失/损坏返回 {}。
+    out = {}
+    for key, rec in _read_pids(base_dir).items():
+        pid = rec.get("pid") if isinstance(rec, dict) else rec
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        out[key] = {"pid": pid, "alive": _pid_alive(pid)}
+    return out
+
+
 def _pid_alive(pid):
     # Windows 进程存在性检查。⚠ 严禁 os.kill(pid, 0): Windows 上 signal 0 == CTRL_C_EVENT,
     # os.kill(pid, 0) 实际是"向共享控制台发 Ctrl+C"(非 Unix 的杀 0 探活语义)。在宿主 harness

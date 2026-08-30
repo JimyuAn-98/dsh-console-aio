@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import shutil
+from datetime import datetime
 
 
 def default_config_path():
@@ -92,4 +93,32 @@ def load_derived(path=None, allow_empty_ports=False):
     return derived(load_config(path), allow_empty_ports=allow_empty_ports)
 
 
-__all__ = ['load_config', 'save_config', 'load_derived', 'derived']
+# ── 配置导出/导入(GUI↔CLI 共享格式, OTP deploy.xml 思想) ──
+# 信封 = 类型/格式版本/时间戳 + 完整 config。导出内容含真实 IP/用户名(gitignored 的
+# config.json 本就如此), 由 UI 提示用户妥善保管; 导入是覆盖式(调用方先确认 + save_config
+# 自动 .bak + 热重载)。校验失败一律返回中文文案, 不抛异常(脏文件不致命)。
+EXPORT_TYPE = "dsh-console-config"
+EXPORT_VERSION = 1
+
+
+def export_envelope(cfg, now=None):
+    return {"_type": EXPORT_TYPE, "_version": EXPORT_VERSION,
+            "_exported_at": now or datetime.now().isoformat(timespec="seconds"),
+            "config": dict(cfg or {})}
+
+
+def parse_import(data):
+    # 校验导入数据: (config dict, "") 或 (None, 中文错误文案)。只认信封格式 ——
+    # 裸 config dict 拒绝(避免把随手导出的半截文件当配置写盘)。
+    if not isinstance(data, dict):
+        return None, "导入文件不是 JSON 对象"
+    if data.get("_type") != EXPORT_TYPE:
+        return None, "不是本应用的配置导出文件(缺少 _type: %s), 请用「导出配置」生成" % EXPORT_TYPE
+    cfg = data.get("config")
+    if not isinstance(cfg, dict):
+        return None, "导出文件缺少 config 字段或其不是对象"
+    return cfg, ""
+
+
+__all__ = ['load_config', 'save_config', 'load_derived', 'derived',
+           'export_envelope', 'parse_import']
