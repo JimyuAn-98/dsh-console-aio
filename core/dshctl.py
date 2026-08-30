@@ -10,10 +10,24 @@
 #   events('card',   (key, online_bool))
 # 由 app/services.py 把 events 转发到 Qt Signal。绝无跨线程直接改 UI。
 
+import json
 import os
 import socket
 import subprocess
 import threading
+import urllib.request
+
+
+def fetch_dsh_tags(per_page=8):
+    # 拉取 dsh 本体仓库的 GitHub tags(新→旧), 返回名称列表; 网络失败抛异常由 UI 层
+    # 转成中文文案。走 api.github.com(同一仓库 tags 数据的官方接口), 不爬 HTML。
+    url = ("https://api.github.com/repos/deepseek-ai/deepseek-harness/tags"
+           "?per_page=%d" % int(per_page))
+    req = urllib.request.Request(url, headers={"User-Agent": "dsh-console-aio"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        data = json.load(r)
+    return [t.get("name") or "" for t in data
+            if isinstance(t, dict) and t.get("name")]
 
 
 class DshCtl:

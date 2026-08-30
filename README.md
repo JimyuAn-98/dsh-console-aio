@@ -43,7 +43,7 @@
 ## 界面布局
 
     顶部:  [🐳 DSH Console v0.6 ]   部署:[本机 ▾]        [环境][安装 dsh][配置]
-    左导航            │ 中栏: 页面容器(16 页)                │ 右栏: 监控(可收起)
+    左导航            │ 中栏: 页面容器(17 页)                │ 右栏: 监控(可收起)
     总览               │ 总览: 运行状态+数据速览+部署+隧道      │ 本机端口 ●●●●●
     隧道               │ 插件: 列表|详情|配置 (三栏可拖拽)      │ 公网中转 反向隧道 ●●●
     会话与工作区       │ ...                                 │
@@ -149,11 +149,12 @@
 
 ---
 
-## 数据域管理（16 页导航）
+## 数据域管理（17 页导航）
 
 | 页面 | 功能 |
 |------|------|
 | 总览 | 运行状态卡 + 数据速览（会话/用量/任务板/插件）+ 部署列表 + 隧道速览 |
+| DSH 管理 | 本机 dsh 操控（启动/重启/停止）+ 完整更新 + 环境/安装 + 版本信息（GitHub tags 对比） |
 | 隧道 | 隧道卡片启停/常驻 + 本机 dsh 启停/更新 |
 | 会话与工作区 | 分组/会话/详情三栏，归档/恢复/删除（二次确认） |
 | Agent 模式 | 窄列表按名字选 + preset.yml 只读详情 |
@@ -199,7 +200,7 @@
 ## Roadmap（dsh 控制台进化路线）
 - [x] 配置外置到 config.json（IP/用户/端口/轮询）+ 配置热重载（保存即生效）
 - [x] 全部卡片 Python 化（core/tunnel_mgr.py + 纯 Python 更新）；旧 .ps1 收进 legacy/
-- [x] **PySide6 现代界面**：深色亚克力 + 现代列表/卡片组件 + 16 页导航（含实时主题定制）
+- [x] **PySide6 现代界面**：深色亚克力 + 现代列表/卡片组件 + 17 页导航（含实时主题定制）
 - [x] 一键安装 dsh + 环境检查（更新/安装/卸载引导）
 - [x] 打包分发（PyInstaller + Inno Setup，GitHub Actions 自动发版）
 - [x] **会话与工作区管理**：分组浏览 / 归档 / 恢复 / 删除（二次确认）
@@ -230,7 +231,7 @@ MIT © 2025 JimyuAn
 
 # dsh-console-aio (English)
 
-**dsh All-In-One console** (Windows GUI, PySide6 dark acrylic): SSH tunnel management, local dsh start/stop/install/update, health monitoring, and a 16-page dsh data-domain console (sessions/agents/profiles/plugins/tasks/usage/LLM/deployments/logs/settings).
+**dsh All-In-One console** (Windows GUI, PySide6 dark acrylic): SSH tunnel management, local dsh start/stop/install/update, health monitoring, and a 17-page dsh data-domain console (sessions/agents/profiles/plugins/tasks/usage/LLM/deployments/logs/settings).
 
 ![Main window](docs/screenshots/main.png)
 
@@ -268,10 +269,11 @@ All tunables live in config.json; the **Config** button opens the Settings page 
 
 See the Chinese section above for the full field table.
 
-## Data-domain pages (16-page navigation)
+## Data-domain pages (17-page navigation)
 | Page | What it does |
 |--------|-------------|
 | Overview | run-status card + data quick-look (sessions/usage/tasks/plugins) + deployments + tunnels |
+| DSH manage | local dsh start/restart/stop + full update + env/install + version info (GitHub tags diff) |
 | Tunnels | tunnel card start/persist/stop + local dsh start/stop/update |
 | Sessions & workspace | group/session/detail columns, archive/restore/delete (double confirm) |
 | Agent presets | narrow name list + read-only preset.yml detail |
@@ -310,7 +312,7 @@ Pushing a `v*` tag triggers the CI workflow: PyInstaller onefile → Inno Setup 
 
 ## Roadmap
 - [x] External config + hot-reload
-- [x] PySide6 modern UI (dark acrylic + modern list/card components + 16-page navigation)
+- [x] PySide6 modern UI (dark acrylic + modern list/card components + 17-page navigation)
 - [x] One-click dsh install + environment check
 - [x] Packaged distribution (PyInstaller + Inno Setup, GitHub Actions auto-release)
 - [x] Plugin manager (list / install / uninstall / patch-layer toggles with config & effective badges)

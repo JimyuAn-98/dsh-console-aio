@@ -3,6 +3,17 @@
 
 ## v0.8.0 (未发布)
 
+### DSH 管理页（新增, 17 页导航, 总览与隧道之间）
+
+- **dsh 域操作集中一页**：本机 dsh 操控(启动/重启/停止, 原隧道页卡) + 完整更新
+  (原隧道页"运行更新"卡, 保留确认流程) + 环境检查/安装 dsh(原顶栏按钮入口);
+  隧道页回归纯隧道(3 张隧道卡 + 方案卡), 顶栏只剩 搜索/立即刷新
+- **版本信息(dsh 本体)**：拉取 GitHub deepseek-ai/deepseek-harness 的 tags(官方 API,
+  后台线程)展示最新 tag 与近期列表, 并与本机版本(package.json)做一致性提示;
+  手动刷新按钮, 离线时显示重试提示
+- 新增 ui/pages_dsh.py + core/dshctl.fetch_dsh_tags; 打包 hidden-import 四处补齐
+  (本地 bat 顺带补上一直缺失的 pages_logs/pages_settings)
+
 ### 隧道规划器（执行顺序 ⑤-T1+T2, 隧道页「隧道方案」卡）
 
 - **多套拓扑一键切换**：「隧道方案」= 端口拓扑字段(forward_ports/reverse_port/

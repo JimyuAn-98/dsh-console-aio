@@ -139,7 +139,8 @@ def _apply_items(cfg):
     ITEMS.extend(build_items(cfg))
 
 NAV_ITEMS = [
-    ('总览', 'overview'), ('隧道', 'tunnels'), ('会话与工作区', 'sessions'),
+    ('总览', 'overview'), ('DSH 管理', 'dsh'), ('隧道', 'tunnels'),
+    ('会话与工作区', 'sessions'),
     ('Agent 模式', 'agents'), ('Profile 管理', 'profiles'), ('插件管理', 'plugins'),
     ('任务看板', 'taskboard'), ('模型用量', 'usage'), ('LLM 配置', 'llm'),
     ('备份与凭据', 'ops'), ('SSH 密钥', 'keys'), ('部署管理', 'deployments'),
@@ -871,22 +872,16 @@ class MainWindow(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        refresh = QPushButton("立即刷新")
-        refresh.clicked.connect(self._force_refresh)
         search = QPushButton("搜索")
         search.setToolTip("命令面板: 搜索页面/部署/动作 (Ctrl+K)")
         search.clicked.connect(self._open_palette)
-        env = QPushButton("环境")
-        env.clicked.connect(self._open_env)
-        install = QPushButton("安装")
-        install.clicked.connect(self._open_install)
+        refresh = QPushButton("立即刷新")
+        refresh.clicked.connect(self._force_refresh)
 
         for w in (logo, title, ver, sep, dlab, self.deploy, poll):
             lay.addWidget(w)
         lay.addWidget(spacer)
         lay.addWidget(search)
-        lay.addWidget(env)
-        lay.addWidget(install)
         lay.addWidget(refresh)
 
         # 无边框窗口控制按钮(自绘标题栏; 仅 Windows 无边框模式)
@@ -983,18 +978,7 @@ class MainWindow(QMainWindow):
                 pass
         return super().nativeEvent(eventType, message)
 
-    # ---- 顶栏入口(命令面板/环境检查/安装向导) ----
-    def _open_env(self):
-        from ui.dialogs import EnvDialog
-        EnvDialog(self).exec()
-
-    def _open_install(self):
-        from ui.dialogs import InstallDialog
-        dlg = InstallDialog(self)
-        dlg.exec()
-        if getattr(dlg, "result", None):
-            self._refresh_deploy_list()
-            self.set_status("安装完成，dash_repo 已更新")
+    # ---- 顶栏入口(命令面板; 环境检查/安装入口已迁「DSH 管理」页) ----
 
     # ---- 主体: 左导航 + 页面宿主 ----
     def _build_body(self):
@@ -1070,6 +1054,9 @@ class MainWindow(QMainWindow):
             w.deleteLater()
         if key == "overview":
             page = OverviewPage(self)
+        elif key == "dsh":
+            from ui.pages_dsh import DshManagePage
+            page = DshManagePage(self)
         elif key == "tunnels":
             page = TunnelsPage(self)
         elif key == "sessions":
@@ -1115,7 +1102,7 @@ class MainWindow(QMainWindow):
             from ui.pages_theme import ThemePage
             page = ThemePage(self)
         else:
-            # 兜底(正常不可达: 16 个导航 key 全部有真实页面)
+            # 兜底(正常不可达: 17 个导航 key 全部有真实页面)
             page = QLabel("未知页面: " + key)
         self.stack.addWidget(page)
 
@@ -1410,6 +1397,10 @@ class TunnelsPage(BasePage):
         row = QHBoxLayout()
         row.setSpacing(10)
         for i, item in enumerate(ITEMS):
+            # dsh 域两卡(本机 dsh 操控/运行更新)已迁「DSH 管理」页, 隧道页回归纯隧道;
+            # ITEMS 保留这两项(探测/状态单一来源, 概览页 dsh-web 卡与监控仍依赖)
+            if item.get("type") == "dsh" or item.get("key") == "update-dsh":
+                continue
             card = self._make_card(item)
             row.addWidget(card, 1)
             if (i + 1) % 2 == 0:
@@ -1597,35 +1588,9 @@ class TunnelsPage(BasePage):
 
     # ---- 动作分派: 页面只分派与提示, 业务经 service 信号桥在后台线程执行 ----
     def _on_action(self, item, mode):
-        t = item["type"]
-        key = item["key"]
-        if t == "dsh":
-            self.app.set_status("正在 %s 本机 dsh ..." % mode)
-            self.app.service.start_dsh(mode)
-            return
-        if key == "update-dsh":
-            # 更新的是 dsh 本体(dash_repo), 不是本控制台(控制台更新在「关于与更新」页)。
-            # 流程: 停 web -> git 拉取 -> 清理旧构建 -> 依赖 -> 构建 -> 重启, 业务在 core.dshctl。
-            # 危险操作约定: 先确认"将执行什么", 用户点是才执行。
-            ans = QMessageBox.question(
-                self, "更新 dsh",
-                "将对本机 dsh 执行一次完整更新:\n\n"
-                "  1) 停止当前 dsh web\n"
-                "  2) git 拉取最新代码\n"
-                "  3) 清理旧构建产物\n"
-                "  4) 安装依赖 (pnpm install)\n"
-                "  5) 构建 (pnpm run build, 耗时较长)\n"
-                "  6) 重启 dsh web\n\n"
-                "期间 dsh 页面会短暂不可用。是否继续?")
-            if ans != QMessageBox.StandardButton.Yes:
-                self.app.set_status("已取消更新")
-                return
-            self.app.loge("[update-dsh] 开始完整更新...", "warn")
-            self.app.set_status("正在运行更新(构建较久, 请耐心)...")
-            self.app.service.update_dsh()
-            return
-        # python 隧道: 启停/常驻重连业务在 core.tunnels; persist 停止标志由 service
+        # 仅 python 隧道(dsh 操控/更新已迁「DSH 管理」页); persist 停止标志由 service
         # 持有(窗口生命周期), 不再随页面重建丢失导致"停止后又被重连"。
+        key = item["key"]
         self.app.loge("[%s] 模式: %s (Python)" % (key, mode), "warn")
         self.app.set_status("正在执行 %s -> %s (Python) ..." % (mode, key))
         self.app.service.start_tunnel(key, mode)

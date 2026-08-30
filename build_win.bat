@@ -51,7 +51,9 @@ echo [1/2] PyInstaller onefile build (PySide6)...
   --hidden-import ui.pages_taskboard --hidden-import ui.pages_usage ^
   --hidden-import ui.pages_llm --hidden-import ui.pages_ops ^
   --hidden-import ui.pages_keys --hidden-import ui.pages_version ^
-  --hidden-import ui.pages_deployments --hidden-import ui.pages_theme ^
+  --hidden-import ui.pages_deployments --hidden-import ui.pages_logs ^
+  --hidden-import ui.pages_settings --hidden-import ui.pages_theme ^
+  --hidden-import ui.pages_dsh ^
   --add-data "ui/theme.qss;ui" ^
   --add-data "logo.png;." ^
   --add-data "RELEASE_NOTES.md;." ^
