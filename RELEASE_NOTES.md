@@ -16,6 +16,8 @@
   不入报告); Release 资产新增 SHA256SUMS.txt(下载校验)
 - 修复 tunnels_snapshot 首版假设 pid 记录为裸 int 的数据形状 bug(实测记录为 dict);
   新增 4 组单测, 353 例全过
+- **安装包发布者改为 JimyuAn**：Windows「设置→应用」的发布者字段与 README 版权行
+  同步; AppId 不变, 升级安装仍识别为同一应用(装完 v0.8.0 后生效)
 
 ## v0.7.0 (2026-08-30)
 

@@ -221,7 +221,7 @@
 - [ ] 小白引导：首次使用向导 / 诊断助手 / 常见问题
 
 ## License
-MIT © 2025 dsh-tools
+MIT © 2025 JimyuAn
 
 ---
 
@@ -322,4 +322,4 @@ Pushing a `v*` tag triggers the CI workflow: PyInstaller onefile → Inno Setup 
 - [ ] Beginner onboarding (first-run wizard / diagnostics / FAQ)
 
 ## License
-MIT © 2025 dsh-tools
+MIT © 2025 JimyuAn

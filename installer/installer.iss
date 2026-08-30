@@ -4,7 +4,7 @@
 #define MyAppVersion "0.7.0"
 #endif
 #define MyAppExeName "dsh-console-aio.exe"
-#define MyAppPublisher "dsh-tools"
+#define MyAppPublisher "JimyuAn"
 
 [Setup]
 AppId={{494C75BA-07ED-465D-A94E-2CB4F369EAA4}
