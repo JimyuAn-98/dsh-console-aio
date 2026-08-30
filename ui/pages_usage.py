@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from core import data as core_data
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget)
+    QMessageBox, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ui.base import BasePage
 from ui.chart import StackedBarChart, short_model
@@ -102,6 +102,10 @@ class UsagePage(BasePage):
         chead.addWidget(QLabel("每日 token 趋势(输入+输出, 按模型堆叠; 悬停看当日明细)",
                                objectName="rightTitle"))
         chead.addStretch(1)
+        self._btn_collapse = QPushButton("收起图表")
+        self._btn_collapse.setToolTip("收起后趋势卡只占一行标题, 高度让给下方三栏")
+        self._btn_collapse.clicked.connect(self._toggle_chart)
+        chead.addWidget(self._btn_collapse)
         self._chart_span = 14
         self._span_btns = {}
         for n in (7, 14, 30):
@@ -126,16 +130,18 @@ class UsagePage(BasePage):
                       objectName="cardHint")
         note.setWordWrap(True)
 
-        # 三栏独立横向滚动容器: widgetResizable 尊重子项最小宽 —— 视口 < 950 时三栏
-        # 保持 950 并自己出横向滚动条, 而标题/信息条/趋势卡等仍自适应窗口宽度
-        # (不会被三栏最小宽撑破); 视口够宽时三栏照常拉伸铺满
+        # 三栏吃掉页面剩余的全部高度(视口大则更高, 只有窗口真放不下时才出滚动):
+        # mid_host 纵向 Ignored —— 布局无视其 sizeHint(否则 560+ 的最小高会把内容
+        # 总高顶破视口, 页面永远滚动、三栏被钉死); mid 保留 300px 兜底, 真放不下时
+        # 由 mid_host 自己的滚动条接管
         mid.setMinimumWidth(950)
-        mid.setMinimumHeight(560)
+        mid.setMinimumHeight(300)
         mid_host = QScrollArea()
         mid_host.setWidgetResizable(True)
         mid_host.setFrameShape(QFrame.NoFrame)
-        mid_host.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        mid_host.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         mid_host.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        mid_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         mid_host.setWidget(mid)
         cv.addWidget(mid_host, 1)
         cv.addWidget(note)
@@ -236,6 +242,12 @@ class UsagePage(BasePage):
         for k, b in self._span_btns.items():
             b.setChecked(k == n)
         self._update_chart()
+
+    def _toggle_chart(self):
+        # 收起/展开趋势图: 收起后趋势卡只剩标题行, 高度全让给下方三栏
+        vis = not self._chart.isVisible()
+        self._chart.setVisible(vis)
+        self._btn_collapse.setText("展开图表" if not vis else "收起图表")
 
     def _update_chart(self):
         res = self._stats or {}

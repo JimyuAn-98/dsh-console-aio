@@ -58,7 +58,7 @@ class StackedBarChart(QWidget):
         self._days = []      # [(标签, {模型: 值})]
         self._models = []    # 堆叠顺序(与 PALETTE 序号对应)
         self._hover = -1
-        self.setMinimumHeight(190)
+        self.setMinimumHeight(160)
         self.setMouseTracking(True)
 
     def set_series(self, days, models):
