@@ -63,11 +63,17 @@ class UsagePage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
+        # 整页纵向滚动(与设置页同款): 标题/信息条/趋势卡/三栏/说明全部随页面滚动,
+        # 视口不够时滚动而不是挤压任何区域
+        content = QWidget()
+        cv = QVBoxLayout(content)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
         title = QLabel("模型用量统计", objectName="cardTitle")
-        root.addWidget(title)
+        cv.addWidget(title)
         hint = QLabel("解压扫描全部会话的 session.jsonl.zstd 聚合 token 用量(较慢, 后台执行); "
                       "远程部署统计暂不支持, 会明确提示。", objectName="cardHint")
-        root.addWidget(hint)
+        cv.addWidget(hint)
 
         info = QFrame(objectName="card")
         il = QHBoxLayout(info)
@@ -84,7 +90,7 @@ class UsagePage(BasePage):
         self._btn_refresh = QPushButton("刷新")
         self._btn_refresh.clicked.connect(self._refresh)
         il.addWidget(self._btn_refresh)
-        root.addWidget(info)
+        cv.addWidget(info)
 
         # 趋势卡(按模型堆叠的每日 token 柱状图; 数据来自最近一次统计, 切窗口不重扫)
         chart_card = QFrame(objectName="card")
@@ -107,7 +113,7 @@ class UsagePage(BasePage):
         ch.addLayout(chead)
         self._chart = StackedBarChart()
         ch.addWidget(self._chart)
-        root.addWidget(chart_card)
+        cv.addWidget(chart_card)
 
         mid = three_split(
             card_wrap("按模型", self._make_list(is_model=True)),
@@ -118,19 +124,16 @@ class UsagePage(BasePage):
         note = QLabel("估算费用按内置单价(元/百万 token)计算; 价格修改仅本次运行生效, 不写入文件。",
                       objectName="cardHint")
 
-        # 三栏横向可扩展(与其他三栏页同款): 视口不足时出横向滚动条, 不再互相挤压;
-        # 纵向给足最低高度——上方趋势卡加入后视口剩余不够, 页面纵向滚动而不是压扁三栏
+        # 三栏横向可扩展(与其他三栏页同款); 纵向最低高度保证呼吸感——整页滚动兜底
         mid.setMinimumWidth(950)
         mid.setMinimumHeight(430)
-        content = QWidget()
-        cv = QVBoxLayout(content)
-        cv.setContentsMargins(0, 0, 0, 0)
-        cv.setSpacing(8)
         cv.addWidget(mid, 1)
         cv.addWidget(note)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)   # 三栏最宽 950+, 窄窗口横向可滚
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
 

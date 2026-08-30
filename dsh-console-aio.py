@@ -871,8 +871,9 @@ class MainWindow(QMainWindow):
 
         refresh = QPushButton("立即刷新")
         refresh.clicked.connect(self._force_refresh)
-        config = QPushButton("配置")
-        config.clicked.connect(self._open_config)
+        search = QPushButton("搜索")
+        search.setToolTip("命令面板: 搜索页面/部署/动作 (Ctrl+K)")
+        search.clicked.connect(self._open_palette)
         env = QPushButton("环境")
         env.clicked.connect(self._open_env)
         install = QPushButton("安装")
@@ -881,7 +882,7 @@ class MainWindow(QMainWindow):
         for w in (logo, title, ver, sep, dlab, self.deploy, poll):
             lay.addWidget(w)
         lay.addWidget(spacer)
-        lay.addWidget(config)
+        lay.addWidget(search)
         lay.addWidget(env)
         lay.addWidget(install)
         lay.addWidget(refresh)
@@ -980,11 +981,7 @@ class MainWindow(QMainWindow):
                 pass
         return super().nativeEvent(eventType, message)
 
-    # ---- 顶栏对话框入口(配置向导/环境检查/安装向导) ----
-    def _open_config(self):
-        # P1 弹窗收敛: 配置在「设置」页内完成(标签页), 不再弹 ConfigDialog
-        self._show_page("settings")
-
+    # ---- 顶栏入口(命令面板/环境检查/安装向导) ----
     def _open_env(self):
         from ui.dialogs import EnvDialog
         EnvDialog(self).exec()
@@ -1059,6 +1056,12 @@ class MainWindow(QMainWindow):
 
     def _show_page(self, key):
         self._current_page_key = key
+        # 左导航选中随页面同步(命令面板/部署切换等编程跳转也一致); 断信号防回环
+        idx = next((i for i, (_l, k) in enumerate(NAV_ITEMS) if k == key), -1)
+        if idx >= 0 and self.nav.currentRow() != idx:
+            self.nav.blockSignals(True)
+            self.nav.setCurrentRow(idx)
+            self.nav.blockSignals(False)
         while self.stack.count():
             w = self.stack.widget(0)
             self.stack.removeWidget(w)
