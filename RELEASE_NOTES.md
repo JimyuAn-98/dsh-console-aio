@@ -1,7 +1,54 @@
 
 # Release Notes
 
-## v0.7.0 (未发布)
+## v0.7.0 (2026-08-30)
+
+### 实时主题定制（新增「主题」页, 16 页导航）
+
+- **全部界面颜色实时可调**：主题页按 背景/边框/强调/控件/滚动条/文字/状态 分组展示
+  全部颜色 token, 色块按钮（QColorDialog）+ hex 直填, 改动即时生效无需重启
+  （`MainWindow.apply_theme` -> TOKENS 原地更新 -> 重新生成 QSS setStyleSheet,
+  Qt 立即重抛光; 自绘 delegate 逐帧读 TOKENS 随重绘跟随）
+- **透明度滑杆**：主背景/面板/日志区/页面宿主四个 rgba token 的 alpha 实时调节
+  （80ms 节流防连续 repolish; 仅亚克力模糊模式有可见效果; 裁剪 5%-100% 防全透明）。
+  亚克力模式主窗口背景从"全透明"改为 **bg_rgba 染色层**（rgb 随「主背景」联动,
+  alpha=染色深度）—— 修复亚克力模式下改「主背景」颜色无效果的盲区
+- **强调色派生自动化**：改 accent 时表格选中软色块/分栏高亮辉光自动重算,
+  派生色不进覆盖集（用户只管本色）
+- **主题持久化**：「保存为启动默认」写 config.json["theme"]（core save_config 自动
+  .bak, 重启仍生效）; 「保存当前为主题文件」/加载/删除走 themes/*.json（打包运行在
+  exe 目录, 与 config.json 同规则）; 「恢复默认」即时回到出厂配色
+- **架构去双源**：`ui/widgets.py` 画家侧配色从常量改为逐帧读 TOKENS（QSS/自绘同源）;
+  theme.py 新增 DEFAULT_TOKENS 快照、COLOR_GROUPS/ALPHA_KEYS 白名单（脏配置不致命,
+  非法值忽略）、`valid_color`/`set_alpha`/`current_overrides`/主题文件 IO 纯函数;
+  新增滑杆/主题列表 QSS; 启动时激活 config["theme"] 后再生成样式表
+- 模糊/亚克力开关刻意不做：窗口材质须在显示前设置, 运行中切换需重建整窗
+- 测试：theme 管理纯函数 5 组新用例（激活派生/白名单忽略/alpha 往返裁剪/覆盖集/
+  主题文件往返）, 348 例全过; 16 页构造冒烟 + apply_theme 实时换肤离屏验证
+
+### 主题色换版: #5686fe + 中性色相 240°→224° 对齐
+
+- **accent 换纯蓝 `#5686fe`**（hover `#7aa3ff`），配套派生值同步：表格选中软色块、
+  分栏手柄 hover 辉光、导航选中底 `bg_active`；`ui/widgets.py` 画家侧 ACCENT 同步
+- **结构中性色（背景/边框/面板/按钮底/滚动条）色相 240°→~224°**：整体从"蓝紫夜"
+  转为"纯蓝夜"，与新品牌 logo 同族；文字灰维持原值（色相差异不可感知）
+- **硬编码色值全部提升为 token**：build_qss 模板内 btn_bg/btn_hover/inset_border/
+  accent_soft 等散落字面量收编进 TOKENS（"主题唯一真源"契约恢复）；`build_qss`
+  支持部分覆盖 dict；pages_plugins 徽章底、pages_version 详情框改读 token
+- 新增 `python -m ui.theme` 一键重新生成 `ui/theme.qss`（非 Mica 外部覆盖层产物）；
+  `tests/test_theme.py` 主背景断言改 token 驱动 + 部分覆盖用例（343 例全过）
+- 决策记录：`.agents/notes/implemented/feature/2026-08-30-theme-accent-5686fe.md`
+
+### 品牌 Logo / 图标接入
+
+- **Logo 全链路接入**：根目录 `logo.png`（蓝鲸）→ 顶栏标题左侧 logo（DPI 自适应缩放，
+  资源缺失自动隐藏降级为纯文字）+ 任务栏/Alt-Tab 窗口图标（`setWindowIcon`）+
+  exe 图标（PyInstaller `--icon logo.ico`）+ 安装包/卸载项图标（Inno `SetupIconFile`）
+- 新增 `logo.ico`（由 logo.png 透明补方正方形后生成的 16-256px 多尺寸图标）；
+  logo.png 经 `--add-data` 进包，运行时 frozen 走 `_MEIPASS` 定位（与 theme.qss 同套路）
+- 新增 **主题预览工具** `tools/preview_theme.py`：离屏（WA_DontShowOnScreen）渲染
+  MainWindow，按 VARIANTS 输出新旧配色并排对比图到 `preview/`（`*_preview.png` 已
+  gitignore）；旧配色以完整覆盖表保留在工具内供对比/回滚参照
 
 ## v0.6.0 (2026-08-30)
 

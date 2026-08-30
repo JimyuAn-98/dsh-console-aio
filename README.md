@@ -42,8 +42,8 @@
 
 ## 界面布局
 
-    顶部:  [ DSH Console v0.6 ]   部署:[本机 ▾]        [环境][安装 dsh][配置]
-    左导航            │ 中栏: 页面容器(15 页)                │ 右栏: 监控(可收起)
+    顶部:  [🐳 DSH Console v0.6 ]   部署:[本机 ▾]        [环境][安装 dsh][配置]
+    左导航            │ 中栏: 页面容器(16 页)                │ 右栏: 监控(可收起)
     总览               │ 总览: 运行状态+数据速览+部署+隧道      │ 本机端口 ●●●●●
     隧道               │ 插件: 列表|详情|配置 (三栏可拖拽)      │ 公网中转 反向隧道 ●●●
     会话与工作区       │ ...                                 │
@@ -149,7 +149,7 @@
 
 ---
 
-## 数据域管理（15 页导航）
+## 数据域管理（16 页导航）
 
 | 页面 | 功能 |
 |------|------|
@@ -167,6 +167,7 @@
 | 部署管理 | 多部署列表/详情/操作日志三栏：CRUD、连接测试、只读快照（在线徽章） |
 | 日志管理 | dsh web 落盘输出 tail + 过滤 + 着色 + token 脱敏 |
 | 设置 | 配置标签页化，保存即热重载 |
+| 主题 | 全部界面颜色实时可调（即时预览），可存/载主题文件、设启动默认 |
 | 关于与更新 | 当前版本 / 检查更新 / 更新日志 / 一键自动更新 |
 
 ![总览](docs/screenshots/main.png)
@@ -198,7 +199,7 @@
 ## Roadmap（dsh 控制台进化路线）
 - [x] 配置外置到 config.json（IP/用户/端口/轮询）+ 配置热重载（保存即生效）
 - [x] 全部卡片 Python 化（core/tunnel_mgr.py + 纯 Python 更新）；旧 .ps1 收进 legacy/
-- [x] **PySide6 现代界面**：深色亚克力 + 现代列表/卡片组件 + 15 页导航
+- [x] **PySide6 现代界面**：深色亚克力 + 现代列表/卡片组件 + 16 页导航（含实时主题定制）
 - [x] 一键安装 dsh + 环境检查（更新/安装/卸载引导）
 - [x] 打包分发（PyInstaller + Inno Setup，GitHub Actions 自动发版）
 - [x] **会话与工作区管理**：分组浏览 / 归档 / 恢复 / 删除（二次确认）
@@ -227,7 +228,7 @@ MIT © 2025 dsh-tools
 
 # dsh-console-aio (English)
 
-**dsh All-In-One console** (Windows GUI, PySide6 dark acrylic): SSH tunnel management, local dsh start/stop/install/update, health monitoring, and a 15-page dsh data-domain console (sessions/agents/profiles/plugins/tasks/usage/LLM/deployments/logs/settings).
+**dsh All-In-One console** (Windows GUI, PySide6 dark acrylic): SSH tunnel management, local dsh start/stop/install/update, health monitoring, and a 16-page dsh data-domain console (sessions/agents/profiles/plugins/tasks/usage/LLM/deployments/logs/settings).
 
 ![Main window](docs/screenshots/main.png)
 
@@ -265,7 +266,7 @@ All tunables live in config.json; the **Config** button opens the Settings page 
 
 See the Chinese section above for the full field table.
 
-## Data-domain pages (15-page navigation)
+## Data-domain pages (16-page navigation)
 | Page | What it does |
 |--------|-------------|
 | Overview | run-status card + data quick-look (sessions/usage/tasks/plugins) + deployments + tunnels |
@@ -282,6 +283,7 @@ See the Chinese section above for the full field table.
 | Deployments | multi-deployment list/detail/op-log columns: CRUD, connection test, read-only snapshots |
 | Logs | live tail of dsh web output with filtering, coloring, token masking |
 | Settings | config as tabs, hot-reload on save |
+| Theme | edit every UI color live (instant preview), save/load theme files, set startup default |
 | About & update | current version / check update / changelog / one-click auto-update |
 
 ![Sessions](docs/screenshots/sessions.png)
@@ -306,7 +308,7 @@ Pushing a `v*` tag triggers the CI workflow: PyInstaller onefile → Inno Setup 
 
 ## Roadmap
 - [x] External config + hot-reload
-- [x] PySide6 modern UI (dark acrylic + modern list/card components + 15-page navigation)
+- [x] PySide6 modern UI (dark acrylic + modern list/card components + 16-page navigation)
 - [x] One-click dsh install + environment check
 - [x] Packaged distribution (PyInstaller + Inno Setup, GitHub Actions auto-release)
 - [x] Plugin manager (list / install / uninstall / patch-layer toggles with config & effective badges)
