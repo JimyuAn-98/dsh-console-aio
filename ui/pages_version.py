@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from core import version as core_version
 from ui.base import BasePage
+from ui.theme import TOKENS
 
 
 class VersionPage(BasePage):
@@ -86,8 +87,10 @@ class VersionPage(BasePage):
         self._log_text.setFont(QFont("Consolas", 9))
         self._log_text.setMinimumHeight(150)
         self._log_text.setStyleSheet(
-            "QPlainTextEdit { background: #16161f; color: #e6e6e6; "
-            "border: 1px solid #2c2c40; border-radius: 8px; padding: 4px; }")
+            # 底色/描边取 theme token(与全局日志区一致: bg_log + inset_border)
+            "QPlainTextEdit { background: %s; color: #e6e6e6; "
+            "border: 1px solid %s; border-radius: 8px; padding: 4px; }"
+            % (TOKENS["bg_log"], TOKENS["inset_border"]))
         lv.addWidget(self._log_text)
         root.addWidget(log_card, 1)
 

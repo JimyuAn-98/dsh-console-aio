@@ -50,3 +50,6 @@ dump_ui.json
 dump_ui.xml
 ui_dump/
 dist-preview/
+
+# 用户保存的主题文件(运行时生成)
+themes/

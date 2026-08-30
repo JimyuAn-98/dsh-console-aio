@@ -10,11 +10,14 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QLabel, QListWidget, QListWidgetItem,
     QSplitter, QStyle, QStyledItemDelegate, QVBoxLayout)
 
-ACCENT = "#4f6ef7"
-TEXT = "#e6e6e6"
-TEXT_DIM = "#9a9ab0"
-BADGE_COLORS = {"ok": "#7ecb6a", "warn": "#e5c07b", "err": "#e07a7a",
-                "dim": "#9a9ab0", "accent": ACCENT}
+from ui.theme import TOKENS
+
+
+def _badge_color(kind):
+    # 徽章/状态色与 QSS 同源(逐帧读 TOKENS, 实时换肤后随重绘自动生效)
+    return {"ok": TOKENS["ok"], "warn": TOKENS["warn"], "err": TOKENS["err"],
+            "dim": TOKENS["text_dim"], "accent": TOKENS["accent"]}.get(
+                kind, TOKENS["text_dim"])
 
 
 def _tint(hex_color, alpha):
@@ -38,7 +41,7 @@ class _RowDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.State_Selected)
         if selected:
             painter.setPen(Qt.NoPen)
-            painter.setBrush(_tint(ACCENT, 46))
+            painter.setBrush(_tint(TOKENS["accent"], 46))
             painter.drawRoundedRect(rect, 8, 8)
         elif option.state & QStyle.State_MouseOver:
             painter.setPen(Qt.NoPen)
@@ -53,14 +56,14 @@ class _RowDelegate(QStyledItemDelegate):
             x += 16
         font = painter.font()
         title_y = rect.top() + 8 if row.get("meta") else rect.top() + (rect.height() - 17) // 2
-        painter.setPen(QColor("#ffffff" if selected else TEXT))
+        painter.setPen(QColor("#ffffff" if selected else TOKENS["text"]))
         painter.drawText(x, title_y + 13, row.get("title") or "")
         meta = row.get("meta") or ""
         if meta:
             small = QFont(font)
             small.setPixelSize(11)
             painter.setFont(small)
-            painter.setPen(QColor(TEXT_DIM))
+            painter.setPen(QColor(TOKENS["text_dim"]))
             painter.drawText(x, rect.bottom() - 6, meta)
             painter.setFont(font)
         badge_font = QFont(font)
@@ -69,7 +72,7 @@ class _RowDelegate(QStyledItemDelegate):
         painter.setFont(badge_font)
         bx = rect.right() - 8
         for text, kind in reversed(row.get("badges") or []):
-            color = BADGE_COLORS.get(kind, BADGE_COLORS["dim"])
+            color = _badge_color(kind)
             w = bfm.horizontalAdvance(text) + 14
             br = QRect(bx - w, rect.center().y() - 9, w, 18)
             painter.setPen(QColor(color))

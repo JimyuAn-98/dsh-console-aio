@@ -41,9 +41,12 @@ def _entry_src_text(e):
 
 
 def _chips_html(chips):
-    # 详情卡徽章 chips 行(QLabel 富文本; Qt 富文本不支持圆角, 用底色块近似)
+    # 详情卡徽章 chips 行(QLabel 富文本; Qt 富文本不支持圆角, 用底色块近似);
+    # 底色取 theme token bg_active(accent 同族深底)
+    from ui.theme import TOKENS
     return " ".join(
-        '<span style="background-color:#2f3353; color:%s;">&nbsp;%s&nbsp;</span>' % (color, text)
+        '<span style="background-color:%s; color:%s;">&nbsp;%s&nbsp;</span>'
+        % (TOKENS["bg_active"], color, text)
         for text, color in chips)
 
 

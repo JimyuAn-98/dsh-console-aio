@@ -19,10 +19,11 @@ from PySide6.QtWidgets import (
     QComboBox, QFrame, QSizePolicy, QAbstractItemView,
     QMessageBox, QToolTip, QSplitter)
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QEvent, QPoint, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QTextCursor, QColor, QCursor
+from PySide6.QtGui import QTextCursor, QColor, QCursor, QIcon, QPixmap
 
 from core import data as dsh_data
 from app.services import DshService
+from ui import theme as dsh_theme
 from ui.theme import build_qss, apply_window_effects, try_system_blur
 from ui.widgets import ModernList, card_wrap
 
@@ -64,7 +65,23 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get('DSH_AIO_CONFIG') or os.path.join(BASE_DIR, 'config.json')
-APP_VERSION = '0.6.0'
+APP_VERSION = '0.7.0'
+
+
+def _find_logo():
+    # Logo 资源定位: 源码运行在仓库根, 打包(onefile)后随 --add-data 解压到 _MEIPASS。
+    # 找不到返回 None(顶栏/窗口图标降级为纯文字, 不致命)。
+    cands = []
+    if getattr(sys, 'frozen', False):
+        cands.append(os.path.join(getattr(sys, '_MEIPASS', BASE_DIR), 'logo.png'))
+    cands.append(os.path.join(BASE_DIR, 'logo.png'))
+    for c in cands:
+        if os.path.exists(c):
+            return c
+    return None
+
+
+LOGO_PATH = _find_logo()
 
 # frozen 模式下把 exe 目录也加入 sys.path, 保证旁置的可写数据/日志可见(仅当需要时)。
 if getattr(sys, 'frozen', False) and BASE_DIR not in sys.path:
@@ -122,7 +139,7 @@ NAV_ITEMS = [
     ('Agent 模式', 'agents'), ('Profile 管理', 'profiles'), ('插件管理', 'plugins'),
     ('任务看板', 'taskboard'), ('模型用量', 'usage'), ('LLM 配置', 'llm'),
     ('备份与凭据', 'ops'), ('SSH 密钥', 'keys'), ('部署管理', 'deployments'),
-    ('日志管理', 'logs'), ('设置', 'settings'), ('关于与更新', 'version'),
+    ('日志管理', 'logs'), ('设置', 'settings'), ('主题', 'theme'), ('关于与更新', 'version'),
 ]
 
 
@@ -712,6 +729,8 @@ class MainWindow(QMainWindow):
         if self._frameless:
             self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setWindowTitle("DSH Console · v" + APP_VERSION)
+        if LOGO_PATH:
+            self.setWindowIcon(QIcon(LOGO_PATH))   # 任务栏/Alt-Tab 图标(无边框窗口同样生效)
         self.resize(1160, 800)
         self.setMinimumSize(960, 620)
         self._normal_geo = None                # 最大化前几何(还原用)
@@ -721,6 +740,9 @@ class MainWindow(QMainWindow):
         self._mica = apply_window_effects(self)
         # 系统级模糊(SetWindowCompositionAttribute, 经典方案); 失败则半透明无模糊
         self._sys_blur = try_system_blur(self) if self._mica else False
+        # 自定义主题(config.json["theme"])先激活再生成样式表; 运行中经 apply_theme 实时换肤
+        self._custom_theme = bool(CONFIG.get("theme"))
+        dsh_theme.set_active(CONFIG.get("theme") or {})
         self.setStyleSheet(self._load_theme())
 
         self._current_page_key = None
@@ -778,12 +800,16 @@ class MainWindow(QMainWindow):
                 self.loge("模糊: %s" % ("系统级(ACCENT_ENABLE_BLURBEHIND)" if self._sys_blur
                                         else "系统级失败, 半透明无模糊"), "ok")
 
-    # ---- 主题(主题引擎 ui/theme.py, token 驱动) ----
+    # ---- 主题(主题引擎 ui/theme.py, token 驱动; 主题页经 apply_theme 实时换肤) ----
     def _load_theme(self):
         #   Mica 可用(Win11 22H2+) -> 生成半透明 QSS(外部 theme.qss 不参与, 避免盖住 DWM 背景);
+        #   有自定义主题(config["theme"] / 运行中 apply_theme) -> 由 TOKENS 实时生成
+        #   (外部 theme.qss 是出厂色产物, 会盖掉覆盖);
         #   否则 -> 外部 ui/theme.qss 优先(手动微调), 缺失回退生成的不透明 QSS。
         if self._mica:
             return build_qss(mica=True)
+        if self._custom_theme:
+            return build_qss(mica=False)
         if getattr(sys, 'frozen', False):
             base = getattr(sys, '_MEIPASS', BASE_DIR)
         else:
@@ -797,12 +823,35 @@ class MainWindow(QMainWindow):
                 continue
         return build_qss(mica=False)
 
+    def apply_theme(self, overrides=None, note="主题已实时应用"):
+        # 实时换肤: 原地更新 TOKENS -> 重新生成 QSS setStyleSheet。Qt 立即重抛光全部
+        # 控件; 自绘 delegate(逐帧读 TOKENS)随全局重绘生效, 无需重启。
+        # 透明度属 rgba token, 仅亚克力(Mica)模式有可见效果。overrides=None 只重建样式。
+        dsh_theme.set_active(overrides or {})
+        self._custom_theme = self._custom_theme or bool(overrides)
+        self.setStyleSheet(build_qss(mica=self._mica))
+        if note:
+            self.loge(note, "ok")
+
     # ---- 顶部栏 ----
     def _build_topbar(self):
         bar = _TopBar(self)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(16, 10, 16, 10)
         lay.setSpacing(10)
+
+        # Logo(自绘标题栏左侧; 按 DPI 缩放保证高分屏清晰, 资源缺失时隐藏降级)
+        logo = QLabel(objectName="logoLbl")
+        pm = QPixmap(LOGO_PATH) if LOGO_PATH else QPixmap()
+        if not pm.isNull():
+            dpr = self.devicePixelRatioF() or 1.0
+            pm = pm.scaled(int(round(22 * dpr)), int(round(22 * dpr)),
+                           Qt.AspectRatioMode.KeepAspectRatio,
+                           Qt.TransformationMode.SmoothTransformation)
+            pm.setDevicePixelRatio(dpr)
+            logo.setPixmap(pm)
+        else:
+            logo.hide()
 
         title = QLabel("DSH Console", objectName="titleLbl")
         ver = QLabel("  v" + APP_VERSION, objectName="verLbl")
@@ -824,7 +873,7 @@ class MainWindow(QMainWindow):
         install = QPushButton("安装")
         install.clicked.connect(self._open_install)
 
-        for w in (title, ver, sep, dlab, self.deploy, poll):
+        for w in (logo, title, ver, sep, dlab, self.deploy, poll):
             lay.addWidget(w)
         lay.addWidget(spacer)
         lay.addWidget(config)
@@ -1052,8 +1101,11 @@ class MainWindow(QMainWindow):
         elif key == "settings":
             from ui.pages_settings import SettingsPage
             page = SettingsPage(self)
+        elif key == "theme":
+            from ui.pages_theme import ThemePage
+            page = ThemePage(self)
         else:
-            # 兜底(正常不可达: 15 个导航 key 全部有真实页面)
+            # 兜底(正常不可达: 16 个导航 key 全部有真实页面)
             page = QLabel("未知页面: " + key)
         self.stack.addWidget(page)
 
