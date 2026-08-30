@@ -1,6 +1,22 @@
 
 # Release Notes
 
+## v0.8.0 (未发布)
+
+### 诊断报告 + 配置导出/导入（执行顺序 ②, 设置页新标签「诊断与配置」）
+
+- **一键诊断报告**：工具链版本(git/node/npm/pnpm) + 本机 dsh/端口探测 + 隧道常驻进程
+  存活 + 配置概览, 一键生成/复制/保存; 地址与用户名自动打码(IPv4 保前两段、用户名留
+  首字符), 诊断不发起任何远程连接, 报告可安全外发求助/贴 issue
+- **配置导出/导入**：导出完整 config.json 为带信封的 JSON(`_type`/`_version`/
+  `_exported_at`, GUI↔CLI 共享格式, OTP deploy.xml 思想); 导入校验信封 + 确认覆盖
+  (自动 .bak) + 热重载
+- core 新增 `diagnostics.py`(collect/render/脱敏纯函数) 与 `config.export_envelope/
+  parse_import`; `tunnel_mgr.tunnels_snapshot` 只取 pid/alive(记录里的明文主机/用户
+  不入报告); Release 资产新增 SHA256SUMS.txt(下载校验)
+- 修复 tunnels_snapshot 首版假设 pid 记录为裸 int 的数据形状 bug(实测记录为 dict);
+  新增 4 组单测, 353 例全过
+
 ## v0.7.0 (2026-08-30)
 
 ### 实时主题定制（新增「主题」页, 16 页导航）

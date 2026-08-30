@@ -166,7 +166,7 @@
 | SSH 密钥 | 生成/指纹/公钥查看（私钥内容绝不读取） |
 | 部署管理 | 多部署列表/详情/操作日志三栏：CRUD、连接测试、只读快照（在线徽章） |
 | 日志管理 | dsh web 落盘输出 tail + 过滤 + 着色 + token 脱敏 |
-| 设置 | 配置标签页化，保存即热重载 |
+| 设置 | 配置标签页化，保存即热重载；诊断报告（脱敏可外发）与配置导入导出 |
 | 主题 | 全部界面颜色实时可调（即时预览），可存/载主题文件、设启动默认 |
 | 关于与更新 | 当前版本 / 检查更新 / 更新日志 / 一键自动更新 |
 
@@ -216,7 +216,8 @@
 - [x] **版本管理**：当前版本 / 检查更新 / 更新日志 / 一键自动更新
 - [ ] 多套拓扑配置切换
 - [ ] 多主题切换（Mica/纯色/浅色）+ 布局记忆
-- [ ] 全局命令面板（Ctrl+K）/ 配置导出导入 / 诊断报告 / 用量图表
+- [x] 配置导出导入 + 诊断报告一键生成（设置页「诊断与配置」标签）
+- [ ] 全局命令面板（Ctrl+K）/ 用量图表
 - [ ] 小白引导：首次使用向导 / 诊断助手 / 常见问题
 
 ## License
@@ -282,7 +283,7 @@ See the Chinese section above for the full field table.
 | SSH keys | generate / fingerprints / public-key view (private keys are never read) |
 | Deployments | multi-deployment list/detail/op-log columns: CRUD, connection test, read-only snapshots |
 | Logs | live tail of dsh web output with filtering, coloring, token masking |
-| Settings | config as tabs, hot-reload on save |
+| Settings | config as tabs, hot-reload on save; masked diagnostics report & config import/export |
 | Theme | edit every UI color live (instant preview), save/load theme files, set startup default |
 | About & update | current version / check update / changelog / one-click auto-update |
 
