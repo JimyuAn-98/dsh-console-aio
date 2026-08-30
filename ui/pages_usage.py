@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from core import data as core_data
 from PySide6.QtWidgets import (
     QDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+    QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
 from ui.base import BasePage
 from ui.chart import StackedBarChart, short_model
@@ -63,18 +63,13 @@ class UsagePage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        # 整页纵向滚动(与设置页同款): 标题/信息条/趋势卡/三栏/说明全部随页面滚动,
-        # 视口不够时滚动而不是挤压任何区域
-        content = QWidget()
-        cv = QVBoxLayout(content)
-        cv.setContentsMargins(0, 0, 0, 0)
-        cv.setSpacing(8)
+        # 标题/提示/信息条固定在滚动区外(常驻顶部); 趋势卡/三栏/说明进滚动区
         title = QLabel("模型用量统计", objectName="cardTitle")
-        cv.addWidget(title)
+        root.addWidget(title)
         hint = QLabel("解压扫描全部会话的 session.jsonl.zstd 聚合 token 用量(较慢, 后台执行); "
                       "远程部署统计暂不支持, 会明确提示。", objectName="cardHint")
         hint.setWordWrap(True)   # 不换行会以整行宽度撑破内容最小宽, 窄窗口出外层横滚
-        cv.addWidget(hint)
+        root.addWidget(hint)
 
         info = QFrame(objectName="card")
         il = QHBoxLayout(info)
@@ -91,7 +86,13 @@ class UsagePage(BasePage):
         self._btn_refresh = QPushButton("刷新")
         self._btn_refresh.clicked.connect(self._refresh)
         il.addWidget(self._btn_refresh)
-        cv.addWidget(info)
+        root.addWidget(info)
+
+        # 滚动区内容: 趋势卡 → 三栏(固定高) → 说明; 用户滚动整页, 三栏不参与纵向滚动
+        content = QWidget()
+        cv = QVBoxLayout(content)
+        cv.setContentsMargins(0, 0, 0, 0)
+        cv.setSpacing(8)
 
         # 趋势卡(按模型堆叠的每日 token 柱状图; 数据来自最近一次统计, 切窗口不重扫)
         chart_card = QFrame(objectName="card")
@@ -130,20 +131,17 @@ class UsagePage(BasePage):
                       objectName="cardHint")
         note.setWordWrap(True)
 
-        # 三栏吃掉页面剩余的全部高度(视口大则更高, 只有窗口真放不下时才出滚动):
-        # mid_host 纵向 Ignored —— 布局无视其 sizeHint(否则 560+ 的最小高会把内容
-        # 总高顶破视口, 页面永远滚动、三栏被钉死); mid 保留 300px 兜底, 真放不下时
-        # 由 mid_host 自己的滚动条接管
+        # 三栏固定高度 500px: 纵向不滚(整页滚动兜底), 列表行多时由 ModernList 自滚;
+        # 窄窗口时只有三栏横向滚, 标题/信息条/趋势卡等仍自适应窗口宽度
         mid.setMinimumWidth(950)
-        mid.setMinimumHeight(300)
         mid_host = QScrollArea()
         mid_host.setWidgetResizable(True)
         mid_host.setFrameShape(QFrame.NoFrame)
-        mid_host.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        mid_host.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         mid_host.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        mid_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        mid_host.setFixedHeight(500)
         mid_host.setWidget(mid)
-        cv.addWidget(mid_host, 1)
+        cv.addWidget(mid_host)
         cv.addWidget(note)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
