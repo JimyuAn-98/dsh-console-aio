@@ -59,6 +59,20 @@ def tcp_ok(host, port, timeout=0.8):
         s.close()
 
 
+def port_free(port, host="127.0.0.1"):
+    # 本机端口能否绑定(规划器占用检测)。与 tcp_ok 互补: tcp_ok 测"有服务在听",
+    # 本函数测"我能否占用"。带 SO_REUSEADDR: TIME_WAIT 不算占用, 活监听才算。
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((host, int(port)))
+        return True
+    except (OSError, ValueError):
+        return False
+    finally:
+        s.close()
+
+
 def tunnels_snapshot(base_dir):
     # 隧道常驻进程快照(诊断报告等只读场景): {key: {"pid": int, "alive": bool}}。
     # pid 文件的记录值是 dict(含 sig/host/user 等, 此处只取 pid 字段, 明文不入快照);
