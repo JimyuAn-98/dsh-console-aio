@@ -217,7 +217,8 @@
 - [ ] 多套拓扑配置切换
 - [ ] 多主题切换（Mica/纯色/浅色）+ 布局记忆
 - [x] 配置导出导入 + 诊断报告一键生成（设置页「诊断与配置」标签）
-- [ ] 全局命令面板（Ctrl+K）/ 用量图表
+- [x] 用量趋势图表（按模型堆叠, 设置在用量页）
+- [ ] 全局命令面板（Ctrl+K）
 - [ ] 小白引导：首次使用向导 / 诊断助手 / 常见问题
 
 ## License
@@ -277,7 +278,7 @@ See the Chinese section above for the full field table.
 | Profiles | list / copy / delete profiles |
 | Plugins | list/detail/composed-config columns; official `dsh plugin` install/uninstall; patch-layer enable/disable (config vs. effective badges) |
 | Task board | ledger + scheduler read-only |
-| Model usage | decompress sessions, aggregate tokens (by model/day) + cost estimate |
+| Model usage | decompress sessions, aggregate tokens (by model/day) + cost estimate + daily trend chart |
 | LLM config | switch default model, browse custom providers (API keys only hinted by env-var name) |
 | Backup & credentials | one-click ~/.dsh backup (credentials excluded), credential presence hints |
 | SSH keys | generate / fingerprints / public-key view (private keys are never read) |
