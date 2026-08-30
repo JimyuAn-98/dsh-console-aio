@@ -481,7 +481,9 @@ def zstd_available():
 def usage_stats(remote=None):
     # 解压全部 session jsonl.zstd, 聚合 token 用量。
     # 返回 {ok: bool, error?: str, models: {model: {provider, input, output, calls}},
-    #        days: {date: {input, output}}, sessions: n}
+    #        days: {date: {input, output}}, days_models: {date: {model: {input, output}}},
+    #        sessions: n}
+    # days_models 为趋势图维度(天×模型, 只计输入+输出, 不含缓存命中), 与 days 同源累加。
     if remote is not None and remote.is_remote:
         return {"ok": False, "error": "远程用量统计暂不支持(需远程 Python + zstandard)"}
     if not zstd_available():
@@ -490,6 +492,7 @@ def usage_stats(remote=None):
     base = sessions_dir()
     models = {}
     days = {}
+    days_models = {}
     nsessions = 0
     if not os.path.isdir(base):
         return {"ok": True, "models": models, "days": days, "sessions": 0}
@@ -544,9 +547,13 @@ def usage_stats(remote=None):
                                     dd["input"] += i
                                     dd["output"] += o
                                     dd["cache"] += cr
+                                    dm = days_models.setdefault(date, {}).setdefault(m, {"input": 0, "output": 0})
+                                    dm["input"] += i
+                                    dm["output"] += o
             except (OSError, ValueError):
                 continue
-    return {"ok": True, "models": models, "days": days, "sessions": nsessions}
+    return {"ok": True, "models": models, "days": days,
+            "days_models": days_models, "sessions": nsessions}
 
 # 内置官方单价(元/百万 token), UI 可编辑覆盖。
 # 结构: {"in_cached": [空闲, 高峰], "in_miss": [空闲, 高峰], "out": [空闲, 高峰]}

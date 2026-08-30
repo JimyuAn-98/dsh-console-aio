@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
 from ui.base import BasePage
+from ui.chart import StackedBarChart, short_model
 from ui.widgets import ModernList, card_wrap, three_split
 
 # 明细卡键值对: (数据字段, 界面名)
@@ -84,6 +85,29 @@ class UsagePage(BasePage):
         self._btn_refresh.clicked.connect(self._refresh)
         il.addWidget(self._btn_refresh)
         root.addWidget(info)
+
+        # 趋势卡(按模型堆叠的每日 token 柱状图; 数据来自最近一次统计, 切窗口不重扫)
+        chart_card = QFrame(objectName="card")
+        ch = QVBoxLayout(chart_card)
+        ch.setContentsMargins(12, 8, 12, 8)
+        ch.setSpacing(4)
+        chead = QHBoxLayout()
+        chead.addWidget(QLabel("每日 token 趋势(输入+输出, 按模型堆叠; 悬停看当日明细)",
+                               objectName="rightTitle"))
+        chead.addStretch(1)
+        self._chart_span = 14
+        self._span_btns = {}
+        for n in (7, 14, 30):
+            b = QPushButton("%d 天" % n)
+            b.setCheckable(True)
+            b.setChecked(n == self._chart_span)
+            b.clicked.connect(lambda _=False, k=n: self._set_span(k))
+            self._span_btns[n] = b
+            chead.addWidget(b)
+        ch.addLayout(chead)
+        self._chart = StackedBarChart()
+        ch.addWidget(self._chart)
+        root.addWidget(chart_card)
 
         mid = three_split(
             card_wrap("按模型", self._make_list(is_model=True)),
@@ -189,6 +213,43 @@ class UsagePage(BasePage):
         self._sessions_lbl.setText("会话总数: %d" % int(res.get("sessions") or 0))
         self._fill_models(res.get("models") or {})
         self._fill_days(res.get("days") or {})
+        self._update_chart()
+
+    # ── 趋势图(天×模型, 数据来自最近一次统计; 切窗口只重排不重扫) ──
+    def _set_span(self, n):
+        self._chart_span = n
+        for k, b in self._span_btns.items():
+            b.setChecked(k == n)
+        self._update_chart()
+
+    def _update_chart(self):
+        res = self._stats or {}
+        dm = res.get("days_models") or {}
+        dates = sorted(k for k in dm if k and k != "?")[-self._chart_span:]
+
+        def tok(v):
+            v = v or {}
+            return int(v.get("input") or 0) + int(v.get("output") or 0)
+
+        totals = {}
+        for d in dates:
+            for m, v in (dm.get(d) or {}).items():
+                totals[m] = totals.get(m, 0) + tok(v)
+        order = sorted(totals, key=lambda m: -totals[m])
+        models = [m for m in order if totals.get(m)]
+        top, rest = models[:8], models[8:]
+        days = []
+        for d in dates:
+            stack = {}
+            for m in top:
+                v = tok((dm.get(d) or {}).get(m))
+                if v:
+                    stack[m] = v
+            other = sum(tok((dm.get(d) or {}).get(m)) for m in rest)
+            if other:
+                stack["其他"] = other
+            days.append((str(d)[5:], stack))
+        self._chart.set_series(days, top + (["其他"] if rest else []))
 
     def _fill_models(self, models):
         # 模型行: 标题=模型名, meta=provider · 调用次数 · 估算费用
