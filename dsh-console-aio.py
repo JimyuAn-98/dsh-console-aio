@@ -28,7 +28,8 @@ from core import tunnel_planner as dsh_planner
 from app.services import DshService
 from ui import theme as dsh_theme
 from ui.palette import CommandPalette
-from ui.theme import build_qss, apply_window_effects, try_system_blur
+from ui.theme import build_qss
+from ui import win32_frame as wframe
 from ui.widgets import ModernList, card_wrap
 
 # 白色齿轮 SVG(内嵌, 无需打包资源文件; QSvgRenderer 渲染为 QIcon)
@@ -687,40 +688,16 @@ class StatusPanel(QFrame):
 
 
 
-# ---------------- 自绘标题栏(无边框窗口): 手动拖拽 + 双击最大化 ----------------
-# 不用 HTCAPTION: 分层(WS_EX_LAYERED)窗口上 WM_NCHITTEST 拖拽不可靠(实测), 手动
-# mouse 事件纯 Qt 实现; 控件(按钮/下拉)自己消费点击, 空白/标签区自然冒泡到本栏。
+# ---------------- 自绘工具栏(保留原生标题栏方案) ----------------
+# 原生标题栏负责: 窗口拖动/贴靠/多屏/最小化/最大化/关闭/双击最大化。
+# 下面的自绘栏是一条业务工具栏(logo/标题/部署下拉/搜索/刷新), 不承担窗口拖拽,
+# 也不含自绘最小化/最大化/关闭按钮(那些由原生标题栏提供)。
 class _TopBar(QFrame):
     def __init__(self, win, parent=None):
         super().__init__(parent)
         self.setObjectName("topbar")
         self._win = win
-        self._drag = None
 
-    def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton and not self._win._maxed:
-            self._drag = e.globalPosition().toPoint() - self._win.frameGeometry().topLeft()
-            e.accept()
-        else:
-            super().mousePressEvent(e)
-
-    def mouseMoveEvent(self, e):
-        if self._drag is not None:
-            self._win.move(e.globalPosition().toPoint() - self._drag)
-            e.accept()
-        else:
-            super().mouseMoveEvent(e)
-
-    def mouseReleaseEvent(self, e):
-        self._drag = None
-        super().mouseReleaseEvent(e)
-
-    def mouseDoubleClickEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self._win._toggle_maximize()
-            e.accept()
-        else:
-            super().mouseDoubleClickEvent(e)
 
 
 # ---------------- 主窗口 ----------------
@@ -728,23 +705,20 @@ class MainWindow(QMainWindow):
     def __init__(self, smoke=False):
         super().__init__()
         self.smoke = smoke
-        # 无边框窗口仅 Windows(自绘标题栏 + 分层透明 + DWM Mica); 拖拽/拉伸走 WM_NCHITTEST。
-        # 其他平台保留原生标题栏(跨平台策略, 见 docs/VISION_部署子工具组.md)。
-        self._frameless = sys.platform == "win32"
-        if self._frameless:
-            self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+        # 保留原生标题栏(全平台)方案: 原生 WS_CAPTION|WS_THICKFRAME 不动 ->
+        # 原生贴靠/多屏拖拽/拉伸/标题栏按钮全保留, 无需 WM_NCCALCSIZE/WM_NCHITTEST。
+        # 平台窗口效果(Win11 22H2+): set_accent_blur(blurbehind)亚克力, 非分层窗口 ->
+        # 主区透出模糊; 原生标题栏实心不透明(Win11 原生标题栏无法真透明, 已定稿放弃)。
+        # 不用 FramelessWindowHint(删 WS_CAPTION|WS_THICKFRAME 会毁原生贴靠);
+        # 不用 DWM backdrop(DWMSBT, 非分层窗口无 alpha 通道, 画不出 -> 黑窗);
+        # 不做藏标题栏(WM_NCCALCSIZE 会丢掉原生标题栏按钮)。
         self.setWindowTitle("DSH Console · v" + APP_VERSION)
         if LOGO_PATH:
-            self.setWindowIcon(QIcon(LOGO_PATH))   # 任务栏/Alt-Tab 图标(无边框窗口同样生效)
+            self.setWindowIcon(QIcon(LOGO_PATH))   # 任务栏/Alt-Tab 图标
         self.resize(1160, 800)
         self.setMinimumSize(960, 620)
-        self._normal_geo = None                # 最大化前几何(还原用)
-        self._maxed = False                    # 自维护最大化状态(setGeometry 伪最大化)
-        self._btn_max = None                   # 最大化按钮(图标切换 □/❐)
-        # 平台窗口效果(Win11 22H2+ 分层透明; 失败自动回退纯 QSS)
-        self._mica = apply_window_effects(self)
-        # 系统级模糊(SetWindowCompositionAttribute, 经典方案); 失败则半透明无模糊
-        self._sys_blur = try_system_blur(self) if self._mica else False
+        self._mica = wframe.set_accent_blur(int(self.winId())) if sys.platform == "win32" else False
+        self._sys_blur = self._mica
         # 自定义主题(config.json["theme"])先激活再生成样式表; 运行中经 apply_theme 实时换肤
         self._custom_theme = bool(CONFIG.get("theme"))
         dsh_theme.set_active(CONFIG.get("theme") or {})
@@ -805,8 +779,7 @@ class MainWindow(QMainWindow):
             if sys.platform == "win32":
                 QTimer.singleShot(800, self._log_window_facts)
             if self._mica:
-                self.loge("模糊: %s" % ("系统级(ACCENT_ENABLE_BLURBEHIND)" if self._sys_blur
-                                        else "系统级失败, 半透明无模糊"), "ok")
+                self.loge("背景: DWM 亚克力(DWMSBT_TRANSIENTWINDOW, 非分层窗口, 保留原生贴靠)", "ok")
 
     # ---- 主题(主题引擎 ui/theme.py, token 驱动; 主题页经 apply_theme 实时换肤) ----
     def _load_theme(self):
@@ -883,46 +856,19 @@ class MainWindow(QMainWindow):
         lay.addWidget(spacer)
         lay.addWidget(search)
         lay.addWidget(refresh)
-
-        # 无边框窗口控制按钮(自绘标题栏; 仅 Windows 无边框模式)
-        if self._frameless:
-            btn_min = QPushButton("—", objectName="winBtn")
-            self._btn_max = QPushButton("□", objectName="winBtn")
-            btn_close = QPushButton("×", objectName="winBtnClose")
-            btn_min.clicked.connect(self.showMinimized)
-            self._btn_max.clicked.connect(self._toggle_maximize)
-            btn_close.clicked.connect(self.close)
-            for b in (btn_min, self._btn_max, btn_close):
-                b.setFixedSize(34, 28)
-                lay.addWidget(b)
         return bar
 
-    # ---- 无边框窗口: 最大化/还原(自维护状态, setGeometry 伪最大化不可靠) ----
-    def _toggle_maximize(self):
-        if self._maxed:
-            self.setGeometry(self._normal_geo)
-            self._maxed = False
-            self._btn_max.setText("□")
-        else:
-            self._normal_geo = self.geometry()
-            scr = self.screen() or QApplication.primaryScreen()
-            if scr is not None:
-                self.setGeometry(scr.availableGeometry())
-            self._maxed = True
-            self._btn_max.setText("❐")
-
+    # ---- 窗口诊断(启动后打印; 分层/DPI/DWM backdrop 排查用) ----
     def _log_window_facts(self):
         # 启动后诊断: 分层窗口/DPI/DWM backdrop 实际状态(半透明排查用)
         try:
             hwnd = int(self.winId())
-            style = ctypes.windll.user32.GetWindowLongPtrW(hwnd, -20)
-            layered = bool(style & 0x80000)
+            layered = wframe.is_layered(hwnd)
             dpi = ctypes.windll.user32.GetDpiForWindow(hwnd)
-            v = ctypes.c_int(0)
-            r = ctypes.windll.dwmapi.DwmGetWindowAttribute(
-                hwnd, 38, ctypes.byref(v), ctypes.sizeof(v))
-            self.loge("窗口: 分层=%s DWM-backdrop=%d DPI=%d"
-                      % ("开" if layered else "关", v.value if r == 0 else -1, dpi), "ok")
+            v = wframe.query_backdrop(hwnd)
+            self.loge("窗口: 分层=%s DWM-backdrop=%d DPI=%d 原生caption=%s thickframe=%s"
+                      % ("开" if layered else "关", v, dpi,
+                         wframe.has_caption(hwnd), wframe.has_thickframe(hwnd)), "ok")
         except Exception as e:
             self.loge("窗口诊断失败: %s" % e, "err")
 
@@ -930,52 +876,8 @@ class MainWindow(QMainWindow):
         super().resizeEvent(e)
 
     def nativeEvent(self, eventType, message):
-        # WM_NCHITTEST: 标题栏空白区拖拽(HTCAPTION), 边缘 6px 拉伸, 控件区放行。
-        # ⚠ 坐标换算: lParam 是物理像素, Qt geometry() 是逻辑像素(高分屏 DPI 缩放下
-        # 直接比较会导致热区错位——实测 150% 缩放下右缘热区膨胀到半屏、左/上缘消失)。
-        if sys.platform == "win32" and not self.smoke:
-            try:
-                msg = ctypes.wintypes.MSG.from_address(int(message))
-                if msg.message == 0x0084:  # WM_NCHITTEST
-                    dpi = ctypes.windll.user32.GetDpiForWindow(int(self.winId())) or 96
-                    dpr = dpi / 96.0
-                    x = ctypes.c_short(msg.lParam & 0xFFFF).value / dpr
-                    y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value / dpr
-                    geo = self.geometry()  # 逻辑坐标
-                    if self._maxed:
-                        # 最大化时不拉伸(热区关闭); 标题栏拖拽由 _TopBar 手动处理
-                        return True, 1
-                    ex, ey, ew, eh = geo.x(), geo.y(), geo.width(), geo.height()
-                    EDGE = 6
-                    left = x <= ex + EDGE
-                    right = x >= ex + ew - EDGE
-                    top = y <= ey + EDGE
-                    bottom = y >= ey + eh - EDGE
-                    if left and top:
-                        hit = 13
-                    elif right and top:
-                        hit = 14
-                    elif left and bottom:
-                        hit = 16
-                    elif right and bottom:
-                        hit = 17
-                    elif left:
-                        hit = 10
-                    elif right:
-                        hit = 11
-                    elif top:
-                        hit = 12
-                    elif bottom:
-                        hit = 15
-                    elif y <= ey + 52:
-                        # 标题栏区: 统一 HTCLIENT, 拖拽由 _TopBar 手动 mouse 事件处理
-                        # (分层窗口上 HTCAPTION 不可靠, 实测)
-                        hit = 1
-                    else:
-                        hit = 1
-                    return True, hit
-            except Exception:
-                pass
+        # 保留原生标题栏方案下不做任何拦截: 原生框架自行处理贴靠/拖拽/拉伸/
+        # 多屏命中, 无需 WM_NCCALCSIZE(藏标题栏)/WM_NCHITTEST(自绘命中)。
         return super().nativeEvent(eventType, message)
 
     # ---- 顶栏入口(命令面板; 环境检查/安装入口已迁「DSH 管理」页) ----

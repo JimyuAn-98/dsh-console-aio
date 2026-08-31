@@ -101,9 +101,12 @@ tools/screenshot_ui.py         → 每轮 GUI 改动的验证工具（渲染 PNG
 ## 七、GUI 现代化（Mica / 光效 / 分栏 / 表格展开 / 品牌）
 
 ### 7.1 深色亚克力 / Windows 11 深色 Mica
-- **Mica**：Win11 22H2+，经 ctypes 调 `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)`，
-  或直接用 [win32mica](https://github.com/marticliment/win32mica)（PyPI，已验证可用）。
-- **Acrylic**：`SetWindowCompositionAttribute`（Win10 1809+，注意性能开销）。
+- **亚克力（定稿 2026-08-31）**：Win11 22H2+，经 ctypes 调 `SetWindowCompositionAttribute`
+  `ACCENT_ENABLE_BLURBEHIND`（`ui/win32_frame.set_accent_blur`），**非分层窗口**即透出主区模糊
+  （参考用户本科项目 areo.h 配方），同时**保留原生标题栏**（Win11 原生标题栏实心不透明，
+  真透明不可得，已放弃）。
+- ⚠️ **不用 DWM backdrop**（`DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE=38)`）：非分层
+  Qt 窗口无 alpha 通道，DWM 背景被完全盖住（实测抓屏纯黑），死路。
 - **回退策略**：旧系统/不可用 → 纯色深色 QSS（现有主题兜底），不崩不卡。
 - **主题引擎**：QSS 参数化（Python 生成），支持 Mica 深色 / 纯色深色 / 浅色切换。
 
@@ -147,7 +150,8 @@ tools/screenshot_ui.py         → 每轮 GUI 改动的验证工具（渲染 PNG
 
 ## 九、技术可行性注记
 
-- Mica：win32mica（PyPI）/ DWM 属性，Win11 22H2+；回退方案必须有。
+- 亚克力（定稿）：`set_accent_blur`（`SetWindowCompositionAttribute` blurbehind），非分层保留原生标题栏，Win11 22H2+；回退方案必须有（纯 QSS 深色兜底）。
+- ❗ 不用 DWM backdrop（`DWMWA_SYSTEMBACKDROP_TYPE`）：非分层 Qt 窗口无 alpha，DWM 背景被盖住（实测黑窗）。
 - 动画：QPropertyAnimation（PySide6 官方支持）。
 - hover 光效：QSS ::hover 为主，QGraphicsDropShadowEffect 少量使用（性能教训：全控件滥用卡顿）。
 - 热重载：CONFIG 事件化（configChanged 信号 → 重建视图），中等重构，是 P0 前提。
@@ -169,9 +173,9 @@ tools/screenshot_ui.py         → 每轮 GUI 改动的验证工具（渲染 PNG
 
 | 层 | Windows 11 | macOS | Linux |
 |---|---|---|---|
-| 背景效果 | Mica（DWM, 22H2+） | vibrancy（原生集成成本高 → 先半透明近似或纯色） | 纯 QSS 深色（尊重系统暗色） |
+| 背景效果 | 亚克力（blurbehind, 22H2+） | vibrancy（原生集成成本高 → 先半透明近似或纯色） | 纯 QSS 深色（尊重系统暗色） |
 | 字体栈 | Microsoft YaHei UI | PingFang SC | Noto Sans CJK（QSS 多字体回退） |
-| 标题栏 | 无边框自绘（配 Mica） | **原生标题栏**（红绿灯） | 原生 |
+| 标题栏 | 原生标题栏（实心, 真透明不可得） | **原生标题栏**（红绿灯） | 原生 |
 | 动效/组件 | QPropertyAnimation + 同一组件库 | 同左 | 同左 |
 
 - **真正拦路虎在 core 层**：powershell/tasklist/taskkill/ssh.exe/pnpm.cmd 全为 Windows 专属；
