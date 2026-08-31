@@ -4,11 +4,11 @@
 # hover 浅白高亮、右侧圆角徽章 chips、状态点; 徽章色沿用主日志区语义色(ok绿/warn黄/err红)。
 # 约束: 纯展示控件, 不做业务; 页面用 set_rows 全量刷新(行数据 dict 存 UserRole)。
 
-from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PySide6.QtCore import QRect, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QFrame, QLabel, QListWidget, QListWidgetItem,
-    QSplitter, QStyle, QStyledItemDelegate, QVBoxLayout)
+    QSplitter, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
 
 from ui.theme import TOKENS
 
@@ -141,3 +141,67 @@ def card_wrap(caption, widget):
     v.addWidget(QLabel(caption, objectName="rightTitle"))
     v.addWidget(widget)
     return card
+
+
+class RefreshIndicator(QWidget):
+    # 页面标题右侧的"刷新状态指示": loading 时画旋转弧(spinner), 结束后显示状态点。
+    # 三种状态点语义(与主日志区 ok/warn/err 色一致): 绿=无变化 / 黄=数据有变化 / 红=获取错误。
+    # 用法: set_loading(True/False) 控制转圈; set_status("ok"|"warn"|"err") 设结束状态点,
+    #       None 清空状态点。setToolTip 提供文字说明(由页面按语义设置)。
+    SIZE = 16
+    FRAME_MS = 40   # 25fps 转圈, 增量 12°(约 0.5s 一圈)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self._loading = False
+        self._angle = 0
+        self._status = None
+        self._timer = QTimer(self)
+        self._timer.setInterval(self.FRAME_MS)
+        self._timer.timeout.connect(self._advance)
+
+    def set_loading(self, loading):
+        # 开始/停止转圈: 转圈时隐藏状态点, 结束后停在当前状态点。
+        if loading == self._loading:
+            return
+        self._loading = loading
+        if loading:
+            self._status = None
+            self._angle = 0
+            self._timer.start()
+        else:
+            self._timer.stop()
+        self.update()
+
+    def set_status(self, kind):
+        # kind: "ok"(绿/无变化) | "warn"(黄/有变化) | "err"(红/错误) | None(清除)。
+        self._status = kind
+        self.set_loading(False)
+        self.update()
+
+    def _advance(self):
+        self._angle = (self._angle + 12) % 360
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        margin = 2
+        if self._loading:
+            # 旋转圆弧(绘制一条渐隐的弧线): 画一个不闭合的圆环缺口, 借旋转营造转圈感。
+            pen = QPen(_tint("#ffffff", 200))
+            pen.setWidthF(2.0)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            r = QRect(margin, margin, self.width() - 2 * margin,
+                      self.height() - 2 * margin)
+            p.drawArc(r, self._angle * 16, 120 * 16)
+        elif self._status:
+            color = _badge_color(self._status)
+            p.setBrush(QColor(color))
+            p.drawEllipse(QRect(margin + 2, margin + 2,
+                                self.width() - 2 * (margin + 2),
+                                self.height() - 2 * (margin + 2)))
+        p.end()

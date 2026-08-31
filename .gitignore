@@ -28,6 +28,9 @@ Thumbs.db
 .DS_Store
 # ── 运行时状态（隧道 PID 轨道等）──
 tunnel-pids.json
+# 页数据本地缓存 + 模型价格持久化(运行时生成, 含用户数据, 不入库)
+dsh_aio_cache.json
+model_prices.json
 
 # ── 个人使用指南(含真实内网信息, 不入库) ──
 dsh使用指南.txt

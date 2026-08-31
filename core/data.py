@@ -556,13 +556,156 @@ def usage_stats(remote=None):
             "days_models": days_models, "sessions": nsessions}
 
 # 内置官方单价(元/百万 token), UI 可编辑覆盖。
-# 结构: {"in_cached": [空闲, 高峰], "in_miss": [空闲, 高峰], "out": [空闲, 高峰]}
+# 结构: {"in_cached": [空闲, 高峰], "in_miss": [空闲, 高峰], "out": [空闲, 高峰],
+#        "billing": "token"|"token-plan"}
 # 高峰时段: 北京时间周一至五 9:00-12:00, 14:00-18:00; 其余为空闲。
+# billing=="token" 按 token 用量计费(estimate_cost); "token-plan" 为按月订阅, 不走按量估算。
+BILLING_TOKEN = "token"
+BILLING_PLAN = "token-plan"
 DEFAULT_PRICES = {
-    "deepseek-v4-flash":        {"in_cached": [0.05, 0.10], "in_miss": [1.5, 3.0], "out": [4.5, 9.0]},
-    "deepseek-v4-pro":          {"in_cached": [0.15, 0.30], "in_miss": [4.5, 9.0], "out": [13.5, 27.0]},
-    "deepseek-v4-flash-vision": {"in_cached": [0.05, 0.10], "in_miss": [1.5, 3.0], "out": [4.5, 9.0]},
+    "deepseek-v4-flash":        {"in_cached": [0.05, 0.10], "in_miss": [1.5, 3.0], "out": [4.5, 9.0], "billing": BILLING_TOKEN},
+    "deepseek-v4-pro":          {"in_cached": [0.15, 0.30], "in_miss": [4.5, 9.0], "out": [13.5, 27.0], "billing": BILLING_TOKEN},
+    "deepseek-v4-flash-vision": {"in_cached": [0.05, 0.10], "in_miss": [1.5, 3.0], "out": [4.5, 9.0], "billing": BILLING_TOKEN},
 }
+
+
+_price_cache = None   # 生效价格缓存(读文件一次; save_prices 后失效), None=未加载
+
+# token-plan(订阅)模型的月/年费默认值
+DEFAULT_MONTHLY = 0.0
+DEFAULT_YEARLY = 0.0
+
+
+def price_file_path():
+    # 价格持久化文件: 与 config.json 同路径(软件路径), 名为 model_prices.json。
+    # 优先级同 _config_path: DSH_AIO_CONFIG(文件) / frozen(exe 目录) / 源码目录。
+    override = os.environ.get('DSH_AIO_CONFIG')
+    if override:
+        base = os.path.dirname(os.path.abspath(override))
+    elif getattr(sys, 'frozen', False):
+        base = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, 'model_prices.json')
+
+
+def _validate_price_spec(spec):
+    # 校验/归一化一条价格记录, 按 billing 分支:
+    #   token      -> {in_cached, in_miss, out, billing} (三组双档单价)
+    #   token-plan -> {monthly, yearly, billing}         (按月/年订阅费, 不走按量)
+    # 非法字段用默认兜底; spec 非 dict / 无法解析返回 None(整条舍弃)。
+    if not isinstance(spec, dict):
+        return None
+    billing = spec.get("billing")
+    if billing == BILLING_PLAN:
+        def fee(k, dft):
+            try:
+                return float(spec.get(k))
+            except (TypeError, ValueError):
+                return dft
+        return {"monthly": fee("monthly", DEFAULT_MONTHLY),
+                "yearly": fee("yearly", DEFAULT_YEARLY),
+                "billing": BILLING_PLAN}
+    # 默认按 token 处理(含 billing 缺失/未知 -> 视为按量)
+    out = {}
+    for k, dft in (("in_cached", [0.05, 0.10]), ("in_miss", [1.5, 3.0]),
+                   ("out", [4.5, 9.0])):
+        v = spec.get(k)
+        if not isinstance(v, (list, tuple)) or len(v) != 2:
+            v = dft
+        try:
+            out[k] = [float(v[0]), float(v[1])]
+        except (TypeError, ValueError):
+            out[k] = dft
+    out["billing"] = BILLING_TOKEN
+    return out
+
+
+def load_prices():
+    # 读取持久化的价格覆盖: {model: {token 结构 或 token-plan 结构}}。
+    # 缺失/损坏返回默认(DEFAULT_PRICES)。只返回 files 里出现的模型, 与内置合并由 effective_prices 负责。
+    p = price_file_path()
+    try:
+        with io.open(p, encoding='utf-8', errors='replace') as fh:
+            d = json.load(fh)
+        if not isinstance(d, dict):
+            return {}
+        out = {}
+        for name, spec in d.items():
+            if not name:
+                continue
+            ok_spec = _validate_price_spec(spec)
+            if ok_spec is not None:
+                out[name] = ok_spec
+        return out
+    except (OSError, ValueError):
+        return {}
+
+
+def _norm_fee(v, dft):
+    # 月/年费转 float; 空/非法用默认。
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return dft
+
+
+def save_prices(prices):
+    # 把 {model: {token 结构 或 token-plan 结构}} 写回 model_prices.json(写前备份)。
+    # 参数为空 dict 时写成空对象(等价于清空所有覆盖, 全部回默认)。
+    p = price_file_path()
+    backup_file(p)
+    clean = {}
+    for name, spec in prices.items():
+        if not name or not isinstance(spec, dict):
+            continue
+        if spec.get("billing") == BILLING_PLAN:
+            clean[name] = {"monthly": _norm_fee(spec.get("monthly"), DEFAULT_MONTHLY),
+                           "yearly": _norm_fee(spec.get("yearly"), DEFAULT_YEARLY),
+                           "billing": BILLING_PLAN}
+        else:
+            clean[name] = {
+                "in_cached": list(spec.get("in_cached") or [0.05, 0.10]),
+                "in_miss": list(spec.get("in_miss") or [1.5, 3.0]),
+                "out": list(spec.get("out") or [4.5, 9.0]),
+                "billing": BILLING_TOKEN,
+            }
+    try:
+        with io.open(p, 'w', encoding='utf-8', newline='') as fh:
+            json.dump(clean, fh, ensure_ascii=False, indent=2)
+    except OSError:
+        return False
+    global _price_cache
+    _price_cache = None   # 使生效价格缓存失效, 下次读取重新合并
+    return True
+
+
+def effective_prices():
+    # 当前生效价格 = 内置 DEFAULT_PRICES 被(可选的)持久化覆盖合并:
+    # 文件中出现的模型覆盖内置; 其余保持内置。返回一个新 dict, 不改动全局。
+    # 结果按模块级缓存保存(避免每次估算都读盘), save_prices 后失效。
+    global _price_cache
+    if _price_cache is not None:
+        return _price_cache
+    out = {}
+    for name, spec in DEFAULT_PRICES.items():
+        out[name] = dict(spec)
+    for name, spec in load_prices().items():
+        out[name] = spec
+    _price_cache = out
+    return _price_cache
+
+
+def subscription_cost(prices=None):
+    # 汇总所有订阅(token-plan)模型的月费/年费合计, 返回 (monthly_total, yearly_total)。
+    # 供用量页信息条展示"订阅费合计"; prices 缺省用 effective_prices()。
+    p = effective_prices() if prices is None else prices
+    m = y = 0.0
+    for spec in p.values():
+        if isinstance(spec, dict) and spec.get("billing") == BILLING_PLAN:
+            m += _norm_fee(spec.get("monthly"), DEFAULT_MONTHLY)
+            y += _norm_fee(spec.get("yearly"), DEFAULT_YEARLY)
+    return m, y
 
 def is_peak_hour(now=None):
     # 高峰时段: 北京时间周一至五 9:00-12:00, 14:00-18:00
@@ -574,15 +717,39 @@ def is_peak_hour(now=None):
 
 
 def estimate_cost(model, input_tokens, output_tokens, cache_tokens, prices=None):
-    # 估算费用(元): 按缓存命中/未命中 + 高峰/空闲区分
-    p = (prices or DEFAULT_PRICES).get(model)
+    # 估算费用(元): 按缓存命中/未命中 + 高峰/空闲区分。
+    # prices 默认取 effective_prices()(内置 + 持久化覆盖); token-plan(订阅)模型不走按量 -> None。
+    p = (effective_prices() if prices is None else prices).get(model)
     if not p:
+        return None
+    if p.get("billing") == BILLING_PLAN:
         return None
     peak = 1 if is_peak_hour() else 0
     miss = max(0, input_tokens - (cache_tokens or 0))
     return (miss / 1000000.0 * p["in_miss"][peak]
             + (cache_tokens or 0) / 1000000.0 * p["in_cached"][peak]
             + output_tokens / 1000000.0 * p["out"][peak])
+
+
+def usage_source_mtime():
+    # 用量统计数据源时间戳(秒): 所有 session.jsonl.zstd 的最新 mtime。
+    # 用作"数据是否变化"的比对基准: 源 mtime 晚于缓存抓取时间即视为有新数据需重扫。
+    base = sessions_dir()
+    latest = 0
+    if os.path.isdir(base):
+        for g in os.listdir(base):
+            gp = os.path.join(base, g)
+            if not os.path.isdir(gp):
+                continue
+            for sd in os.listdir(gp):
+                f = os.path.join(gp, sd, "session.jsonl.zstd")
+                try:
+                    mt = os.path.getmtime(f)
+                    if mt > latest:
+                        latest = mt
+                except OSError:
+                    continue
+    return latest
 
 
 # ── 备份 ──────────────────────────────────────────────

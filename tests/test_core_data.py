@@ -591,11 +591,141 @@ class TestCostEstimation:
         cost = estimate_cost("deepseek-v4-flash", 0, 0, 0)
         assert cost == 0.0
 
-    def test_estimate_cost_custom_prices(self):
+    def test_estimate_cost_custom_prices(self, monkeypatch):
         from core.data import estimate_cost
+        # 固定为时空闲时段, 避免测试结果随当前时刻(高峰/空闲)漂移
+        monkeypatch.setattr("core.data.is_peak_hour", lambda now=None: False)
         prices = {"my-model": {"in_cached": [1.0, 2.0], "in_miss": [3.0, 4.0], "out": [5.0, 6.0]}}
         cost = estimate_cost("my-model", 1000000, 0, 0, prices=prices)
         assert cost == pytest.approx(3.0)  # 1M * 3.0/M = 3.0
+
+    def test_token_plan_returns_none(self):
+        # 订阅(token-plan)模型不走按量估算 -> estimate_cost 返回 None
+        from core.data import estimate_cost
+        prices = {"gemini-plan": {"in_cached": [0.1, 0.2], "in_miss": [1.0, 2.0],
+                                  "out": [3.0, 4.0], "billing": "token-plan"}}
+        assert estimate_cost("gemini-plan", 1000000, 100000, 0, prices=prices) is None
+
+
+class TestPricePersistence:
+    # 价格持久化: model_prices.json 读写 + 生效价合并 + 缓存失效。monkeypatch 隔离, 绝不写真实文件。
+
+    def _iso(self, tmp_path, monkeypatch):
+        # 价格文件指到 tmp_path, 并使生效价缓存失效, 保证每例从干净状态开始
+        import core.data as d
+        monkeypatch.setattr(d, "price_file_path",
+                            lambda: os.path.join(str(tmp_path), "model_prices.json"))
+        monkeypatch.setattr(d, "_price_cache", None)
+        return d
+
+    def test_save_then_load_roundtrip(self, tmp_path, monkeypatch):
+        d = self._iso(tmp_path, monkeypatch)
+        assert d.save_prices({"m1": {"in_cached": [0.1, 0.2], "in_miss": [1.0, 1.5],
+                                     "out": [2.0, 3.0], "billing": "token"}})
+        loaded = d.load_prices()
+        assert loaded == {"m1": {"in_cached": [0.1, 0.2], "in_miss": [1.0, 1.5],
+                                 "out": [2.0, 3.0], "billing": "token"}}
+
+    def test_missing_file_returns_empty(self, tmp_path, monkeypatch):
+        d = self._iso(tmp_path, monkeypatch)
+        assert d.load_prices() == {}
+
+    def test_bad_billing_falls_back_token(self, tmp_path, monkeypatch):
+        d = self._iso(tmp_path, monkeypatch)
+        with io.open(os.path.join(str(tmp_path), "model_prices.json"), "w",
+                     encoding="utf-8") as fh:
+            json.dump({"m": {"in_cached": [1, 2], "in_miss": [3, 4],
+                             "out": [5, 6], "billing": "oops"}}, fh)
+        assert d.load_prices()["m"]["billing"] == "token"
+
+    def test_effective_merges_override_on_top_of_default(self, tmp_path, monkeypatch):
+        from core.data import DEFAULT_PRICES
+        d = self._iso(tmp_path, monkeypatch)
+        # 覆盖 flash 价格 + 新增一个模型; 未覆盖的模型保持内置
+        assert d.save_prices({"deepseek-v4-flash": {"in_cached": [9, 9], "in_miss": [9, 9],
+                                                    "out": [9, 9], "billing": "token"},
+                              "custom-only": {"in_cached": [1, 2], "in_miss": [3, 4],
+                                              "out": [5, 6], "billing": "token"}})
+        eff = d.effective_prices()
+        assert eff["deepseek-v4-flash"]["in_miss"] == [9, 9]
+        assert eff["custom-only"]["in_miss"] == [3, 4]
+        assert eff["deepseek-v4-pro"]["in_miss"] == DEFAULT_PRICES["deepseek-v4-pro"]["in_miss"]
+
+    def test_save_invalidates_cache(self, tmp_path, monkeypatch):
+        d = self._iso(tmp_path, monkeypatch)
+        d.effective_prices()  # 触发缓存
+        assert d._price_cache is not None
+        assert d.save_prices({})
+        assert d._price_cache is None   # 保存后失效, 下次重读
+
+    def test_empty_save_returns_defaults(self, tmp_path, monkeypatch):
+        from core.data import DEFAULT_PRICES
+        d = self._iso(tmp_path, monkeypatch)
+        d.save_prices({"custom": {"in_cached": [1, 1], "in_miss": [1, 1],
+                                  "out": [1, 1], "billing": "token"}})
+        d.save_prices({})   # 清空覆盖
+        eff = d.effective_prices()
+        assert "custom" not in eff
+        assert d.effective_prices()["deepseek-v4-flash"]["in_miss"] == \
+            DEFAULT_PRICES["deepseek-v4-flash"]["in_miss"]
+
+    # ── 订阅(token-plan)结构 ──
+    def test_save_plan_roundtrip(self, tmp_path, monkeypatch):
+        d = self._iso(tmp_path, monkeypatch)
+        assert d.save_prices({"gemini-plan": {"monthly": 199.0, "yearly": 1990.0,
+                                              "billing": "token-plan"}})
+        loaded = d.load_prices()
+        assert loaded == {"gemini-plan": {"monthly": 199.0, "yearly": 1990.0,
+                                          "billing": "token-plan"}}
+        # 订阅模型不写 token 三组字段
+        assert "in_cached" not in loaded["gemini-plan"]
+
+    def test_plan_bad_fee_falls_back_zero(self, tmp_path, monkeypatch):
+        d = self._iso(tmp_path, monkeypatch)
+        with io.open(os.path.join(str(tmp_path), "model_prices.json"), "w",
+                     encoding="utf-8") as fh:
+            json.dump({"m": {"monthly": "abc", "yearly": None, "billing": "token-plan"}}, fh)
+        loaded = d.load_prices()["m"]
+        assert loaded["monthly"] == 0.0 and loaded["yearly"] == 0.0
+        assert loaded["billing"] == "token-plan"
+
+    def test_effective_plan_merges(self, tmp_path, monkeypatch):
+        d = self._iso(tmp_path, monkeypatch)
+        # 把内置 token 模型覆盖成订阅 + 新增一个订阅模型
+        assert d.save_prices({"deepseek-v4-flash": {"monthly": 100.0, "yearly": 1000.0,
+                                                    "billing": "token-plan"},
+                              "plan-only": {"monthly": 50.0, "yearly": 500.0,
+                                            "billing": "token-plan"}})
+        eff = d.effective_prices()
+        assert eff["deepseek-v4-flash"]["billing"] == "token-plan"
+        assert eff["deepseek-v4-flash"]["monthly"] == 100.0
+        assert eff["plan-only"]["yearly"] == 500.0
+        # 未覆盖的内置模型保持 token 结构
+        assert eff["deepseek-v4-pro"].get("billing") == "token"
+
+    def test_estimate_plan_from_effective_returns_none(self, tmp_path, monkeypatch):
+        from core.data import estimate_cost
+        d = self._iso(tmp_path, monkeypatch)
+        d.save_prices({"gemini-plan": {"monthly": 99.0, "yearly": 990.0,
+                                       "billing": "token-plan"}})
+        d._price_cache = None
+        # estimate_cost 默认走 effective_prices -> 订阅模型返回 None(不走按量)
+        assert estimate_cost("gemini-plan", 1000000, 100000, 0) is None
+
+    def test_subscription_cost_sums_plans_only(self, tmp_path, monkeypatch):
+        d = self._iso(tmp_path, monkeypatch)
+        d.save_prices({"plan_a": {"monthly": 100.0, "yearly": 1000.0, "billing": "token-plan"},
+                       "plan_b": {"monthly": 50.0, "yearly": 500.0, "billing": "token-plan"},
+                       "tok": {"in_cached": [0.1, 0.2], "in_miss": [1.5, 3.0],
+                               "out": [4.5, 9.0], "billing": "token"}})
+        d._price_cache = None
+        m, y = d.subscription_cost()
+        assert (m, y) == pytest.approx((150.0, 1500.0))   # 只累计订阅模型, token 模型不计
+
+    def test_subscription_cost_no_plans_zero(self, tmp_path, monkeypatch):
+        d = self._iso(tmp_path, monkeypatch)
+        m, y = d.subscription_cost()
+        assert (m, y) == (0.0, 0.0)
 
 
 class TestIsPeakHour:
