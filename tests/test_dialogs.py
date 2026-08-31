@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
-# ui/pages_settings.py 设置页 + ui/dialogs.py 剩余对话框构造冒烟测试。
-# 验证: SettingsPage 构造/模板/保存合并路径 + InstallDialog / EnvDialog 构造不崩溃。
-# 环境: QT_QPA_PLATFORM=offscreen; 配置读写 monkeypatch 拦截, 绝不写真实 config.json。
+# ui/pages_settings.py 设置页 + DSH 管理页(弹窗收敛后: 环境检查/安装向导页面内分步)测试。
+# 验证: SettingsPage 构造/模板/保存合并 + DshManagePage 环境表/安装向导构造冒烟。
+# 环境: QT_QPA_PLATFORM=offscreen; 配置读写/后台读/网络 monkeypatch 拦截, 绝不落真实资源。
 
 import os
-import sys
-import json
 
 import pytest
 
@@ -109,74 +107,84 @@ class TestSettingsPage:
         qapp_mod.processEvents()
 
 
-class TestInstallDialog:
-    """InstallDialog: 安装向导构造冒烟。"""
+class _FakeService:
+    # DshManagePage 依赖的 service 最小接口(构造用; card 信号仅 connect 记账)
+    def __init__(self):
+        self.card = _FakeSignal()
 
-    def test_construction(self, qapp_mod):
-        from ui.dialogs import InstallDialog
-        dlg = InstallDialog()
-        assert dlg.windowTitle() == "安装 dsh"
-        assert dlg.result is None
-        dlg.close()
+    def run_cmd(self, *a, **k):
+        pass
+
+    def start_dsh(self, *a, **k):
+        pass
+
+
+class _FakeSignal:
+    def connect(self, *a, **k):
+        pass
+
+
+class TestDshManagePage:
+    """DSH 管理页: 弹窗收敛后, 环境检查 / 安装向导以页面内分步呈现(退役 EnvDialog/InstallDialog)。"""
+
+    class _FakeApp:
+        NAME = "dsh"
+
+        def __init__(self):
+            self._card_state = {}
+            self.service = _FakeService()
+            self.logs = []
+
+        def loge(self, *a):
+            self.logs.append(a)
+
+        def set_status(self, *a):
+            pass
+
+        def _refresh_deploy_list(self):
+            pass
+
+    def test_construct_with_env_and_install_cards(self, qapp_mod, monkeypatch):
+        # 镜像旧 InstallDialog/EnvDialog 的构造冒烟: 页面能构建, 且包含环境表与安装向导卡
+        from ui.pages_dsh import DshManagePage
+        # 拦截后台读/网络: 环境探测返回固定值, tags 拉取直接抛错(避免真网络)
+        import core.env as _env
+        def _fake_tools(tools):
+            return {"git": "git version 2.53.0", "node": "v24.19.0",
+                    "npm": "11.17.0", "pnpm": "11.7.0"}
+        monkeypatch.setattr(_env, "tool_versions", _fake_tools)
+        import core.dshctl as _dshctl
+        def _boom():
+            raise RuntimeError("no network in test")
+        monkeypatch.setattr(_dshctl, "fetch_dsh_tags", _boom)
+        app = self._FakeApp()
+        page = DshManagePage(app)
+        qapp_mod.processEvents()
+        # 页面已建; 环境表两条目的版本探测结果经信号回到主线程
+        assert page.env_rows  # 4 个工具行
+        assert page._inst_url is not None
+        assert page._inst_bar is not None
+        page.close()
         qapp_mod.processEvents()
 
-
-class TestEnvDialog:
-    """EnvDialog: 环境检查构造冒烟。"""
-
-    def test_construction(self, qapp_mod):
-        from ui.dialogs import EnvDialog
-        dlg = EnvDialog()
-        assert dlg.windowTitle() == "环境检查"
-        dlg.close()
+    def test_install_validation_requires_url(self, qapp_mod, monkeypatch):
+        # 安装向导: 空仓库地址拒绝启动(与旧 InstallDialog 同源校验)
+        from ui.pages_dsh import DshManagePage
+        # 拦截弹窗(空 URL 会 QMessageBox.critical)与后台读/网络
+        monkeypatch.setattr("ui.pages_dsh.QMessageBox.critical", lambda *a, **k: None)
+        import core.env as _env
+        monkeypatch.setattr(_env, "tool_versions", lambda tools: {})
+        import core.dshctl as _dshctl
+        monkeypatch.setattr(_dshctl, "fetch_dsh_tags", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+        app = self._FakeApp()
+        page = DshManagePage(app)
         qapp_mod.processEvents()
-
-
-class TestDialogBase:
-    """_DialogBase.safe_emit: 线程安全发射。"""
-
-    def test_safe_emit_on_destroyed(self, qapp_mod):
-        """对已销毁的 QObject emit 不应崩溃。"""
-        from PySide6.QtCore import Signal, QObject
-        from ui.dialogs import _DialogBase
-
-        class FakeDialog(_DialogBase):
-            _sig = Signal(str)
-
-        dlg = FakeDialog()
-        sig = dlg._sig
-        dlg.close()
+        page._inst_url.setText("")
+        # 直接触发安装应被 URL 校验拦截(_inst_running 仍为 False)
+        page._start_install()
+        assert page._inst_running is False
+        page.close()
         qapp_mod.processEvents()
-        # safe_emit 应吞掉 RuntimeError
-        dlg.safe_emit(sig, "test")
-        qapp_mod.processEvents()
-
-
-class TestLoadConfig:
-    """dialogs._load_config: 防御模式读取。"""
-
-    def test_load_config_missing_file(self, tmp_path, monkeypatch):
-        from ui.dialogs import _load_config
-        monkeypatch.setattr("ui.dialogs.CONFIG_PATH", str(tmp_path / "missing.json"))
-        result = _load_config()
-        assert result == {}
-
-    def test_load_config_valid(self, tmp_path, monkeypatch):
-        from ui.dialogs import _load_config
-        cfg = {"key": "value"}
-        p = tmp_path / "config.json"
-        p.write_text(json.dumps(cfg), encoding="utf-8")
-        monkeypatch.setattr("ui.dialogs.CONFIG_PATH", str(p))
-        result = _load_config()
-        assert result["key"] == "value"
-
-    def test_load_config_corrupted(self, tmp_path, monkeypatch):
-        from ui.dialogs import _load_config
-        p = tmp_path / "config.json"
-        p.write_text("{bad json", encoding="utf-8")
-        monkeypatch.setattr("ui.dialogs.CONFIG_PATH", str(p))
-        result = _load_config()
-        assert result == {}
 
 
 class TestHumanSize:

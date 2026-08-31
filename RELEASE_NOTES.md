@@ -3,6 +3,56 @@
 
 ## v0.8.0 (未发布)
 
+### 浅色主题 + 明/暗变体切换（小菜①）
+
+- **新增浅色主题**：`ui/theme.py` 新增 `LIGHT_TOKENS` 全套浅色变体（背景/文字/边框/控件/
+  滚动条全面反色为浅色系），与深色同一 token 键、同一 QSS 模板
+- **明/暗一键切换**：主题页新增「明/暗变体」卡（深色/浅色两个按钮），切换即生效、持久化
+  `config.json["theme_variant"]`（自动 .bak）；**深色仍为启动默认**
+- **切变体语义**：切换时丢弃旧变体上未保存的覆盖（避免把另一套配色的覆盖叠到新底上），
+  提示先「保存为启动默认」；变体与具名主题文件/启动默认叠加工作（overrides 只对本变体生效）
+- **选中/强调文字 token 化**：QSS 与画家层散落的 `#fff`（主按钮、表格/下拉/现代列表选中、
+  主题文件选中、导航 hover、spinner）统一收编为新 token `on_accent`/`on_selection`
+  （深色=白、浅色=深），浅色下文字/选中不再不可见；画家层 hover 由「白 12 透明」改为读
+  `bg_hover` token，spinner 改读 `text` token
+- **原生标题栏跟随**：切浅色时 `set_immersive_dark(False)`（亮标题栏），切深色反之
+- **非 Mica 路径**：浅色变体下 `_load_theme` 走实时生成 QSS（不读深色出厂 `theme.qss`）
+- **决策**：明/暗入口选「主题页加切换」而非跟随系统/独立预设；深色保持默认。决策记录见
+  `.agents/notes/implemented/feature/2026-08-31-light-theme.md`
+- 测试：theme 新增 6 组变体用例（默认深色/切浅色+派生/非法变体拒绝/变体感知恢复默认/
+  浅色 QSS token/双变体 on token 齐备），17 例全过；17 页构造冒烟 + 离屏切变体验证通过
+
+### 弹窗收敛第二步：环境检查 + 安装向导 → 页面内分步（小菜②）
+
+- **退役模态弹窗**：`ui/dialogs.py` 整体删除——EnvDialog（环境检查）与 InstallDialog
+  （安装向导）两个模态 `QDialog.exec()` 退役，改为 **DSH 管理页页面内分步**
+  （step in place，愿景 §二.5）；业务仍在 `core/env.py`（纯 Python）未动
+- **开发环境检查卡**：页内 QTableWidget 内联展示 git/node/npm/pnpm 版本 + 推荐基准 +
+  OK/缺失状态；「更新/安装/卸载」动作先说明将执行什么、确认后才执行（`QMessageBox.question`
+  危险确认约定保留）；「刷新」按钮实时重探测
+- **安装 dsh 卡**：页内 URL + 目标目录(可浏览)输入 + 「开始安装」+ 进度条 + 流式日志
+  （`QPlainTextEdit`），经 `core_env.install_dsh(events)` 回调 → 类级 Signal → safe_emit
+  回主线程；空 URL 校验拦截；安装成功自动 `_refresh_deploy_list`（新仓库可被部署联动）
+- **打包清理**：`build_win.bat` / 两个 spec 移除 `ui.dialogs` hidden-import
+- **文档**：README「安装/环境检查」改述为页面内分步；决策记录见
+  `.agents/notes/implemented/feature/2026-08-31-dialog-consolidation.md`
+- 测试：`tests/test_dialogs.py` 移除对旧 dialogs 的依赖，新增 `TestDshManagePage`
+  构造冒烟 + 空 URL 安装校验；离屏 17 页导航冒烟通过（DSH 页含 4 环境行 + 安装卡）
+
+### 卸载 dsh（保留/含数据）+ 环境检查卡两处修正（2026-08-31）
+
+- **新增「卸载 dsh」**：DSH 管理页新增卸载卡，两种模式——**保留数据卸载**（停 web +
+  删源码目录 dash_repo + 清空 config、保留 ~/.dsh）/**彻底卸载含数据**（额外删 ~/.dsh
+  数据目录）。删除前逐条列出将删路径；「彻底卸载」二次确认；删除有防误删守卫（绝不删
+  用户主目录）。业务在 `core/env.py::uninstall_dsh`（零 Qt, 与 install_dsh 对称），流程经
+  事件回页面进度条 + 流式日志。新增 `QPushButton#danger` 样式（err 红色）与 `err_hover` token
+- **环境检查卡修正**：①「当前版本」/状态文字由硬编码 `Qt.black`/`Qt.darkGreen` 改为主题
+  token（`text`/`ok`/`err`），暗色背景下不再黑字看不清、明/暗变体自适应；②环境表内
+  更新/安装/卸载按钮设最小高度（防被行高裁切、字显不全）
+- 测试：`tests/test_core_env.py` 新增 `TestUninstallDsh` 5 例（保留数据删源/含数据删
+  ~/.dsh/无仓库 graceful/rmtree 失败返回 err/主目录守卫）；`test_dialogs.py` 的
+  TestDshManagePage 冒烟覆盖卸载卡；离屏冒烟验证环境行色读 token + 卸载取消不执行
+
 ### DSH 管理页（新增, 17 页导航, 总览与隧道之间）
 
 - **dsh 域操作集中一页**：本机 dsh 操控(启动/重启/停止, 原隧道页卡) + 完整更新

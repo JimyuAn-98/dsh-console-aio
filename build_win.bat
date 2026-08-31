@@ -45,7 +45,6 @@ echo [1/2] PyInstaller onefile build (PySide6)...
   --name dsh-console-aio ^
   --icon logo.ico ^
   --hidden-import core --hidden-import core.tunnel_mgr ^
-  --hidden-import ui.dialogs ^
   --hidden-import ui.pages_sessions --hidden-import ui.pages_agents ^
   --hidden-import ui.pages_profiles --hidden-import ui.pages_plugins ^
   --hidden-import ui.pages_taskboard --hidden-import ui.pages_usage ^

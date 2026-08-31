@@ -719,7 +719,12 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(960, 620)
         self._mica = wframe.set_accent_blur(int(self.winId())) if sys.platform == "win32" else False
         self._sys_blur = self._mica
-        # 自定义主题(config.json["theme"])先激活再生成样式表; 运行中经 apply_theme 实时换肤
+        # 明/暗变体(config["theme_variant"], 默认深色): 先切 base 色板, 再套用户覆盖
+        # (config["theme"])图层; 原生标题栏跟随变体(浅色 -> 亮标题栏)。
+        dsh_theme.set_variant(CONFIG.get("theme_variant") or "dark")
+        self._theme_variant = dsh_theme.get_variant()
+        if sys.platform == "win32":
+            wframe.set_immersive_dark(int(self.winId()), dark=(self._theme_variant != "light"))
         self._custom_theme = bool(CONFIG.get("theme"))
         dsh_theme.set_active(CONFIG.get("theme") or {})
         self.setStyleSheet(self._load_theme())
@@ -784,12 +789,12 @@ class MainWindow(QMainWindow):
     # ---- 主题(主题引擎 ui/theme.py, token 驱动; 主题页经 apply_theme 实时换肤) ----
     def _load_theme(self):
         #   Mica 可用(Win11 22H2+) -> 生成半透明 QSS(外部 theme.qss 不参与, 避免盖住 DWM 背景);
-        #   有自定义主题(config["theme"] / 运行中 apply_theme) -> 由 TOKENS 实时生成
-        #   (外部 theme.qss 是出厂色产物, 会盖掉覆盖);
+        #   有自定义主题(config["theme"] / 运行中 apply_theme)或浅色变体 -> 由 TOKENS 实时生成
+        #   (外部 theme.qss 是深色出厂产物, 会盖掉覆盖/浅色);
         #   否则 -> 外部 ui/theme.qss 优先(手动微调), 缺失回退生成的不透明 QSS。
         if self._mica:
             return build_qss(mica=True)
-        if self._custom_theme:
+        if self._custom_theme or self._theme_variant != "dark":
             return build_qss(mica=False)
         if getattr(sys, 'frozen', False):
             base = getattr(sys, '_MEIPASS', BASE_DIR)
@@ -813,6 +818,27 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(build_qss(mica=self._mica))
         if note:
             self.loge(note, "ok")
+
+    def set_theme_variant(self, variant):
+        # 明/暗切换: 切 base 色板(丢弃旧变体上的覆盖, 避免叠到新底上) -> 持久化
+        # config["theme_variant"] -> 原生标题栏跟随 -> 重建 QSS。深色为启动默认。
+        # 返回是否成功(非法 variant 返回 False)。
+        if not dsh_theme.set_variant(variant):
+            return False
+        self._theme_variant = dsh_theme.get_variant()
+        if sys.platform == "win32":
+            wframe.set_immersive_dark(int(self.winId()), dark=(self._theme_variant != "light"))
+        ov = dsh_theme.current_overrides()
+        cfg = dsh_config.load_config()
+        if ov:
+            cfg["theme"] = ov
+        else:
+            cfg.pop("theme", None)       # 已回到变体出厂 -> 清空覆盖
+        cfg["theme_variant"] = self._theme_variant
+        ok = dsh_config.save_config(cfg)
+        self._custom_theme = bool(ov)
+        self.setStyleSheet(build_qss(mica=self._mica))
+        return ok
 
     # ---- 顶部栏 ----
     def _build_topbar(self):

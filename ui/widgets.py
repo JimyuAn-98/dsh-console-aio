@@ -45,7 +45,7 @@ class _RowDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(rect, 8, 8)
         elif option.state & QStyle.State_MouseOver:
             painter.setPen(Qt.NoPen)
-            painter.setBrush(_tint("#ffffff", 12))
+            painter.setBrush(QColor(TOKENS["bg_hover"]))
             painter.drawRoundedRect(rect, 8, 8)
         x = rect.left() + 10
         dot = row.get("dot")
@@ -56,7 +56,7 @@ class _RowDelegate(QStyledItemDelegate):
             x += 16
         font = painter.font()
         title_y = rect.top() + 8 if row.get("meta") else rect.top() + (rect.height() - 17) // 2
-        painter.setPen(QColor("#ffffff" if selected else TOKENS["text"]))
+        painter.setPen(QColor(TOKENS["on_selection"] if selected else TOKENS["text"]))
         painter.drawText(x, title_y + 13, row.get("title") or "")
         meta = row.get("meta") or ""
         if meta:
@@ -191,7 +191,7 @@ class RefreshIndicator(QWidget):
         margin = 2
         if self._loading:
             # 旋转圆弧(绘制一条渐隐的弧线): 画一个不闭合的圆环缺口, 借旋转营造转圈感。
-            pen = QPen(_tint("#ffffff", 200))
+            pen = QPen(_tint(TOKENS["text"], 200))
             pen.setWidthF(2.0)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             p.setPen(pen)

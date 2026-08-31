@@ -58,10 +58,14 @@ TOKENS = {
     "nav_text": "#b8b8cf",
     "text_disabled": "#6a6a80",
     "tooltip_border": "#4b5878",
+    # 强调/选中底上的文字色(浅色主题反转为深色; 与 accent 同源配色, 不入可编辑白名单)
+    "on_accent": "#ffffff",
+    "on_selection": "#ffffff",
     # 状态色
     "ok": "#7ecb6a",
     "warn": "#e5c07b",
     "err": "#e07a7a",
+    "err_hover": "#eb9c9c",
     "mon_ok": "#43d17f",
     "mon_bad": "#e5574d",
     # 字体(跨平台栈: Win -> mac -> Linux)
@@ -82,7 +86,64 @@ TOKENS = {
 # DEFAULT_TOKENS 是模块加载时冻结的出厂预设。config.json["theme"] 存启动默认覆盖,
 # themes/*.json 是具名主题文件(两者格式相同: {token: 颜色值} 最小覆盖集)。
 
-DEFAULT_TOKENS = dict(TOKENS)   # 出厂预设快照(恢复默认 = 从这里拷回)
+DEFAULT_TOKENS = dict(TOKENS)   # 深色出厂预设快照(恢复默认 = 从当前变体的 base 拷回)
+
+# ── 浅色主题变体(LIGHT_TOKENS): 与深色同一套 token 键, 值全为浅色。
+# 由主题页「明/暗」切换启用, config.json["theme_variant"] 持久化(深色仍为启动默认)。
+# rgba 半透明层在亚克力模式下把浅色托在 DWM 模糊之上; 文字/边框/控件全面反转为浅色系。
+LIGHT_TOKENS = {
+    # 背景
+    "bg": "#eef1f6",
+    "bg_rgba": "rgba(238, 241, 246, 0.42)",
+    "bg_elevated": "#f7f9fc",
+    "bg_elevated_rgba": "rgba(247, 249, 252, 0.55)",
+    "bg_log": "#ffffff",
+    "bg_log_rgba": "rgba(255, 255, 255, 0.75)",
+    "bg_page_rgba": "rgba(238, 241, 246, 0.42)",
+    "bg_hover": "#dde3ee",
+    "bg_active": "#d3ddf5",
+    # 边框 / 强调
+    "border": "#d5dbe6",
+    "border_strong": "#c3cbd9",
+    "border_hover": "#9fb0d8",
+    "accent": "#5686fe",
+    "accent_hover": "#3068f0",
+    "accent_soft": "rgba(86, 134, 254, 40)",   # _derive_tokens 会按 accent 重算
+    "accent_glow": "rgba(86, 134, 254, 0.22)",
+    # 控件
+    "btn_bg": "#ffffff",
+    "btn_hover": "#e7edf7",
+    "btn_pressed": "#d9e1ef",
+    "btn_disabled_bg": "#eef1f6",
+    "input_disabled_bg": "#eef1f6",
+    "inset_border": "#cdd5e2",
+    "table_alt": "#f2f5fa",
+    # 文字
+    "text": "#23262e",
+    "text_dim": "#6b7280",
+    "text_bright": "#14171d",
+    "nav_text": "#4b5160",
+    "text_disabled": "#9aa1af",
+    "tooltip_border": "#c3cbd9",
+    "on_accent": "#ffffff",
+    "on_selection": "#23262e",
+    # 状态色(浅色底上加深保证对比度)
+    "ok": "#2f9e44",
+    "warn": "#b7791f",
+    "err": "#d64545",
+    "err_hover": "#e55a5a",
+    "mon_ok": "#1f9d63",
+    "mon_bad": "#e03e2f",
+    # 字体 / 圆角 / 滚动条(与深色一致; 滚动条底色转浅)
+    "font": '"Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif',
+    "mono": "Consolas, 'Cascadia Mono', monospace",
+    "radius": "10px",
+    "radius_sm": "6px",
+    "scroll_bg": "#e2e6ee",
+    "scroll_handle": "#c3cbd9",
+    "scroll_handle_hover": "#9fb0d8",
+}
+
 
 # 主题页可编辑的 hex 颜色 token(按分组展示)。不在白名单的: accent_soft/accent_glow
 # (accent 派生色, 自动重算)、bg_rgba(未使用的预留 token)、font/mono/radius(非颜色)。
@@ -146,8 +207,32 @@ def set_active(overrides):
 
 
 def reset_default():
+    # 恢复出厂 = 恢复当前变体的 base 色板(深色/浅色各自出厂), 派生随之重算
     TOKENS.clear()
-    TOKENS.update(DEFAULT_TOKENS)
+    TOKENS.update(VARIANTS[ACTIVE_VARIANT])
+    _derive_tokens()
+
+
+# ── 明/暗变体 ──
+VARIANTS = {"dark": DEFAULT_TOKENS, "light": LIGHT_TOKENS}
+ACTIVE_VARIANT = "dark"        # 模块级当前变体(启动默认深色; 由 config["theme_variant"] 覆盖)
+
+
+def get_variant():
+    return ACTIVE_VARIANT
+
+
+def set_variant(variant):
+    # 切换明/暗: 把 TOKENS 重置为该变体的 base 色板(覆盖仅对本变体生效, 切换即丢弃,
+    # 避免把另一套配色的覆盖叠到新底上)。返回是否成功。
+    global ACTIVE_VARIANT
+    if variant not in VARIANTS:
+        return False
+    ACTIVE_VARIANT = variant
+    TOKENS.clear()
+    TOKENS.update(VARIANTS[variant])
+    _derive_tokens()
+    return True
 
 
 def get_alpha(token):
@@ -165,8 +250,8 @@ def set_alpha(token, alpha):
 
 
 def current_overrides():
-    # 当前生效值与出厂的差异集 = 写 config["theme"] / 主题文件的最小覆盖集
-    return {k: TOKENS[k] for k in PERSIST_KEYS if TOKENS[k] != DEFAULT_TOKENS[k]}
+    # 当前生效值与"当前变体出厂"的差异集 = 写 config["theme"] / 主题文件的最小覆盖集
+    return {k: TOKENS[k] for k in PERSIST_KEYS if TOKENS[k] != VARIANTS[ACTIVE_VARIANT][k]}
 
 
 def themes_dir():
@@ -294,7 +379,7 @@ QComboBox#deploy::drop-down {{ border: none; width: 22px; }}
 QComboBox#deploy QAbstractItemView {{
     background: {t["btn_bg"]}; border: 1px solid {t["border_strong"]};
     selection-background-color: {t["accent"]};
-    selection-color: #ffffff; color: {t["text"]}; outline: 0; padding: 4px;
+    selection-color: {t["on_selection"]}; color: {t["text"]}; outline: 0; padding: 4px;
 }}
 
 QPushButton {{
@@ -304,8 +389,10 @@ QPushButton {{
 QPushButton:hover {{ background: {t["btn_hover"]}; border-color: {t["border_hover"]}; }}
 QPushButton:pressed {{ background: {t["btn_pressed"]}; }}
 QPushButton:disabled {{ color: {t["text_disabled"]}; background: {t["btn_disabled_bg"]}; }}
-QPushButton#primary {{ background: {t["accent"]}; border-color: {t["accent"]}; color: #fff; font-weight: bold; }}
+QPushButton#primary {{ background: {t["accent"]}; border-color: {t["accent"]}; color: {t["on_accent"]}; font-weight: bold; }}
 QPushButton#primary:hover {{ background: {t["accent_hover"]}; border-color: {t["accent_hover"]}; }}
+QPushButton#danger {{ background: {t["err"]}; border-color: {t["err"]}; color: #ffffff; }}
+QPushButton#danger:hover {{ background: {t["err_hover"]}; border-color: {t["err_hover"]}; }}
 
 /* 左导航 */
 QListWidget#nav {{
@@ -313,7 +400,7 @@ QListWidget#nav {{
     outline: 0; padding-top: 6px;
 }}
 QListWidget#nav::item {{ padding: 9px 16px; border-left: 3px solid transparent; color: {t["nav_text"]}; }}
-QListWidget#nav::item:hover {{ background: {t["bg_hover"]}; color: #fff; }}
+QListWidget#nav::item:hover {{ background: {t["bg_hover"]}; color: {t["text_bright"]}; }}
 QListWidget#nav::item:selected {{
     background: {t["bg_active"]}; color: {t["text_bright"]};
     border-left: 3px solid {t["accent"]}; font-weight: bold;
@@ -324,7 +411,7 @@ QListWidget#modernList {{
     background: transparent; border: none; outline: 0;
 }}
 QListWidget#modernList::item {{ border: none; }}
-QListWidget#modernList::item:selected {{ background: transparent; color: #ffffff; }}
+QListWidget#modernList::item:selected {{ background: transparent; color: {t["on_selection"]}; }}
 
 /* 右状态栏 */
 QFrame#rightBar {{ background: {bg_panel}; border-left: 1px solid {t["border"]}; }}
@@ -364,7 +451,7 @@ QTableWidget {{
     background: transparent; border: 1px solid {t["inset_border"]}; border-radius: {t["radius"]};
     gridline-color: transparent; alternate-background-color: {t["table_alt"]};
     selection-background-color: {t["accent_soft"]};
-    selection-color: #ffffff; outline: 0;
+    selection-color: {t["on_selection"]}; outline: 0;
 }}
 QTableWidget::item {{ padding: 4px 8px; border: none; }}
 QTableWidget::item:selected {{ background: {t["accent_soft"]}; }}
@@ -404,7 +491,7 @@ QComboBox:focus {{ border-color: {t["accent"]}; }}
 QComboBox::drop-down {{ border: none; width: 22px; }}
 QComboBox QAbstractItemView {{
     background: {t["btn_bg"]}; border: 1px solid {t["border_strong"]};
-    selection-background-color: {t["accent"]}; selection-color: #ffffff;
+    selection-background-color: {t["accent"]}; selection-color: {t["on_selection"]};
     color: {t["text"]}; outline: 0; padding: 4px;
 }}
 
@@ -459,7 +546,7 @@ QListWidget#themeList {{
     border-radius: {t["radius_sm"]}; color: {t["text"]}; outline: 0;
 }}
 QListWidget#themeList::item {{ padding: 5px 8px; }}
-QListWidget#themeList::item:selected {{ background: {t["accent_soft"]}; color: #ffffff; }}
+QListWidget#themeList::item:selected {{ background: {t["accent_soft"]}; color: {t["on_selection"]}; }}
 
 /* 工具提示/下拉菜单也覆盖掉系统色 */
 QToolTip {{ background: {t["btn_bg"]}; color: {t["text"]}; border: 1px solid {t["tooltip_border"]}; padding: 4px 8px; }}

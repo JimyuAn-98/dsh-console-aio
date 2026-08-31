@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 # core/env.py - 开发环境探测 / SSH 免密测试 / dsh 一键安装流(纯 Python, 零 Qt,
-# 严禁 import PySide)。由 ui/dialogs.py 的内联子进程业务下沉而来(ConfigDialog 的
-# SSH 测试 / InstallDialog 的安装流 / EnvDialog 的版本探测与工具命令)。
+# 严禁 import PySide)。由旧 ui/dialogs.py 的内联子进程业务下沉而来(ConfigDialog 的
+# SSH 测试 / InstallDialog 的安装流 / EnvDialog 的版本探测与工具命令)—— 弹窗收敛后
+# 环境检查与安装向导改为 DSH 管理页(ui/pages_dsh.py)页面内分步, 业务仍在本模块。
 #
 # 通讯约定: install_dsh 遵循 events(kind, payload) 纯数据回调:
 #   events("log", text)            逐行输出/说明
@@ -152,5 +153,85 @@ def install_dsh(events=None, url=None, target=None):
     return {"msg": "dsh 安装完成 目标目录: " + target, "err": "", "target": target}
 
 
+def uninstall_dsh(events=None, keep_data=True):
+    # 卸载本机 dsh(与 install_dsh 对应的纯业务, 零 Qt): 停 web -> 删源码目录(dash_repo)
+    # -> 清 config.dash_repo; keep_data=False 时再删 ~/.dsh 数据目录。
+    # 契约: {"msg", "err", "removed_repo": bool, "removed_data": bool, "data_dir": 数据目录}
+    # 危险操作: 本函数只执行, 由 UI 层先弹强确认框(逐条列出将删的具体路径)。
+    # 删除守卫: 仅当路径非空、绝对、且确实存在时才删, 绝不手拼/通配, 防误删用户关键目录。
+    def step(n, text):
+        if events:
+            events("step", (n, text))
+
+    def line(text):
+        if events:
+            events("log", text)
+
+    cfg = dsh_config.load_config()
+    repo = (cfg.get("dash_repo") or "").strip()
+    ctl = DshCtl(dsh_config.load_derived())
+
+    removed_repo = False
+    removed_data = False
+    data_dir = ""
+
+    # 0) 停 web(先停再用, 避免删到被占用/运行中的目录)
+    step(1, "步骤 1/3: 停止本机 dsh web")
+    ctl.stop_dsh(events=_bridge(events))
+
+    # 1) 删源码目录
+    if repo and os.path.isabs(repo) and os.path.isdir(repo):
+        step(2, "步骤 2/3: 删除源码目录 " + repo)
+        line("[卸载] 删除源码目录: " + repo)
+        try:
+            shutil.rmtree(repo)
+            removed_repo = True
+        except Exception as e:
+            line("[卸载] 删除源码目录失败: " + str(e))
+            return {"msg": "", "err": "删除源码目录失败: %s" % e,
+                    "removed_repo": False, "removed_data": False, "data_dir": ""}
+    else:
+        line("[卸载] 未检测到 dsh 源码目录(跳过): " + (repo or "config 未设置 dash_repo"))
+
+    # 2) 清 config.dash_repo
+    step(3, "步骤 3/3: 清空 config.json 的 dash_repo")
+    try:
+        cfg2 = dsh_config.load_config()
+        if cfg2.get("dash_repo"):
+            cfg2["dash_repo"] = ""
+            if dsh_config.save_config(cfg2):
+                line("[卸载] 已清空 config.json 的 dash_repo(写前已 .bak)。")
+    except Exception as e:
+        line("[卸载] 清 config.dash_repo 失败(请手动在配置向导里清): " + str(e))
+
+    # 3) 数据目录(仅"彻底卸载"删)
+    if not keep_data:
+        from core import data as dsh_data
+        data_dir = dsh_data.dsh_home()
+        if os.path.isabs(data_dir) and os.path.isdir(data_dir) \
+                and os.path.abspath(data_dir) != os.path.abspath(os.path.expanduser("~")):
+            step(4, "删除数据目录 ~/.dsh")
+            line("[卸载] 删除数据目录: " + data_dir)
+            try:
+                shutil.rmtree(data_dir)
+                removed_data = True
+            except Exception as e:
+                line("[卸载] 删除数据目录失败: " + str(e))
+                return {"msg": "", "err": "删除数据目录失败: %s" % e, "removed_repo": removed_repo,
+                        "removed_data": False, "data_dir": data_dir}
+        else:
+            line("[卸载] 未检测到数据目录(跳过): " + data_dir)
+
+    parts = []
+    if removed_repo:
+        parts.append("源码目录已删除")
+    if not keep_data and removed_data:
+        parts.append("数据目录(~/.dsh)已删除")
+    if not parts:
+        parts = ["未检测到已安装的 dsh(无可删)"]
+    return {"msg": "dsh 卸载完成: " + "; ".join(parts), "err": "", "removed_repo": removed_repo,
+            "removed_data": removed_data, "data_dir": data_dir}
+
+
 __all__ = ["get_version", "tool_versions", "missing_tools", "pnpm_env",
-           "run_capture", "test_ssh", "install_dsh"]
+           "run_capture", "test_ssh", "install_dsh", "uninstall_dsh"]

@@ -74,6 +74,7 @@ class ThemePage(BasePage):
         v = QVBoxLayout(content)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(8)
+        v.addWidget(self._build_variant_card())
         v.addWidget(self._build_files_card())
         v.addWidget(self._build_colors_card())
         v.addWidget(self._build_alpha_card())
@@ -84,6 +85,56 @@ class ThemePage(BasePage):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
+
+    # ── 明/暗变体卡: 深色/浅色 一键切换(持久化 config["theme_variant"]; 深色为默认) ──
+    def _build_variant_card(self):
+        card = QFrame(objectName="card")
+        v = QVBoxLayout(card)
+        v.setContentsMargins(10, 8, 10, 8)
+        v.setSpacing(6)
+        v.addWidget(QLabel("明/暗变体(切换即 discard 当前变体上未保存的覆盖; 保留请先「保存为启动默认」)",
+                           objectName="rightTitle"))
+        row = QHBoxLayout()
+        self._dark_btn = QPushButton("深色")
+        self._dark_btn.setCheckable(True)
+        self._dark_btn.clicked.connect(lambda: self._on_toggle_variant("dark"))
+        self._light_btn = QPushButton("浅色")
+        self._light_btn.setCheckable(True)
+        self._light_btn.clicked.connect(lambda: self._on_toggle_variant("light"))
+        row.addWidget(self._dark_btn)
+        row.addWidget(self._light_btn)
+        row.addStretch(1)
+        v.addLayout(row)
+        self._sync_variant_btns()
+        return card
+
+    def _sync_variant_btns(self):
+        # 变体按钮高亮与当前变体一致(blockSignals 防回填触发切换)
+        cur = dsh_theme.get_variant()
+        for btn in (self._dark_btn, self._light_btn):
+            btn.blockSignals(True)
+        self._dark_btn.setChecked(cur == "dark")
+        self._light_btn.setChecked(cur == "light")
+        self._dark_btn.setObjectName("primary" if cur == "dark" else "")
+        self._light_btn.setObjectName("primary" if cur == "light" else "")
+        # objectName 变化后需重新抛光才生效
+        self._dark_btn.style().unpolish(self._dark_btn); self._dark_btn.style().polish(self._dark_btn)
+        self._light_btn.style().unpolish(self._light_btn); self._light_btn.style().polish(self._light_btn)
+        for btn in (self._dark_btn, self._light_btn):
+            btn.blockSignals(False)
+
+    def _on_toggle_variant(self, variant):
+        if variant == dsh_theme.get_variant():
+            self._sync_variant_btns()
+            return
+        if not self.app.set_theme_variant(variant):
+            self._set("切换失败: 非法变体或 config.json 写入失败(可能被占用)", err=True)
+            self._sync_variant_btns()
+            return
+        self._set("已切换为%s色主题(config.json theme_variant=%s)"
+                  % ("浅" if variant == "light" else "深", variant))
+        self._sync_variant_btns()
+        self._refresh_all()
 
     # ── 主题文件卡: 具名主题的保存/加载/删除 ──
     def _build_files_card(self):
@@ -300,7 +351,8 @@ class ThemePage(BasePage):
 
     # ── 状态/回填 ──
     def _refresh_all(self):
-        # 色板/滑杆从 TOKENS 回填(加载/恢复默认后调用); blockSignals 防回填触发再应用
+        # 色板/滑杆从 TOKENS 回填(加载/恢复默认/切变体后调用); blockSignals 防回填触发再应用
+        self._sync_variant_btns()
         for key in self._cells:
             self._refresh_cell(key)
         for token, (slider, pct) in self._sliders.items():

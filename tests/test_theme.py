@@ -146,3 +146,68 @@ def test_theme_file_roundtrip(tmp_path):
 def test_mica_probe_returns_bool():
     from ui.theme import is_windows_11_22h2
     assert isinstance(is_windows_11_22h2(), bool)
+
+
+# ── 明/暗变体(浅色主题) ──
+
+def test_variant_default_is_dark():
+    from ui.theme import get_variant, TOKENS, reset_default
+    reset_default()
+    assert get_variant() == "dark"
+    assert TOKENS["bg"] == "#1b202e"
+
+
+def test_set_variant_light_and_overrides():
+    # 切换浅色: base 换浅色板, 覆盖集为空; accent 派生色仍按当前 accent 重算
+    from ui.theme import (TOKENS, current_overrides, set_variant, set_active,
+                          reset_default)
+    try:
+        assert set_variant("light") is True
+        assert TOKENS["bg"] == "#eef1f6"
+        assert TOKENS["text"] == "#23262e"
+        assert current_overrides() == {}
+        set_active({"accent": "#123456"})
+        assert TOKENS["accent_soft"].startswith("rgba(18, 52, 86, ")
+    finally:
+        reset_default()
+
+
+def test_set_variant_rejects_unknown():
+    # 非法变体返回 False, 当前变体不变
+    from ui.theme import set_variant, get_variant
+    before = get_variant()
+    assert set_variant("maroon") is False
+    assert get_variant() == before
+
+
+def test_reset_default_variant_aware():
+    # 恢复默认回到当前变体的出厂(浅色变体下 reset 到浅色 base)
+    from ui.theme import TOKENS, set_variant, set_active, reset_default
+    try:
+        set_variant("light")
+        set_active({"accent": "#ff0000"})
+        reset_default()
+        assert TOKENS["bg"] == "#eef1f6"
+        assert TOKENS["accent"] != "#ff0000"
+    finally:
+        reset_default()
+
+
+def test_light_build_qss_uses_light_tokens():
+    # 浅色变体生成的 QSS 含浅色值, 且选中文字走 on_selection(浅色下为深色)
+    from ui.theme import TOKENS, set_variant, reset_default, build_qss
+    try:
+        set_variant("light")
+        qss = build_qss(mica=False)
+        assert TOKENS["bg"] in qss
+        assert TOKENS["on_selection"] in qss
+    finally:
+        reset_default()
+
+
+def test_on_text_tokens_present_in_both_variants():
+    # on_accent / on_selection 两变体都有(供 QSS 弱化/选中文字反色)
+    from ui.theme import DEFAULT_TOKENS, LIGHT_TOKENS
+    for base in (DEFAULT_TOKENS, LIGHT_TOKENS):
+        assert "on_accent" in base
+        assert "on_selection" in base

@@ -177,6 +177,88 @@ class TestInstallDsh:
         assert "git 仓库地址" in r["err"]
 
 
+class TestUninstallDsh:
+    # 与 TestInstallDsh 同构: 子进程(停 web)/config 读写/目录删除全部隔离, 绝不真删。
+    def _fake_repo(self, tmp_path, name="dsh"):
+        # 造一个"假安装": 源码目录含 package.json, 数据目录(~/.dsh)含一个文件
+        repo = tmp_path / name
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "package.json").write_text('{"name":"dsh"}', encoding="utf-8")
+        data = tmp_path / ".dsh"
+        data.mkdir(parents=True, exist_ok=True)
+        (data / "meta.json").write_text("{}", encoding="utf-8")
+        return str(repo), str(data)
+
+    def _patch(self, monkeypatch, tmp_path, repo, data):
+        # 拦截: 停 web 空跑; config 读写走 tmp 下的假 config; DSH_HOME 指到假数据目录
+        monkeypatch.setattr(env_mod.DshCtl, "stop_dsh", lambda self, events=None: True)
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({"dash_repo": repo}), encoding="utf-8")
+        monkeypatch.setattr(dsh_config, "load_config",
+                            lambda path=None: json.loads(cfg_path.read_text(encoding="utf-8")))
+        monkeypatch.setattr(dsh_config, "save_config",
+                            lambda cfg, path=None: cfg_path.write_text(
+                                json.dumps(cfg), encoding="utf-8") or True)
+        monkeypatch.setenv("DSH_HOME", data)
+
+    def test_keep_data_removes_repo_and_clears_config(self, tmp_path, monkeypatch):
+        repo, data = self._fake_repo(tmp_path)
+        self._patch(monkeypatch, tmp_path, repo, data)
+        got = []
+        r = env_mod.uninstall_dsh(lambda k, p: got.append((k, p)), keep_data=True)
+        assert r["err"] == "" and r["removed_repo"] is True
+        assert r["removed_data"] is False
+        # 数据目录保留
+        assert (tmp_path / ".dsh" / "meta.json").exists()
+        # 源码目录删除 + config.dash_repo 清空
+        assert not (tmp_path / "dsh").exists()
+        assert json.loads((tmp_path / "config.json").read_text(
+            encoding="utf-8"))["dash_repo"] == ""
+        # 保留数据 = 3 步, 不出现"删数据"步骤
+        assert [p[0] for k, p in got if k == "step"] == [1, 2, 3]
+
+    def test_remove_data_also_deletes_dsh_home(self, tmp_path, monkeypatch):
+        repo, data = self._fake_repo(tmp_path)
+        self._patch(monkeypatch, tmp_path, repo, data)
+        got = []
+        r = env_mod.uninstall_dsh(lambda k, p: got.append((k, p)), keep_data=False)
+        assert r["err"] == "" and r["removed_repo"] is True
+        assert r["removed_data"] is True and r["data_dir"] == data
+        assert not (tmp_path / "dsh").exists() and not (tmp_path / ".dsh").exists()
+        assert [p[0] for k, p in got if k == "step"] == [1, 2, 3, 4]
+
+    def test_no_repo_reports_not_installed(self, monkeypatch):
+        # config 里没有 dash_repo: 不报错, 标记未删除, 提示"未检测到已安装"
+        monkeypatch.setattr(env_mod.DshCtl, "stop_dsh", lambda self, events=None: True)
+        monkeypatch.setattr(dsh_config, "load_config", lambda path=None: {"dash_repo": ""})
+        r = env_mod.uninstall_dsh(None, keep_data=True)
+        assert r["err"] == "" and r["removed_repo"] is False and r["removed_data"] is False
+        assert "未检测到" in r["msg"]
+
+    def test_rmtree_failure_returns_error(self, tmp_path, monkeypatch):
+        repo, data = self._fake_repo(tmp_path)
+        self._patch(monkeypatch, tmp_path, repo, data)
+
+        def boom(p):
+            raise OSError("access denied")
+        monkeypatch.setattr(env_mod.shutil, "rmtree", lambda p: boom(p))
+        r = env_mod.uninstall_dsh(None, keep_data=True)
+        assert "删除源码目录失败" in r["err"] and r["removed_repo"] is False
+
+    def test_data_dir_guard_no_home_deletion(self, tmp_path, monkeypatch):
+        # 数据目录绝不能等于用户主目录: 即使 dsh_home() 指向主目录, 守卫也不删(防灾难)
+        import os as _os
+        repo = tmp_path / "repo2"
+        repo.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(env_mod.DshCtl, "stop_dsh", lambda self, events=None: True)
+        monkeypatch.setattr(dsh_config, "load_config", lambda path=None: {"dash_repo": str(repo)})
+        monkeypatch.setenv("DSH_HOME", _os.path.expanduser("~"))   # 数据目录 == 主目录
+        monkeypatch.setattr(env_mod.shutil, "rmtree", lambda p, **k: None)  # 双保险绝不真删
+        r = env_mod.uninstall_dsh(None, keep_data=False)
+        assert r["err"] == "" and r["removed_repo"] is True
+        assert r["removed_data"] is False    # 守卫拒绝删主目录
+
+
 class TestSaveConfig:
     def test_bak_and_roundtrip(self, tmp_path):
         p = tmp_path / "config.json"

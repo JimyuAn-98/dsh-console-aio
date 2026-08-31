@@ -9,7 +9,7 @@
 
 > 中文 | [English](#english)
 
-**dsh All-In-One 控制台**（Windows GUI，PySide6 暗色亚克力界面）：SSH 隧道管理、本机 dsh 启停/安装/更新、健康监控，以及 15 个页面的 dsh 数据域管理（会话/Agent/Profile/插件/任务/用量/LLM/部署/日志/设置…）。
+**dsh All-In-One 控制台**（Windows GUI，PySide6 亚克力界面，支持深/浅主题）：SSH 隧道管理、本机 dsh 启停/安装/更新、健康监控，以及 15 个页面的 dsh 数据域管理（会话/Agent/Profile/插件/任务/用量/LLM/部署/日志/设置…）。
 
 - 🚀 一键操作：本机 dsh 启停、SSH 隧道（启动/常驻/停止）、dsh 一键更新、全新环境一键安装
 - 🖥️ 环境检查：git/node/npm/pnpm 版本与推荐基准，更新/安装/卸载引导
@@ -42,7 +42,7 @@
 
 ## 界面布局
 
-    顶部:  [🐳 DSH Console v0.6 ]   部署:[本机 ▾]        [环境][安装 dsh][配置]
+    顶部:  [🐳 DSH Console v0.6 ]   部署:[本机 ▾]        [搜索][立即刷新]
     左导航            │ 中栏: 页面容器(17 页)                │ 右栏: 监控(可收起)
     总览               │ 总览: 运行状态+数据速览+部署+隧道      │ 本机端口 ●●●●●
     隧道               │ 插件: 列表|详情|配置 (三栏可拖拽)      │ 公网中转 反向隧道 ●●●
@@ -60,7 +60,7 @@
 
 ## 一键安装 dsh（全新环境）
 
-顶部点 **【安装 dsh】** 打开安装向导：填 dsh 的 git 仓库地址（默认官方 deepseek-harness）与目标目录，工具会自动：
+在 **DSH 管理** 页的「安装 dsh」卡填写 dsh 的 git 仓库地址（默认官方 deepseek-harness）与目标目录（可浏览选择，留空默认用户主目录/dsh），点「开始安装」即在页面内分步（step in place）执行：
 
 1. **环境预检**：检查 git / node / npm / pnpm 是否可用，缺失会明确提示先装什么
 2. **git clone**：拉取 dsh 源码到目标目录
@@ -68,13 +68,18 @@
 4. **pnpm run build**：构建
 5. 完成后**自动把目标目录写进 config.json 的 dash_repo**（重启后生效）
 
-适合在没有 dsh 的新机器 / 新用户上，从零一键搭好本机 dsh。
+进度条 + 流式日志显示在页内安装卡，安装过程中实时可见每步输出。适合在没有 dsh 的新机器 / 新用户上，从零一键搭好本机 dsh。
 
-![安装 dsh 向导](docs/screenshots/install-dialog.png)
+同页的「开发环境检查」卡内联展示 git / node / npm / pnpm 的版本与推荐基准，点「更新/安装/卸载」会先说明将执行什么，确认后才执行（环境检查/安装向导已退役模态弹窗，改为页面内分步）。
 
-顶部 **【环境】** 打开环境检查窗口，可查看/更新/安装/卸载 git、node、npm、pnpm：
+## 卸载 dsh
 
-![环境检查](docs/screenshots/env-check.png)
+**DSH 管理** 页「卸载 dsh」卡提供两种模式，均先停 web、再删源码目录并清空 config：
+
+- **保留数据卸载**：只删源码（`dash_repo`）并清空 `config.json` 的 dash_repo；`~/.dsh` 数据（对话/会话/工作区/配置）保留
+- **彻底卸载（含数据）**：额外删除 `~/.dsh` 数据目录——会清掉所有对话记录，**二次确认**后才执行
+
+执行前会逐条列出将删除的具体路径；源码/数据目录删除有防误删守卫（绝不删用户主目录）。
 
 ---
 
@@ -168,7 +173,7 @@
 | 部署管理 | 多部署列表/详情/操作日志三栏：CRUD、连接测试、只读快照（在线徽章） |
 | 日志管理 | dsh web 落盘输出 tail + 过滤 + 着色 + token 脱敏 |
 | 设置 | 配置标签页化，保存即热重载；诊断报告（脱敏可外发）与配置导入导出 |
-| 主题 | 全部界面颜色实时可调（即时预览），可存/载主题文件、设启动默认 |
+| 主题 | 明/暗变体一键切换 + 全部界面颜色实时可调（即时预览），可存/载主题文件、设启动默认 |
 | 关于与更新 | 当前版本 / 检查更新 / 更新日志 / 一键自动更新 |
 
 ![总览](docs/screenshots/main.png)
@@ -201,7 +206,9 @@
 - [x] 配置外置到 config.json（IP/用户/端口/轮询）+ 配置热重载（保存即生效）
 - [x] 全部卡片 Python 化（core/tunnel_mgr.py + 纯 Python 更新）；旧 .ps1 收进 legacy/
 - [x] **PySide6 现代界面**：深色亚克力 + 现代列表/卡片组件 + 17 页导航（含实时主题定制）
-- [x] 一键安装 dsh + 环境检查（更新/安装/卸载引导）
+- [x] **明/暗主题**：浅色整套变体 + 主题页一键切换（深色为默认, config 持久化）
+- [x] 一键安装 dsh + 环境检查（更新/安装/卸载引导；弹窗收敛：改 DSH 管理页页面内分步）
+- [x] 卸载 dsh（保留数据 / 彻底卸载含 ~/.dsh, 危险操作双确认 + 防误删守卫）
 - [x] 打包分发（PyInstaller + Inno Setup，GitHub Actions 自动发版）
 - [x] **会话与工作区管理**：分组浏览 / 归档 / 恢复 / 删除（二次确认）
 - [x] **Agent 模式管理**：窄列表 + preset.yml 详情
@@ -216,7 +223,8 @@
 - [x] **设置页**：配置标签页化 + 热重载（弹窗收敛第一步）
 - [x] **版本管理**：当前版本 / 检查更新 / 更新日志 / 一键自动更新
 - [ ] 多套拓扑配置切换
-- [ ] 多主题切换（Mica/纯色/浅色）+ 布局记忆
+- [x] 明/暗主题切换（主题页, 浅色整套变体, 深色为默认）
+- [ ] 多主题预设切换（Mica 深色/纯色）+ 布局记忆
 - [x] 配置导出导入 + 诊断报告一键生成（设置页「诊断与配置」标签）
 - [x] 用量趋势图表（按模型堆叠, 设置在用量页）
 - [x] 全局命令面板 Ctrl+K（页面/部署/动作 搜索直达）
@@ -231,7 +239,7 @@ MIT © 2025 JimyuAn
 
 # dsh-console-aio (English)
 
-**dsh All-In-One console** (Windows GUI, PySide6 dark acrylic): SSH tunnel management, local dsh start/stop/install/update, health monitoring, and a 17-page dsh data-domain console (sessions/agents/profiles/plugins/tasks/usage/LLM/deployments/logs/settings).
+**dsh All-In-One console** (Windows GUI, PySide6 acrylic, dark/light themes): SSH tunnel management, local dsh start/stop/install/update, health monitoring, and a 17-page dsh data-domain console (sessions/agents/profiles/plugins/tasks/usage/LLM/deployments/logs/settings).
 
 ![Main window](docs/screenshots/main.png)
 
@@ -250,17 +258,20 @@ MIT © 2025 JimyuAn
       python dsh-console-aio.py   (requires Python 3 + `pip install PySide6`)
 
 ## One-click dsh install
-Click **Install dsh** on the top bar: enter the git repo URL (default: official deepseek-harness) and target directory. The tool will:
+On the **DSH Manage** page, the "Install dsh" card takes a git repo URL (default: official deepseek-harness) and target directory (browse or leave blank for `~/dsh`). Click **Start Install** to run the steps **in-page** (step in place) with a progress bar and streaming log:
 1. Pre-check environment (git / node / npm / pnpm)
 2. git clone → 3. pnpm install → 4. pnpm run build
 5. Auto-write the target dir into config.json's dash_repo
 
-![Install dsh dialog](docs/screenshots/install-dialog.png)
-
 ## Environment check
-Click **Environment**: git / node / npm / pnpm versions vs. a recommended baseline, each with Update / Install / Uninstall actions (confirm-before-run, output streams into the main log).
+On the **DSH Manage** page, the "Development environment check" card shows git / node / npm / pnpm versions vs. a recommended baseline, each with Update / Install / Uninstall actions (confirm-before-run). The env check and install wizard are step-in-place cards on the page (the modal EnvDialog / InstallDialog windows are retired).
 
-![Environment check](docs/screenshots/env-check.png)
+## Uninstall dsh
+On the **DSH Manage** page, the "Uninstall dsh" card stops the running web, deletes the source directory (`dash_repo`) and clears `config.json`'s dash_repo, with two modes:
+- **Keep data**: removes the source only; `~/.dsh` (conversations/sessions/workspaces/config) is kept
+- **Full uninstall (with data)**: additionally deletes `~/.dsh` — irreversible, requires a double confirmation
+
+The exact paths to be deleted are listed before running; delete guards never touch the user home directory.
 
 ## Configuration
 All tunables live in config.json; the **Config** button opens the Settings page (tabs: tunnels & deployments / monitoring & naming). **Saving hot-reloads** ports, naming and monitor probes — no restart needed.
@@ -287,7 +298,7 @@ See the Chinese section above for the full field table.
 | Deployments | multi-deployment list/detail/op-log columns: CRUD, connection test, read-only snapshots |
 | Logs | live tail of dsh web output with filtering, coloring, token masking |
 | Settings | config as tabs, hot-reload on save; masked diagnostics report & config import/export |
-| Theme | edit every UI color live (instant preview), save/load theme files, set startup default |
+| Theme | toggle dark/light variant + edit every UI color live (instant preview), save/load theme files, set startup default |
 | About & update | current version / check update / changelog / one-click auto-update |
 
 ![Sessions](docs/screenshots/sessions.png)
