@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QHBoxLayout,
     QVBoxLayout, QListWidget, QListWidgetItem, QStackedWidget, QTextEdit,
     QComboBox, QFrame, QSizePolicy, QAbstractItemView,
-    QMessageBox, QToolTip, QSplitter, QInputDialog)
+    QMessageBox, QToolTip, QSplitter, QInputDialog,
+    QSystemTrayIcon, QMenu)
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QEvent, QPoint, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import (QTextCursor, QColor, QCursor, QIcon, QPixmap,
                            QShortcut, QKeySequence)
@@ -31,7 +32,7 @@ from ui import theme as dsh_theme
 from ui.palette import CommandPalette
 from ui.theme import build_qss
 from ui import win32_frame as wframe
-from ui.widgets import ModernList, RefreshIndicator, card_wrap
+from ui.widgets import ModernList, RefreshIndicator, ConfirmBanner, card_wrap
 
 # 白色齿轮 SVG(内嵌, 无需打包资源文件; QSvgRenderer 渲染为 QIcon)
 _GEAR_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e6e6e6">'
@@ -87,7 +88,19 @@ def _find_logo():
     return None
 
 
+def _find_logo_ico():
+    cands = []
+    if getattr(sys, 'frozen', False):
+        cands.append(os.path.join(getattr(sys, '_MEIPASS', BASE_DIR), 'logo.ico'))
+    cands.append(os.path.join(BASE_DIR, 'logo.ico'))
+    for c in cands:
+        if os.path.exists(c):
+            return c
+    return None
+
+
 LOGO_PATH = _find_logo()
+LOGO_ICO_PATH = _find_logo_ico()
 
 # frozen 模式下把 exe 目录也加入 sys.path, 保证旁置的可写数据/日志可见(仅当需要时)。
 if getattr(sys, 'frozen', False) and BASE_DIR not in sys.path:
@@ -720,6 +733,7 @@ class MainWindow(QMainWindow):
         self.bridge.on_status(self._set_status)
         self._refresh_deploy_list()
         self._show_page("overview")
+        self._init_tray()
         # 全局命令面板(Ctrl+K): 页面/部署/动作键盘直达(OTP 式)
         sc_palette = QShortcut(QKeySequence("Ctrl+K"), self)
         sc_palette.activated.connect(self._open_palette)
@@ -1172,6 +1186,100 @@ class MainWindow(QMainWindow):
         self._set_status("本机端口 %d/%d · %s · ssh.exe %s"
                          % (len(local_ok), local_total, ssh_txt, sc))
 
+        # 动态更新托盘 Tooltip(运行状态秒级感知)
+        if getattr(self, "_tray", None) and self._tray.isVisible():
+            dash_port = CONFIG.get("dash_port", 3080)
+            dsh_ok = (local or {}).get(dash_port, (False, -1))[0]
+            dsh_status_txt = "运行中 (:%d)" % dash_port if dsh_ok else "未运行"
+            tun_active = len([1 for p, ok in (remote or {}).items() if ok])
+            tun_total = len(CONFIG.get("remote_tunnels", []))
+            if tun_active > 0:
+                tun_status_txt = "运行中 (%d/%d 活跃)" % (tun_active, tun_total)
+            else:
+                tun_status_txt = "已停止"
+            self._tray.setToolTip("dsh 控制台\n● dsh: %s\n● 隧道: %s" % (dsh_status_txt, tun_status_txt))
+
+    # ---- 系统托盘与后台常驻 ----
+    def _init_tray(self):
+        self._quitting = False
+        self._tray_notified = False
+        if self.smoke or os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            self._tray = None
+            return
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray = None
+            return
+
+        self._tray = QSystemTrayIcon(self)
+        icon = QIcon(LOGO_ICO_PATH) if (LOGO_ICO_PATH and os.path.isfile(LOGO_ICO_PATH)) else (
+            QIcon(LOGO_PATH) if LOGO_PATH else QIcon())
+        self._tray.setIcon(icon)
+        self._tray.setToolTip("dsh 控制台\n● dsh: 检测中…\n● 隧道: 检测中…")
+
+        menu = QMenu(self)
+        act_show = menu.addAction("🐳 显示主窗口")
+        font = act_show.font()
+        font.setBold(True)
+        act_show.setFont(font)
+        act_show.triggered.connect(self._restore_from_tray)
+
+        menu.addSeparator()
+        act_start_dsh = menu.addAction("🚀 启动本机 dsh")
+        act_start_dsh.triggered.connect(lambda: self.service.start_dsh(CONFIG))
+        act_stop_dsh = menu.addAction("⏹️ 停止本机 dsh")
+        act_stop_dsh.triggered.connect(lambda: self.service.stop_dsh())
+        act_restart_dsh = menu.addAction("🔄 重启本机 dsh")
+        act_restart_dsh.triggered.connect(lambda: self.service.restart_dsh(CONFIG))
+
+        menu.addSeparator()
+        act_start_tun = menu.addAction("🚇 启动隧道")
+        act_start_tun.triggered.connect(lambda: self.service.start_tunnels(CONFIG, CONFIG.get("forward_ports", [])))
+        act_stop_tun = menu.addAction("⏹️ 停止隧道")
+        act_stop_tun.triggered.connect(lambda: self.service.stop_tunnels(CONFIG.get("forward_ports", [])))
+
+        menu.addSeparator()
+        act_quit = menu.addAction("❌ 退出控制台")
+        act_quit.triggered.connect(self._real_quit)
+
+        self._tray.setContextMenu(menu)
+        self._tray.activated.connect(self._on_tray_activated)
+        self._tray.show()
+
+    def _on_tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                      QSystemTrayIcon.ActivationReason.DoubleClick):
+            if self.isVisible() and not self.isMinimized():
+                self.hide()
+            else:
+                self._restore_from_tray()
+
+    def _restore_from_tray(self):
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def closeEvent(self, event):
+        if getattr(self, "_quitting", False) or self._tray is None or not self._tray.isVisible():
+            event.accept()
+        else:
+            event.ignore()
+            self.hide()
+            if not self._tray_notified:
+                self._tray_notified = True
+                self._tray.showMessage(
+                    "dsh 控制台",
+                    "控制台已最小化到系统托盘，后台持续监控与隧道运行中。",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    2000
+                )
+
+    def _real_quit(self):
+        self._quitting = True
+        if getattr(self, "_tray", None):
+            self._tray.hide()
+        self.close()
+        QApplication.quit()
+
 
 # ---------------- 入口 ----------------
 def main():
@@ -1267,6 +1375,10 @@ class TunnelsPage(BasePage):
                                 "改端口/加映射请到 设置 页的端口表。", objectName="cardHint")
         self._plan_out.setWordWrap(True)
         pv.addWidget(self._plan_out)
+
+        self._confirm = ConfirmBanner(self)
+        pv.addWidget(self._confirm)
+
         v.addWidget(plan_card)
 
         self._cards = {}
@@ -1333,19 +1445,23 @@ class TunnelsPage(BasePage):
         if not p:
             self._set_plan_out("先在方案列表中选择一个方案", err=True)
             return
-        ret = QMessageBox.question(
-            self, "应用方案",
-            "将把方案「%s」的端口拓扑写入 config.json(自动 .bak)并热重载。\n"
-            "正在运行的隧道不受影响, 新配置在下次启动隧道时生效。继续?" % p["name"])
-        if ret != QMessageBox.StandardButton.Yes:
-            return
-        cfg = dsh_planner.apply_plan(_load_config(), p)
-        if not dsh_config.save_config(cfg):
-            self._set_plan_out("应用失败: config.json 写入失败(可能被占用)", err=True)
-            return
-        self.app.reload_config()
-        self._plan_refresh(select=p["name"])
-        self._set_plan_out("已应用方案「%s」(新端口在下次启动隧道时生效)" % p["name"])
+
+        def do_apply():
+            cfg = dsh_planner.apply_plan(_load_config(), p)
+            if not dsh_config.save_config(cfg):
+                self._set_plan_out("应用失败: config.json 写入失败(可能被占用)", err=True)
+                return
+            self.app.reload_config()
+            self._plan_refresh(select=p["name"])
+            self._set_plan_out("已应用方案「%s」(新端口在下次启动隧道时生效)" % p["name"])
+
+        self._confirm.ask(
+            "应用方案「%s」" % p["name"],
+            "将把方案端口拓扑写入 config.json(自动 .bak)并热重载。正在运行的隧道不受影响，新配置下次生效。",
+            do_apply,
+            level="warn",
+            confirm_text="应用方案"
+        )
 
     def _plan_save(self):
         cfg = _load_config()
@@ -1386,16 +1502,22 @@ class TunnelsPage(BasePage):
         if not p:
             self._set_plan_out("先选择要删除的方案", err=True)
             return
-        ret = QMessageBox.question(self, "删除方案",
-                                   "将删除方案「%s」(不影响当前配置与运行中隧道)。继续?" % p["name"])
-        if ret != QMessageBox.StandardButton.Yes:
-            return
-        cfg = dsh_planner.delete_plan(_load_config(), p["name"])
-        if not dsh_config.save_config(cfg):
-            self._set_plan_out("删除失败: 写入失败(可能被占用)", err=True)
-            return
-        self._plan_refresh()
-        self._set_plan_out("已删除方案: " + p["name"])
+
+        def do_del():
+            cfg = dsh_planner.delete_plan(_load_config(), p["name"])
+            if not dsh_config.save_config(cfg):
+                self._set_plan_out("删除失败: 写入失败(可能被占用)", err=True)
+                return
+            self._plan_refresh()
+            self._set_plan_out("已删除方案: " + p["name"])
+
+        self._confirm.ask(
+            "删除方案「%s」" % p["name"],
+            "将删除该方案配置（不影响当前已应用的配置与正在运行的隧道）。",
+            do_del,
+            level="danger",
+            confirm_text="确认删除"
+        )
 
     def _plan_validate(self):
         p = self._selected_plan()

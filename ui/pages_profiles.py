@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton, QHeaderView, QMessageBox, QInputDialog)
 
 from ui.base import BasePage
-from ui.widgets import RefreshIndicator
+from ui.widgets import RefreshIndicator, ConfirmBanner
 
 # 仓库根目录(本文件位于 ui/ 下, 上溯一级), config.json 存放于此
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -87,6 +87,9 @@ class ProfilePage(BasePage):
         cv.addWidget(cap)
         cv.addWidget(self._table)
         root.addWidget(card, 1)
+
+        self._confirm = ConfirmBanner(self)
+        root.addWidget(self._confirm)
 
         btns = QHBoxLayout()
         self._btn_copy = QPushButton("复制 Profile")
@@ -247,14 +250,20 @@ class ProfilePage(BasePage):
         if os.path.isdir(os.path.join(base, new)):
             QMessageBox.warning(self, "已存在", "名为 %s 的 Profile 已存在。" % new)
             return
-        if QMessageBox.question(self, "复制 Profile",
-                                "将复制 '%s' 到 '%s'（排除 node_modules）。\n是否继续？"
-                                % (src, new)) != QMessageBox.Yes:
-            return
-        self._set_status("正在复制 Profile...")
-        self._pending = "profile-copy"
-        self._set_btns(False)
-        self.app.service.copy_profile(src, new)
+
+        def do_copy():
+            self._set_status("正在复制 Profile...")
+            self._pending = "profile-copy"
+            self._set_btns(False)
+            self.app.service.copy_profile(src, new)
+
+        self._confirm.ask(
+            "复制 Profile",
+            "将复制「%s」到「%s」（排除 node_modules 缓存目录）。" % (src, new),
+            do_copy,
+            level="warn",
+            confirm_text="确认复制"
+        )
 
     def _delete_profile(self):
         if self._refuse_remote_write():
@@ -270,13 +279,20 @@ class ProfilePage(BasePage):
         if not os.path.isdir(os.path.join(base, name)):
             QMessageBox.warning(self, "目录不存在", "Profile 目录不存在，可能已被删除。")
             return
-        if QMessageBox.question(self, "删除 Profile",
-                                "将永久删除 '%s' 目录及其全部内容。\n是否继续？" % name) != QMessageBox.Yes:
-            return
-        self._set_status("正在删除 Profile...")
-        self._pending = "profile-delete"
-        self._set_btns(False)
-        self.app.service.delete_profile(name)
+
+        def do_delete():
+            self._set_status("正在删除 Profile...")
+            self._pending = "profile-delete"
+            self._set_btns(False)
+            self.app.service.delete_profile(name)
+
+        self._confirm.ask(
+            "删除 Profile「%s」" % name,
+            "将永久删除「%s」目录及其全部配置文件。此操作不可恢复！" % name,
+            do_delete,
+            level="danger",
+            confirm_text="确认删除"
+        )
 
     # ---- 打开目录(页面本机动作, 留 UI 层) ----
     def _open_dir(self):

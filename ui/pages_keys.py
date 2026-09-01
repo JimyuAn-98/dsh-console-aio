@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from core import keys as dsh_keys
 from ui.base import BasePage
+from ui.widgets import ConfirmBanner
 
 
 def _fmt_time(ts):
@@ -77,6 +78,9 @@ class KeysPage(BasePage):
             btns.addWidget(b)
         btns.addStretch(1)
         root.addLayout(btns)
+
+        self._confirm = ConfirmBanner(self)
+        root.addWidget(self._confirm)
 
         pub_card = QFrame(objectName="card")
         pub_l = QVBoxLayout(pub_card)
@@ -173,12 +177,6 @@ class KeysPage(BasePage):
         k = self._selected()
         if k is None:
             return
-        if QMessageBox.question(
-                self, "查看公钥",
-                '公钥(.pub)为公开信息, 可安全查看。\n\n'
-                '注意: 公钥本身不敏感, 但请勿将私钥(id_* 无后缀文件)内容发给任何人。\n\n'
-                '是否查看 ' + k["name"] + '.pub ?') != QMessageBox.Yes:
-            return
         pub, err = self._read_pub(k["name"])
         if err:
             self._set_status("读取公钥失败: " + err)
@@ -192,11 +190,6 @@ class KeysPage(BasePage):
         k = self._selected()
         if k is None:
             return
-        if QMessageBox.question(
-                self, "复制公钥",
-                '将把公钥内容复制到剪贴板(用于 ssh-copy-id 等)。\n\n'
-                '注意: 只复制 .pub 公钥(公开信息); 请勿复制私钥内容。\n\n是否继续？') != QMessageBox.Yes:
-            return
         pub, err = self._read_pub(k["name"])
         if err:
             self._set_status("读取公钥失败: " + err)
@@ -205,7 +198,7 @@ class KeysPage(BasePage):
 
     def _do_copy(self, name, pub):
         if not pub:
-            QMessageBox.warning(self, "无公钥", "未找到 " + name + ".pub")
+            self._set_status("未找到 " + name + ".pub")
             return
         QGuiApplication.clipboard().setText(pub)
         self._set_status("公钥已复制到剪贴板")
@@ -220,17 +213,23 @@ class KeysPage(BasePage):
         if not name:
             return
         if not name.startswith("id_"):
-            QMessageBox.warning(self, "命名建议", "建议以 id_ 开头(如 id_ed25519_my)")
+            self._set_status("命名建议: 建议以 id_ 开头(如 id_ed25519_my)")
         path = os.path.join(dsh_keys.ssh_dir(), name)
-        if QMessageBox.question(
-                self, "生成新密钥",
-                '将执行: ssh-keygen -t ed25519 -f %s -N ""\n\n'
-                '注意: -N "" 表示无口令保护。如需口令保护, 请在终端手动生成。\n是否继续？' % path) != QMessageBox.Yes:
-            return
-        self._set_status("正在生成密钥...")
-        self._pending = "keys-gen"
-        self._set_btns(False)
-        self.app.service.generate_ssh_key(name)
+
+        def do_gen():
+            self._set_status("正在生成密钥...")
+            self._pending = "keys-gen"
+            self._set_btns(False)
+            self.app.service.generate_ssh_key(name)
+
+        self._confirm.ask(
+            "生成新密钥「%s」" % name,
+            "将执行：<code>ssh-keygen -t ed25519 -f %s -N \"\"</code><br>"
+            "（注意：此命令生成无口令保护密钥。如需口令保护，请在终端手动执行）" % path,
+            do_gen,
+            level="warn",
+            confirm_text="确认生成"
+        )
 
     def _after_gen(self, payload):
         # 成功: busy 保持, 自动刷新列表(错误文案/日志由 core 经 events 上报)。
@@ -247,16 +246,11 @@ class KeysPage(BasePage):
 
     # ---- 打开目录(页面本机动作, 留 UI 层) ----
     def _open_dir(self):
-        if QMessageBox.question(
-                self, "打开 .ssh 目录",
-                '将打开本机 ~/.ssh 目录(含私钥文件)。\n\n'
-                '注意: 目录内有私钥, 请勿将其内容泄露或上传。\n\n是否打开？') != QMessageBox.Yes:
-            return
         try:
             os.makedirs(dsh_keys.ssh_dir(), exist_ok=True)
             os.startfile(dsh_keys.ssh_dir())
         except Exception as e:
-            QMessageBox.critical(self, "无法打开", str(e))
+            self._set_status("无法打开目录: " + str(e))
 
     # ---- 展示工具 ----
     def _make_table(self, headers, anchors, widths, stretch_col):

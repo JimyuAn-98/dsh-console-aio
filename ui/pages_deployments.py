@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from core import deployments as core_deployments
 from ui.base import BasePage
-from ui.widgets import ModernList, card_wrap, three_split
+from ui.widgets import ModernList, ConfirmBanner, card_wrap, three_split
 
 
 _LOCAL_NAME = "本机"
@@ -196,13 +196,16 @@ class DeploymentPage(BasePage):
                       objectName="cardHint")
         btns.addWidget(note)
 
-        # 三栏横向可扩展: 视口不足时出横向滚动条, 底部位置让给滚动条
         mid.setMinimumWidth(1020)
         content = QWidget()
         cv = QVBoxLayout(content)
         cv.setContentsMargins(0, 0, 0, 0)
         cv.setSpacing(8)
         cv.addWidget(mid, 1)
+
+        self._confirm = ConfirmBanner(self)
+        cv.addWidget(self._confirm)
+
         cv.addLayout(btns)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -393,15 +396,20 @@ class DeploymentPage(BasePage):
         dep = row["deployment"]
         name = dep.get("name") or "-"
         host = dep.get("host") or "-"
-        msg = ("将删除部署「%s」（主机 %s）的本地记录。\n"
-               "仅删除本地 config.json 中的记录，不会改动远程任何数据。\n\n"
-               "是否继续？" % (name, host))
-        if QMessageBox.question(self, "删除部署", msg) != QMessageBox.Yes:
-            return
-        idx = row["dep_index"]
-        if 0 <= idx < len(self._deployments):
-            del self._deployments[idx]
-        self._save_and_reload("已删除部署记录")
+
+        def do_delete():
+            idx = row["dep_index"]
+            if 0 <= idx < len(self._deployments):
+                del self._deployments[idx]
+            self._save_and_reload("已删除部署记录")
+
+        self._confirm.ask(
+            "删除部署「%s」" % name,
+            "将从本地 config.json 中删除部署记录（主机 %s）。此操作不会连接或改动远程机器数据。" % host,
+            do_delete,
+            level="danger",
+            confirm_text="确认删除"
+        )
 
     def _save_and_reload(self, msg):
         # 写回 config.json 走 service(数据层自动 .bak); 结果经 result("deploy-save") 回包

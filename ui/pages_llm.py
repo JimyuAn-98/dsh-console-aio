@@ -14,9 +14,9 @@ from PySide6.QtCore import Qt
 from core import data as core_data
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QFrame, QComboBox,
-    QTableWidget, QTableWidgetItem, QPushButton, QHeaderView, QMessageBox)
-
+    QTableWidget, QTableWidgetItem, QPushButton, QHeaderView)
 from ui.base import BasePage
+from ui.widgets import ConfirmBanner
 
 # 内置官方 provider 不在 settings.yaml 里, 模型 id 与数据层单价表保持一致
 BUILTIN_PROVIDER = "deepseek-official"
@@ -132,7 +132,8 @@ class LlmPage(BasePage):
         cap = QLabel("自定义 Providers（只读）", objectName="rightTitle")
         cv.addWidget(cap)
         cv.addWidget(self._table)
-        root.addWidget(card, 1)
+        self._confirm = ConfirmBanner(self)
+        root.addWidget(self._confirm)
 
         foot = QLabel("修改写入 settings.yaml（自动备份 .bak），重启 dsh web 生效。",
                       objectName="cardHint")
@@ -262,26 +263,30 @@ class LlmPage(BasePage):
         model = self._model_cb.currentText()
         effort = self._effort_cb.currentText()
         if not provider or not model:
-            QMessageBox.warning(self, "请选择", "请先选择 provider 与 model。")
+            self._set_status("请先选择 provider 与 model。")
             return
         if model not in _models_for(self._settings, provider):
-            QMessageBox.warning(self, "模型无效", "所选模型不在该 provider 的模型列表中。")
+            self._set_status("所选模型不在该 provider 的模型列表中。")
             return
-        desc = ("将默认模型改为：\n"
-                "  provider: %s\n  model: %s\n  reasoningEffort: %s\n\n"
-                "写入 settings.yaml（自动备份 .bak），重启 dsh web 生效。\n是否继续？"
-                % (provider, model, effort))
-        if QMessageBox.question(self, "确认修改默认模型", desc) != QMessageBox.Yes:
-            return
-        self._set_btns(False)
-        self._set_status("正在保存配置...")
-        # 组装完整 settings(页面持有当前副本), 写盘业务在 core.data(写前 .bak)
-        new_settings = dict(self._settings)
-        new_settings["agent-default-model"] = {
-            "provider": provider, "model": model, "reasoningEffort": effort}
-        self._pending_settings = new_settings
-        self._pending = "llm-save"
-        self.app.service.write_settings(new_settings)
+
+        def do_save():
+            self._set_btns(False)
+            self._set_status("正在保存配置...")
+            new_settings = dict(self._settings)
+            new_settings["agent-default-model"] = {
+                "provider": provider, "model": model, "reasoningEffort": effort}
+            self._pending_settings = new_settings
+            self._pending = "llm-save"
+            self.app.service.write_settings(new_settings)
+
+        self._confirm.ask(
+            "修改默认模型",
+            "将默认模型变更为 <b>%s / %s</b> (reasoningEffort: %s)。写入 settings.yaml（自动备份 .bak），重启 dsh web 生效。"
+            % (provider, model, effort),
+            do_save,
+            level="warn",
+            confirm_text="确认修改"
+        )
 
     def _after_save(self, settings, err):
         self._set_btns(True)

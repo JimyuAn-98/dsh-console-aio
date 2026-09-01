@@ -20,6 +20,7 @@ from core import config as dsh_config
 from core import diagnostics as dsh_diag
 from core import env as core_env
 from ui.base import BasePage
+from ui.widgets import ConfirmBanner
 
 
 class SettingsPage(BasePage):
@@ -371,10 +372,12 @@ class SettingsPage(BasePage):
         imp.clicked.connect(self._import_cfg)
         row.addWidget(exp)
         row.addWidget(imp)
-        self._cfgio_lbl = QLabel("", objectName="cardHint")
-        row.addWidget(self._cfgio_lbl)
         row.addStretch(1)
         v.addLayout(row)
+
+        self._confirm = ConfirmBanner(self)
+        v.addWidget(self._confirm)
+
         v.addStretch(1)
         return page
 
@@ -454,19 +457,23 @@ class SettingsPage(BasePage):
         if err:
             self._set_status("导入失败: " + err)
             return
-        ret = QMessageBox.question(
-            self, "导入配置",
-            "将用导出文件覆盖当前 config.json(自动备份 .bak)并热重载。\n"
-            "导入文件含 %d 项配置, 导出于 %s。继续?" % (
-                len(cfg_new), data.get("_exported_at", "未知时间")))
-        if ret != QMessageBox.StandardButton.Yes:
-            return
-        if not dsh_config.save_config(cfg_new, self._config_path):
-            self._set_status("导入失败: config.json 写入失败(可能被占用), 请重试")
-            return
-        self._set_status("已导入并热重载(%d 项)" % len(cfg_new))
-        self.app.loge("[设置] 配置已导入: " + path, "ok")
-        self.app.reload_config()
+
+        def do_import():
+            if not dsh_config.save_config(cfg_new, self._config_path):
+                self._set_status("导入失败: config.json 写入失败(可能被占用), 请重试")
+                return
+            self._set_status("已导入并热重载(%d 项)" % len(cfg_new))
+            self.app.loge("[设置] 配置已导入: " + path, "ok")
+            self.app.reload_config()
+
+        self._confirm.ask(
+            "导入配置覆盖",
+            "将用导入文件覆盖当前 config.json（自动备份 .bak）并热重载。<br>"
+            "导入文件包含 <b>%d</b> 项配置，导出于 %s。" % (len(cfg_new), data.get("_exported_at", "未知时间")),
+            do_import,
+            level="danger",
+            confirm_text="确认覆盖导入"
+        )
 
     # ── 保存(两页合一, 磁盘为基准合并; core 自动 .bak) ──
     def _on_save(self):

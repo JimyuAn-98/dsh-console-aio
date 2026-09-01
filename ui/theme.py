@@ -430,6 +430,20 @@ QLabel#cardTitle {{ font-size: 15px; font-weight: bold; color: {t["text_bright"]
 QLabel#cardHint {{ color: {t["text_dim"]}; font-size: 12px; }}
 QFrame#pageHostBg {{ background: {bg_page}; }}
 
+/* 页内内联确认条 (ConfirmBanner) */
+QFrame#confirmBanner {{
+    background: {bg_panel}; border: 1px solid {t["warn"]}; border-radius: {t["radius"]};
+}}
+QFrame#confirmBanner[level="danger"] {{
+    border: 1px solid {t["err"]};
+}}
+QFrame#confirmBanner QLabel#confirmTitle {{
+    color: {t["text_bright"]}; font-size: 13px; font-weight: bold;
+}}
+QFrame#confirmBanner QLabel#confirmMsg {{
+    color: {t["text"]}; font-size: 12px;
+}}
+
 /* 输入框(单行): 圆角 + 聚焦 accent 描边 */
 QLineEdit {{
     background: {bg_log}; border: 1px solid {t["border_strong"]}; border-radius: {t["radius_sm"]};

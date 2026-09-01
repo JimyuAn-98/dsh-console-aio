@@ -68,7 +68,14 @@
   - **Service 信号桥收口与裸线程清理**（`app/services.py`）：`DshService` 统一调度出口，新增 `step` 进度信号与 9 个业务方法；彻底清理 `ui/pages_dsh.py`、`ui/pages_settings.py`、`ui/pages_sessions.py`、`ui/pages_profiles.py`、`ui/pages_plugins.py`、`ui/pages_taskboard.py`、`ui/pages_agents.py`、`dsh-console-aio.py` 中的所有裸线程（`threading.Thread`）与私有 `Signal`；
   - **测试完备**：400 个纯单元测试 + 83 个 GUI 冒烟测试全部通过。
 
-## 下一步执行顺序（2026-08-30 定）
+- ✅ **全页内联确认条（`ConfirmBanner`）收敛全部危险操作弹窗**（2026-09-01, 路线 B）：
+  - 新增 `ConfirmBanner` 内联确认组件（`ui/widgets.py` + `ui/theme.py`），支持 `level="danger"|"warn"` 语义色、动态操作文案与 `Esc` 键快捷取消；
+  - 全面替代存量全部 `QMessageBox.question` 模态弹窗（包含隧道方案应用/删除、会话归档/恢复/删除分组、Profile 复制/删除、插件安装/卸载/停用/启用、部署删除、默认模型修改、SSH 密钥生成、配置导入覆盖、主题删除/重置、版本更新、DSH 更新/环境工具操作/彻底卸载等约 20 处操作），实现交互完全页面内嵌闭环。
+- ✅ **系统托盘与常驻快捷运维**（2026-09-01, 路线 C）：
+  - 支持 Windows 系统托盘图标（关闭窗口最小化到托盘不中断隧道），双击/左键恢复窗口；
+  - **动态 Tooltip 悬停监控**：秒级同步展示本机 DSH 运行状态与 SSH 隧道联通状态（如 `DSH: 运行中 | 隧道: 2 个运行`）；
+  - **快捷右键运维菜单**：支持免开主窗口快捷执行「启动/关闭/重启 DSH」、「启动/关闭隧道」以及真正「退出控制台」；
+  - **愿景沉淀**：未来将升级为多隧道拓扑独立管控方案。
 
 1. **发版 v0.7.0**：提交当前批次（logo 全链路 + 主题色换版 + 实时主题页）→ CI 打包链
    补齐（pages_theme hidden-import / logo 资源 / exe 图标）→ 本地 build_win.bat 实测

@@ -7,8 +7,8 @@
 from PySide6.QtCore import QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
-    QAbstractItemView, QFrame, QLabel, QListWidget, QListWidgetItem,
-    QSplitter, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
+    QAbstractItemView, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QPushButton, QSplitter, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
 
 from ui.theme import TOKENS
 
@@ -205,3 +205,81 @@ class RefreshIndicator(QWidget):
                                 self.width() - 2 * (margin + 2),
                                 self.height() - 2 * (margin + 2)))
         p.end()
+
+
+class ConfirmBanner(QFrame):
+    # 页内内联确认条: 替代传统系统模态弹窗(QMessageBox.question)。
+    # 特性: 页面内嵌展开、警告(warn)/高危(danger)语义级别、ESC 快捷取消、操作确认回调。
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("confirmBanner")
+        self.setProperty("level", "danger")
+        self._callback = None
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(12)
+
+        # 左侧文案区
+        text_lay = QVBoxLayout()
+        text_lay.setSpacing(2)
+        self._title_lbl = QLabel("", objectName="confirmTitle")
+        self._title_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        self._msg_lbl = QLabel("", objectName="confirmMsg")
+        self._msg_lbl.setWordWrap(True)
+        self._msg_lbl.setTextFormat(Qt.RichText)
+        text_lay.addWidget(self._title_lbl)
+        text_lay.addWidget(self._msg_lbl)
+        lay.addLayout(text_lay, 1)
+
+        # 右侧操作按钮区
+        btn_lay = QHBoxLayout()
+        btn_lay.setSpacing(8)
+        self._cancel_btn = QPushButton("取消")
+        self._cancel_btn.clicked.connect(self.dismiss)
+        btn_lay.addWidget(self._cancel_btn)
+
+        self._ok_btn = QPushButton("确认")
+        self._ok_btn.setObjectName("danger")
+        self._ok_btn.clicked.connect(self._on_ok)
+        btn_lay.addWidget(self._ok_btn)
+        lay.addLayout(btn_lay)
+
+        self.hide()
+
+    def ask(self, title, msg, on_confirm, level="danger", confirm_text="确认执行", cancel_text="取消"):
+        # 发起确认请求: level="danger"|"warn"
+        self._callback = on_confirm
+        self.setProperty("level", level)
+        self._title_lbl.setText(title)
+        self._msg_lbl.setText(msg)
+        self._ok_btn.setText(confirm_text)
+        self._ok_btn.setObjectName("danger" if level == "danger" else "primary")
+        self._cancel_btn.setText(cancel_text)
+
+        # 刷新样式
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.style().unpolish(self._ok_btn)
+        self.style().polish(self._ok_btn)
+
+        self.show()
+        self._ok_btn.setFocus()
+
+    def dismiss(self):
+        self._callback = None
+        self.hide()
+
+    def _on_ok(self):
+        cb = self._callback
+        self.dismiss()
+        if callable(cb):
+            cb()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.dismiss()
+            event.accept()
+        else:
+            super().keyPressEvent(event)

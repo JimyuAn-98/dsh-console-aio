@@ -3,7 +3,32 @@
 
 ## v0.8.0 (未发布)
 
-### 通用缓存层全面推广 + 技术债统一收口（2026-09-01）
+### 全页内联确认条（ConfirmBanner）收敛危险操作弹窗 + 系统托盘与常驻快捷运维（2026-09-01）
+
+- **全页内联确认条组件 `ConfirmBanner`（路线 B）**：
+  - 新增 `ConfirmBanner` 通用内联确认条组件（`ui/widgets.py` + `ui/theme.py`），继承 `QFrame`，提供极佳的沉浸式页面内交互；
+  - 支持 `level="danger"`（高危操作，红色强调）与 `level="warn"`（警告操作，黄色/强调色）语义色适配明暗变体；
+  - 键盘友好：支持 `Esc` 快捷取消，支持自定义确认文案与操作描述；
+  - **全面替换存量 `QMessageBox.question` 模态弹窗**：
+    - 隧道页（`TunnelsPage`）：隧道拓扑方案应用与删除内联确认；
+    - 会话页（`SessionPage`）：会话归档/恢复与会话分组删除内联确认；
+    - Profile 页（`ProfilesPage`）：Profile 复制与删除内联确认；
+    - 插件页（`PluginPage`）：插件安装、卸载、停用、启用内联确认；
+    - 部署页（`DeploymentPage`）：远程部署记录删除内联确认；
+    - LLM 页（`LlmPage`）：默认模型变更与 settings.yaml 保存内联确认；
+    - 密钥页（`KeysPage`）：SSH 密钥生成内联确认，并简化只读查看/复制交互；
+    - 设置页（`SettingsPage`）：配置文件覆盖导入内联确认；
+    - 主题页（`ThemePage`）：自定义主题文件删除与出厂配色重置内联确认；
+    - 版本页（`VersionPage`）：控制台一键更新与安装包升级下载内联确认；
+    - DSH 管理页（`DshPage`）：DSH 本体完整更新、环境检查工具更新/安装/卸载、DSH 本机（保留数据/彻底卸载）内联确认。
+- **系统托盘与常驻快捷运维（路线 C）**：
+  - Windows 系统托盘常驻：用户点击主窗口右上角关闭按钮时，自动最小化到系统托盘，保持 SSH 隧道与后台监控持续稳定运行；
+  - **动态 Tooltip 悬停监控**：秒级同步展示本机 DSH 运行状态与 SSH 隧道联通状态（如 `DSH: 运行中 | 隧道: 2 个运行`）；
+  - **快捷右键运维菜单**：免开主窗口即可右键托盘图标执行常用运维（显示主窗口、启动/关闭/重启 DSH、启动/关闭隧道、彻底退出控制台）；
+  - 智能退出管理：右键菜单「退出控制台」置位退出状态并主动清理托盘图标，彻底杜绝系统托盘幽灵图标残留。
+- **测试与工程保障**：
+  - 新增 `tests/test_widgets.py` 对 `ConfirmBanner` 组件进行独立单元测试；
+  - 全量 404 个单元测试 + 83 个 GUI 冒烟测试全部通过，`--smoke` 冒烟完全正常。
 
 - **缓存层全面推广**：
   - 部署总览（`OverviewPage`）、会话管理（`SessionsPage`）、Profile（`ProfilesPage`）、插件（`PluginsPage`）、任务看板（`TaskboardPage`）、Agent 模式（`AgentPage`）全面接入 `core/cache.py` 缓存与 `RefreshIndicator` 刷新指示器；

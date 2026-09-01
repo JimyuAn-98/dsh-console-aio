@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QPushButton, QMessageBox, QComboBox, QTextEdit, QWidget)
 
 from ui.base import BasePage
-from ui.widgets import ModernList, RefreshIndicator, card_wrap, three_split
+from ui.widgets import ModernList, RefreshIndicator, ConfirmBanner, card_wrap, three_split
 
 
 def _entry_src_text(e):
@@ -146,6 +146,10 @@ class PluginPage(BasePage):
         cv.setContentsMargins(0, 0, 0, 0)
         cv.setSpacing(8)
         cv.addWidget(mid, 1)
+
+        self._confirm = ConfirmBanner(self)
+        cv.addWidget(self._confirm)
+
         cv.addLayout(btns)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -358,10 +362,17 @@ class PluginPage(BasePage):
             QMessageBox.warning(self, "受保护", "这是 dsh 宿主基础插件，不允许安装。")
             return
         cmd = dsh_data.plugin_cmd(profile, "add", pkg)
-        if QMessageBox.question(self, "安装插件",
-                                "将执行：\n  " + " ".join(cmd) + "\n\n是否继续？") != QMessageBox.Yes:
-            return
-        self._run_stream(cmd, "安装插件 " + pkg)
+
+        def do_install():
+            self._run_stream(cmd, "安装插件 " + pkg)
+
+        self._confirm.ask(
+            "安装插件「%s」" % pkg,
+            "将执行命令：\n<code>%s</code>" % " ".join(cmd),
+            do_install,
+            level="warn",
+            confirm_text="确认安装"
+        )
 
     def _remove(self):
         e = self._selected_entry()
@@ -379,10 +390,17 @@ class PluginPage(BasePage):
             QMessageBox.warning(self, "受保护", "这是 dsh 宿主基础插件，不允许卸载。")
             return
         cmd = dsh_data.plugin_cmd(profile, "remove", pkg)
-        if QMessageBox.question(self, "卸载插件",
-                                "将执行：\n  " + " ".join(cmd) + "\n\n卸载会移除插件文件与相关行，是否继续？") != QMessageBox.Yes:
-            return
-        self._run_stream(cmd, "卸载插件 " + pkg)
+
+        def do_remove():
+            self._run_stream(cmd, "卸载插件 " + pkg)
+
+        self._confirm.ask(
+            "卸载插件「%s」" % pkg,
+            "将执行命令：\n<code>%s</code>\n卸载会从 Profile 移除插件文件与相关依赖行。" % " ".join(cmd),
+            do_remove,
+            level="danger",
+            confirm_text="确认卸载"
+        )
 
     def _run_stream(self, cmd, desc):
         # 官方命令经 service.run_cmd 在 dsh 仓库目录流式执行(逐行打主日志), 完成后回 finished。
@@ -415,12 +433,17 @@ class PluginPage(BasePage):
         if e.get("disabled"):
             QMessageBox.information(self, "已停用", "「%s」已处于停用状态。" % name)
             return
-        if QMessageBox.question(
-                self, "禁用插件",
-                "将把「%s」标记为已停用：\n" % name +
-                "写入 %s/cordis.patch.yml(写前自动备份，HMR 约 1 秒生效)。\n\n是否继续？" % profile) != QMessageBox.Yes:
-            return
-        self._set_disabled(profile, eid, True)
+
+        def do_disable():
+            self._set_disabled(profile, eid, True)
+
+        self._confirm.ask(
+            "停用插件「%s」" % name,
+            "将把「%s」标记为 disabled 并写入 %s/cordis.patch.yml(自动备份，HMR 约 1 秒生效)。" % (name, profile),
+            do_disable,
+            level="warn",
+            confirm_text="确认停用"
+        )
 
     def _enable(self):
         e = self._selected_entry()
@@ -437,12 +460,17 @@ class PluginPage(BasePage):
         if not e.get("disabled"):
             QMessageBox.information(self, "未停用", "「%s」当前未停用，无需启用。" % name)
             return
-        if QMessageBox.question(
-                self, "启用插件",
-                "将移除「%s」的 disabled 标记：\n" % name +
-                "写入 %s/cordis.patch.yml(写前自动备份，HMR 约 1 秒生效)。\n\n是否继续？" % profile) != QMessageBox.Yes:
-            return
-        self._set_disabled(profile, eid, False)
+
+        def do_enable():
+            self._set_disabled(profile, eid, False)
+
+        self._confirm.ask(
+            "启用插件「%s」" % name,
+            "将移除「%s」的 disabled 标记并写入 %s/cordis.patch.yml(自动备份，HMR 约 1 秒生效)。" % (name, profile),
+            do_enable,
+            level="warn",
+            confirm_text="确认启用"
+        )
 
     def _set_disabled(self, profile, eid, disabled):
         # 必须用真实 entry id(dump-config 映射), 不能用 bundle 名(如 dshmarket->dsh-market);

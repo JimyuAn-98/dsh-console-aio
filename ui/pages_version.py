@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from core import version as core_version
 from ui.base import BasePage
 from ui.theme import TOKENS
+from ui.widgets import ConfirmBanner
 
 
 class VersionPage(BasePage):
@@ -76,6 +77,9 @@ class VersionPage(BasePage):
             btns.addWidget(b)
         btns.addStretch(1)
         root.addLayout(btns)
+
+        self._confirm = ConfirmBanner(self)
+        root.addWidget(self._confirm)
 
         log_card = QFrame(objectName="card")
         lv = QVBoxLayout(log_card)
@@ -148,23 +152,27 @@ class VersionPage(BasePage):
             return
         if getattr(sys, "frozen", False):
             # 打包(exe)版: 更新 = 打开 GitHub Releases 下载新安装包(天然支持升级安装)
-            ok = QMessageBox.question(
-                self, "检查到新版本 v" + self._latest,
-                "当前为安装版。\n将打开 GitHub Releases 页面下载新安装包，\n"
-                "下载后运行安装器即可完成升级(配置与数据保留)。\n\n是否打开下载页？")
-            if ok == QMessageBox.Yes:
-                self._open_releases()
+            self._confirm.ask(
+                "下载新版本 v" + self._latest,
+                "当前为安装版。将打开 GitHub Releases 页面下载新版本安装包，下载后运行安装器即可完成升级（本地配置与数据均保留）。",
+                self._open_releases,
+                level="warn",
+                confirm_text="打开下载页面"
+            )
             return
-        ok = QMessageBox.question(
-            self, "一键更新",
-            "将执行：\n1. 下载 v" + self._latest + " 更新包(GitHub)\n"
-            "2. 解压并替换程序文件(自动备份旧文件, config.json 等本地配置保留)\n"
-            "3. 重启 dsh-console-aio\n\n是否继续？")
-        if ok != QMessageBox.Yes:
-            return
-        self._set_busy(True)
-        self._set_status("正在下载更新…")
-        self.app.service.update_console()
+
+        def do_update():
+            self._set_busy(True)
+            self._set_status("正在下载更新…")
+            self.app.service.update_console()
+
+        self._confirm.ask(
+            "一键更新到 v" + self._latest,
+            "将执行：<br>1. 下载 v%s 更新包(GitHub)<br>2. 解压并替换程序文件(自动备份，config.json 等本地配置保留)<br>3. 重启控制台" % self._latest,
+            do_update,
+            level="warn",
+            confirm_text="确认开始更新"
+        )
 
     def _after_update(self, payload):
         msg = str(payload.get("msg") or "")

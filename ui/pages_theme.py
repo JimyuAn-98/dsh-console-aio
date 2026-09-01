@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from core import config as dsh_config
 from ui import theme as dsh_theme
 from ui.base import BasePage
+from ui.widgets import ConfirmBanner
 
 # 颜色 token 中文标签(与 theme.COLOR_GROUPS 的 key 对应; 漏了就回退显示 key 本身)
 LABELS = {
@@ -170,6 +171,10 @@ class ThemePage(BasePage):
         act.addWidget(save_default)
         act.addStretch(1)
         v.addLayout(act)
+
+        self._confirm = ConfirmBanner(self)
+        v.addWidget(self._confirm)
+
         self._reload_themes()
         return card
 
@@ -312,28 +317,44 @@ class ThemePage(BasePage):
         if item is None:
             self._set("先在列表中选择要删除的主题文件", err=True)
             return
-        ret = QMessageBox.question(
-            self, "删除主题",
-            "将删除主题文件 themes/%s.json, 删除后不可恢复。确定删除?" % item.text())
-        if ret != QMessageBox.StandardButton.Yes:
-            return
-        if not dsh_theme.delete_theme_file(item.text()):
-            self._set("删除失败: 文件可能被占用", err=True)
-            return
-        self._reload_themes()
-        self._set("已删除主题: " + item.text())
+        theme_name = item.text()
+
+        def do_delete():
+            if not dsh_theme.delete_theme_file(theme_name):
+                self._set("删除失败: 文件可能被占用", err=True)
+                return
+            self._reload_themes()
+            self._set("已删除主题: " + theme_name)
+
+        self._confirm.ask(
+            "删除主题「%s」" % theme_name,
+            "将永久删除主题文件 themes/%s.json，删除后不可恢复。" % theme_name,
+            do_delete,
+            level="danger",
+            confirm_text="确认删除"
+        )
 
     def _on_reset(self):
-        if dsh_theme.current_overrides() \
-                and QMessageBox.question(
-                    self, "恢复默认",
-                    "将恢复出厂配色(当前未保存的调整丢失, 启动默认不变)。继续?") \
-                != QMessageBox.StandardButton.Yes:
+        if not dsh_theme.current_overrides():
+            dsh_theme.reset_default()
+            self.app.apply_theme(note="[主题] 已恢复出厂配色")
+            self._refresh_all()
+            self._set("已恢复出厂配色")
             return
-        dsh_theme.reset_default()
-        self.app.apply_theme(note="[主题] 已恢复出厂配色(仅本次运行; 要保留请「保存为启动默认」)")
-        self._refresh_all()
-        self._set("已恢复出厂配色")
+
+        def do_reset():
+            dsh_theme.reset_default()
+            self.app.apply_theme(note="[主题] 已恢复出厂配色(仅本次运行; 要保留请「保存为启动默认」)")
+            self._refresh_all()
+            self._set("已恢复出厂配色")
+
+        self._confirm.ask(
+            "恢复出厂配色",
+            "将恢复出厂配色（当前未保存的调整将丢失，启动默认设置不变）。",
+            do_reset,
+            level="warn",
+            confirm_text="确认恢复"
+        )
 
     def _on_save_default(self):
         # 以磁盘 config.json 为基准只改 theme 段(不碰其他字段); 恢复出厂后保存即清空覆盖

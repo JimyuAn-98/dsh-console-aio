@@ -24,6 +24,7 @@ from core import config as dsh_config
 from core import env as core_env
 from ui.base import BasePage
 from ui.theme import TOKENS
+from ui.widgets import ConfirmBanner
 
 _GH_TAGS_URL = "https://github.com/deepseek-ai/deepseek-harness/tags"
 
@@ -188,26 +189,29 @@ class DshManagePage(BasePage):
         btns.addWidget(b)
         btns.addStretch(1)
         lv.addLayout(btns)
+
+        self._confirm_update = ConfirmBanner(self)
+        lv.addWidget(self._confirm_update)
+
         return card
 
     def _run_update(self):
-        # 危险操作约定: 先确认"将执行什么", 用户点是才执行; 业务在 core.dshctl。
-        ans = QMessageBox.question(
-            self, "更新 dsh",
-            "将对本机 dsh 执行一次完整更新:\n\n"
-            "  1) 停止当前 dsh web\n"
-            "  2) git 拉取最新代码\n"
-            "  3) 清理旧构建产物\n"
-            "  4) 安装依赖 (pnpm install)\n"
-            "  5) 构建 (pnpm run build, 耗时较长)\n"
-            "  6) 重启 dsh web\n\n"
-            "期间 dsh 页面会短暂不可用。是否继续?")
-        if ans != QMessageBox.StandardButton.Yes:
-            self.app.set_status("已取消更新")
-            return
-        self.app.loge("[update-dsh] 开始完整更新...", "warn")
-        self.app.set_status("正在运行更新(构建较久, 请耐心)...")
-        self.app.service.update_dsh()
+        def do_update():
+            self.app.loge("[update-dsh] 开始完整更新...", "warn")
+            self.app.set_status("正在运行更新(构建较久, 请耐心)...")
+            self.app.service.update_dsh()
+
+        self._confirm_update.ask(
+            "更新 dsh 本体",
+            "将对本机 dsh 执行完整更新：<br>"
+            "1. 停止当前 dsh web<br>"
+            "2. git pull 拉取最新代码<br>"
+            "3. 清理旧构建产物并 pnpm install<br>"
+            "4. pnpm run build 构建并重启 dsh web",
+            do_update,
+            level="warn",
+            confirm_text="确认开始更新"
+        )
 
     # ── 卡: 开发环境检查(页面内分步, 退役 EnvDialog 弹窗) ──
     def _card_env_check(self):
@@ -259,6 +263,10 @@ class DshManagePage(BasePage):
             table.setRowHeight(i, 34)
             self.env_rows[key] = (ver_item, st_item)
         v.addWidget(table, 1)
+
+        self._confirm_env = ConfirmBanner(self)
+        v.addWidget(self._confirm_env)
+
         self._env_refresh()
         return card
 
@@ -286,26 +294,32 @@ class DshManagePage(BasePage):
                 st_item.setForeground(c_ok)
 
     def _env_action(self, key, kind, label):
-        # 每个动作先确认将执行什么, 确认后才执行(危险操作确认约定, 暂不收敛为确认条)
         ops = OPS.get(key)
         if ops is None:
             return
         plan = ops.get(kind) or []
         if not plan:
             return
-        for typ, payload, desc in plan:
-            if QMessageBox.question(
-                    self, label + " " + ops["name"],
-                    "将执行：\n" + desc + "\n\n是否继续？") != QMessageBox.Yes:
-                return
-            if typ == "cmd":
-                self._env_run_cmd(payload, desc)
-            elif typ == "browser":
-                self._env_open_url(payload)
-            elif typ == "page":
-                self._env_open_apps_page()
-            elif typ == "hint":
-                QMessageBox.information(self, label + " " + ops["name"], payload)
+
+        def do_execute_plan():
+            for typ, payload, desc in plan:
+                if typ == "cmd":
+                    self._env_run_cmd(payload, desc)
+                elif typ == "browser":
+                    self._env_open_url(payload)
+                elif typ == "page":
+                    self._env_open_apps_page()
+                elif typ == "hint":
+                    self._confirm_env.ask(label + " " + ops["name"], payload, lambda: None, level="warn", confirm_text="知道了")
+
+        descs = "<br>".join(desc for _, _, desc in plan)
+        self._confirm_env.ask(
+            "%s %s" % (label, ops["name"]),
+            "将执行操作：<br>%s" % descs,
+            do_execute_plan,
+            level="warn" if kind != "uninstall" else "danger",
+            confirm_text="确认" + label
+        )
 
     def _env_run_cmd(self, cmd, desc):
         # 有主窗口(service): service.run_cmd 流式执行逐行进主日志, finished 收尾
@@ -456,52 +470,43 @@ class DshManagePage(BasePage):
         self._uninst_log.setMinimumHeight(110)
         self._uninst_log.setPlaceholderText("卸载日志(流式显示在这里)...")
         v.addWidget(self._uninst_log)
+
+        self._confirm_uninst = ConfirmBanner(self)
+        v.addWidget(self._confirm_uninst)
+
         return card
 
     def _start_uninstall(self, keep_data):
-        # 危险操作: 先在确认框列出将删的具体路径, 点是才执行。
-        # 彻底卸载(删 ~/.dsh 数据)再加一道二次确认(防手滑)。
         cfg = dsh_config.load_config()
         repo = (cfg.get("dash_repo") or "").strip()
         repo_desc = repo or "(未设置, 跳过)"
 
+        def do_run_uninstall():
+            self._uninst_running = True
+            self._uninst_bar.setValue(0)
+            self._uninst_log.clear()
+            self._uninst_bar.setRange(0, 4 if not keep_data else 3)
+            self._uninst_step_lbl.setText("正在卸载…")
+            self.app.service.uninstall_dsh(keep_data=keep_data, op="dsh-uninstall")
+
         if keep_data:
-            lines = ["将执行(不可恢复)：", ""]
-            lines.append("  1) 停止当前 dsh web")
-            lines.append("  2) 删除源码目录: " + repo_desc)
-            lines.append("  3) 清空 config.json 的 dash_repo")
-            lines.append("")
-            lines.append("保留 ~/.dsh 数据目录(对话/会话/配置等不删)。")
-            if QMessageBox.question(self, "卸载 dsh（保留数据）", "\n".join(lines)) \
-                    != QMessageBox.Yes:
-                return
+            self._confirm_uninst.ask(
+                "卸载 dsh（保留数据）",
+                "将执行：<br>1. 停止当前 dsh web<br>2. 删除源码目录：%s<br>3. 清空 config.json 的 dash_repo<br>（保留 ~/.dsh 数据目录）" % repo_desc,
+                do_run_uninstall,
+                level="warn",
+                confirm_text="确认卸载(保留数据)"
+            )
         else:
             from core import data as dsh_data
             data_dir = dsh_data.dsh_home()
-            confirm = QMessageBox.question(
-                self, "彻底卸载 dsh",
-                "将执行(不可恢复)：\n\n"
-                "  1) 停止当前 dsh web\n"
-                "  2) 删除源码目录: %s\n"
-                "  3) 清空 config.json 的 dash_repo\n"
-                "  4) 删除数据目录: %s\n\n"
-                "~/.dsh 包含所有对话记录/会话/工作区/配置, 删除后无法找回!\n"
-                "是否继续?" % (repo_desc, data_dir))
-            if confirm != QMessageBox.Yes:
-                return
-            double = QMessageBox.warning(
-                self, "最后确认", "再次确认：真的删除全部数据(~/.dsh)吗？\n此操作不可撤销。",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if double != QMessageBox.Yes:
-                return
-
-        self._uninst_running = True
-        self._uninst_bar.setValue(0)
-        self._uninst_log.clear()
-        # 进度条范围: 保留数据=3 步, 删数据=4 步
-        self._uninst_bar.setRange(0, 4 if not keep_data else 3)
-        self._uninst_step_lbl.setText("正在卸载…")
-        self.app.service.uninstall_dsh(keep_data=keep_data, op="dsh-uninstall")
+            self._confirm_uninst.ask(
+                "彻底卸载 dsh（含全部数据）",
+                "⚠️ 危险操作：将停止 web、删除源码目录（%s）、清空 dash_repo 配置，并<b>永久删除数据目录（%s）</b>！所有会话与记录均不可恢复！" % (repo_desc, data_dir),
+                do_run_uninstall,
+                level="danger",
+                confirm_text="确认彻底卸载"
+            )
 
     def _on_uninstall_step(self, step, text):
         self._uninst_bar.setValue(step)
