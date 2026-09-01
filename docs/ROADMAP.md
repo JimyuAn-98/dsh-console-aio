@@ -1,7 +1,7 @@
 # 路线图（ROADMAP）
 
 > 当前进展与未来计划的状态总览。**愿景细节/探索记录**见 `docs/VISION_部署子工具组.md`；
-> **历史方案归档**见 `docs/PLANS.md`；**已知问题**见 `docs/BUGS.md`。
+> **历史方案归档**见 `docs/archive/PLANS.md`；**已知问题**见 `docs/BUGS.md`。
 
 ## 当前状态（2026-08-30）
 
@@ -62,6 +62,11 @@
 - ✅ **P4 远程部署子工具组改为延后/独立试验**（2026-08-31 拍板）：不进当前主分支、不占主线，
   用独立分支 + WSL 做远程部署原型，验证可行后再合并——详见 `.agents/notes/proposed/feature/
   2026-08-30-remote-deploy.md` 与同目录 API 状态标注
+- ✅ **通用缓存层全面推广 + 技术债统一收口**（2026-09-01）：
+  - **缓存推广与指示灯**：总览（Overview）、会话（Sessions）、Profile、插件（Plugins）、任务看板（Taskboard）、Agent 模式 全面接入 `core/cache.py` 与 `RefreshIndicator` 状态灯（绿=无变化/命中缓存、黄=数据有变化已刷新、红=获取错误）；
+  - **核心纯数据层扩展**（`core/data.py`）：新增各数据域源时间戳探测（`sessions_source_mtime`、`plugins_source_mtime`、`taskboard_source_mtime`、`agent_presets_source_mtime`、`profiles_source_mtime`、`overview_source_mtime`）与纯数据聚合函数（`read_sessions_data`、`collect_overview_data`）；
+  - **Service 信号桥收口与裸线程清理**（`app/services.py`）：`DshService` 统一调度出口，新增 `step` 进度信号与 9 个业务方法；彻底清理 `ui/pages_dsh.py`、`ui/pages_settings.py`、`ui/pages_sessions.py`、`ui/pages_profiles.py`、`ui/pages_plugins.py`、`ui/pages_taskboard.py`、`ui/pages_agents.py`、`dsh-console-aio.py` 中的所有裸线程（`threading.Thread`）与私有 `Signal`；
+  - **测试完备**：400 个纯单元测试 + 83 个 GUI 冒烟测试全部通过。
 
 ## 下一步执行顺序（2026-08-30 定）
 
@@ -100,13 +105,14 @@
 - **弹窗收敛剩余**（§二.5）：环境检查/安装向导 → 页面内分步（✅ 已完成, DSH 管理页
   页面内分步, `ui/dialogs.py` 整体退役）；危险确认 QMessageBox.question（存量 20 处）→
   页面内确认条组件，按页分批替换
-- **技术债**：OverviewPage.refresh 仍直连 core.data + 裸线程（未走 service）；各页自有裸线程过渡态（pages_dsh._fetch_tags / pages_settings._test_ssh+_gen_diag / TunnelsPage 方案读写 / plugins+sessions+profiles 读取）待统一收口到 DshService —— 已列入「大菜第一阶段」技术债清理
+- **技术债收口**（✅ 已完成）：所有页面的裸线程（`threading.Thread`）与私有 `Signal` 全部清理完毕，统一收口至 `DshService` 信号桥；各数据页面全面接入通用缓存层 `core/cache.py` 与状态指示灯
 - **候选想法**：托盘常驻 + 全局快捷键；**多主题预设切换（Mica 深色/纯色，明/暗变体已落地）**；主题文件跨机导出/导入；布局记忆（分栏尺寸/收起状态持久化）；多套拓扑配置切换；配置热重载已完成（P0，不在候选）
 - **跨平台**：UI 层已按"一套设计系统 + 平台适配层"就绪（见 VISION 第十一章）；core 层仍 Windows 优先，等有 Linux/macOS 用户再抽平台层
 
-## 决策记录索引
+## 决策记录与规范索引
 
-- 分层设计蓝图与信号-槽契约：`docs/UI_LAYERING.md`
-- 当前架构：`docs/ARCHITECTURE.md`
+- 系统架构与信号-槽契约唯一权威：`docs/ARCHITECTURE.md`
 - 测试分层与安全边界：`docs/TESTING.md`
+- 实施计划沉淀库：`docs/plans/`
+- 历史归档（原 UI 分层设计/早期方案/旧迁移指南）：`docs/archive/`
 - Agent 决策记录：`.agents/notes/`

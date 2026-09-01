@@ -21,12 +21,52 @@ def qapp_mod():
     return app
 
 
+class _FakeSignal:
+    def connect(self, *a, **k):
+        pass
+
+
+class _FakeService:
+    def __init__(self):
+        self.card = _FakeSignal()
+        self.log = _FakeSignal()
+        self.step = _FakeSignal()
+        self.result = _FakeSignal()
+        self.finished = _FakeSignal()
+
+    def run_cmd(self, *a, **k):
+        pass
+
+    def start_dsh(self, *a, **k):
+        pass
+
+    def check_tool_versions(self, *a, **k):
+        pass
+
+    def fetch_dsh_tags(self, *a, **k):
+        pass
+
+    def install_dsh(self, *a, **k):
+        pass
+
+    def uninstall_dsh(self, *a, **k):
+        pass
+
+    def test_ssh(self, *a, **k):
+        pass
+
+    def generate_diagnostics(self, *a, **k):
+        pass
+
+
 class _FakeApp:
     # 设置页依赖的最小 app: 热重载调用记账
     _pending_settings_tab = None
 
     def __init__(self):
         self.reloaded = False
+        self.service = _FakeService()
+        self._card_state = {}
 
     def reload_config(self):
         self.reloaded = True
@@ -107,21 +147,6 @@ class TestSettingsPage:
         qapp_mod.processEvents()
 
 
-class _FakeService:
-    # DshManagePage 依赖的 service 最小接口(构造用; card 信号仅 connect 记账)
-    def __init__(self):
-        self.card = _FakeSignal()
-
-    def run_cmd(self, *a, **k):
-        pass
-
-    def start_dsh(self, *a, **k):
-        pass
-
-
-class _FakeSignal:
-    def connect(self, *a, **k):
-        pass
 
 
 class TestDshManagePage:

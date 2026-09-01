@@ -1,87 +1,143 @@
-# 架构（dsh 控制台 · 当前实现）
+# 系统架构（ARCHITECTURE · dsh 控制台）
 
-> 2026-08-25 初稿（tkinter 时代）→ **2026-08-29 重写**：PySide6 迁移 + UI 前后端分层重构
-> （阶段 0–4）完成后的当前结构。旧 tkinter 设计已废弃，归档见 `legacy/`；
-> 分层设计蓝图与信号-槽契约详见 `docs/UI_LAYERING.md`。
+> **单一权威来源**：本文档是 dsh 控制台前后端分层架构、信号-槽通讯契约、数据域映射与设计硬约束的唯一权威文档。
+> 历史设计稿归档见 `docs/archive/UI_LAYERING.md` 与 `docs/archive/PYSIDE_MIGRATION.md`。
 
-## 当前分层（2026-08-29）
+---
+
+## 1. 整体三层架构
+
+项目遵循经典的 Qt 桌面端分层架构，实现**业务逻辑与界面展示的彻底解耦**：
 
 ```
-┌─ 后端层 core/  (纯 Python, 严禁 import PySide) ────────────────┐
-│  config.py      配置加载与派生常量(含 allow_empty_ports 隔离分支)     │
-│  data.py        数据域: YAML/workspace/profiles/plugins/用量/部署     │
-│                 (原根级 dsh_data.py 已归并于此, 兼容 shim 已删除)      │
-│  dshctl.py      dsh 启停/完整更新/监控探测/流式命令 stream_cmd        │
-│  tunnels.py     隧道启停/常驻重连(基于 core/tunnel_mgr.py)             │
-│  version.py     控制台自身版本检查与自更新                           │
-│  keys.py        SSH 密钥(私钥安全红线)                              │
-│  env.py         环境检查/一键安装(dialogs 业务下沉)                  │
-│  ops.py         备份/日志/凭据存在性                                 │
-│  profiles.py    Profile 复制/删除(远程只读红线)                      │
-│  sessions.py    会话归档/恢复/分组删除(远程只读红线)                  │
-│  plugins.py     插件列表/启停/安装卸载(远程只读红线)                  │
-│  deployments.py 部署快照/保存(远程只读红线)                          │
-└─────────────────────────────────────────────────────────────────────┘
-┌─ 接口层 app/services.py  (可 import PySide) ────────────────────────┐
-│  DshService(QObject): status/log/card/monitor/result/finished 信号, │
-│  起后台线程跑 core, events 回调转发为 Qt Signal(唯一起线程处)     │
-└─────────────────────────────────────────────────────────────────────┘
-┌─ UI 层  (只展示 + 订阅信号 + 调 service) ───────────────────────────┐
-│  dsh-console-aio.py  主窗口壳(顶栏/导航/右栏/日志) + 总览页 + 隧道页  │
-│  ui/pages_*.py   11 个管理页(sessions/agents/profiles/plugins/  │
-│                      taskboard/usage/llm/ops/keys/version/          │
-│                      deployments)                                   │
-│  ui/dialogs.py   配置向导 / 安装向导 / 环境检查                  │
-│  ui/base.py      BasePage(safe_emit 页面销毁竞态防护)            │
-│  ui/theme.qss        主题(内嵌 QSS 兜底)                            │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. 后端业务层 core/  (纯 Python, 严禁 import PySide)                         │
+│    config.py         配置加载/派生常量(default_config_path/allow_empty_ports)│
+│    data.py           数据域模型: 会话/workspace/profile/用量/价格/部署抽象   │
+│    dshctl.py         dsh 启停/更新/进程探测/流式命令 stream_cmd              │
+│    tunnel_mgr.py     纯 Python SSH 隧道底层管理器 (forward/reverse/persist)   │
+│    tunnels.py        隧道卡片高层业务封装                                    │
+│    tunnel_planner.py 隧道多方案/拓扑快照/端口冲突校验与自检                  │
+│    cache.py          通用本地数据缓存与时间戳失效校验                        │
+│    diagnostics.py    环境/端口/配置一键诊断报告生成 (敏感信息脱敏)           │
+│    version.py        控制台自身版本比对与 GitHub 自更新                      │
+│    keys.py           SSH 密钥管理 (私钥安全红线: 绝不读取明文)               │
+│    env.py            环境检查 (git/node/npm/pnpm) / 一键安装 / 彻底卸载      │
+│    ops.py            备份 ~/.dsh (排除凭据) / 日志路径 / 凭据存在性          │
+│    profiles.py       Profile 复制与删除 (远程只读红线)                       │
+│    sessions.py       会话归档/恢复/删除 (远程只读红线)                       │
+│    plugins.py        插件列表/cordis patch 启停/官方 CLI 安装卸载            │
+│    deployments.py    多部署快照与配置持久化                                  │
+│    logs.py           dsh web 日志读取与过滤                                 │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │ 纯数据事件 / 回调 / 阻塞计算
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2. 信号桥接口层 app/services.py  (唯一允许起后台工作线程并转 Qt 信号处)        │
+│    DshService(QObject):                                                     │
+│      - 核心信号: status, log, card, monitor, finished, result               │
+│      - 通用工作线程模板: _run_result_op (带 events 域函数), _run_core_op    │
+│      - 页面业务接口: 启停/探测/安装/卸载/备份/诊断等统一触发入口            │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │ Qt Signal (跨线程排队投递)
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3. 前端 UI 展示层 ui/ + 主程序 (只负责视图渲染 + 订阅信号 + 调用 service)    │
+│    dsh-console-aio.py 主窗口壳 (顶栏/左导航/右状态/底部日志) + 总览页/隧道页│
+│    ui/pages_*.py      15 个管理页面 (sessions/plugins/usage/settings/theme…) │
+│    ui/base.py         BasePage (提供 safe_emit 页面销毁防崩机制)             │
+│    ui/theme.py        主题引擎 (TOKENS 实时换肤 / 明暗变体 / QSS 生成)       │
+│    ui/widgets.py      现代组件库 (卡片/列表/确认条/刷新指示器)               │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 数据与配置
+---
 
-| 项 | 位置 | 说明 |
-|----|------|------|
-| config.json | 仓库根(exe 旁), **gitignored** | dash_repo / dash_port / ssh 服务器 / 隧道 / 部署清单; `DSH_AIO_CONFIG` 环境变量可覆盖(测试隔离) |
-| ~/.dsh | `DSH_HOME` 可覆盖 | profiles/ sessions/ storages/ task-board/ settings.yaml / .agent-presets |
-| DshRemote | core/data.py | 本机 / 远程(ssh 免密只读)统一抽象 |
-| core/tunnel_mgr.py | core/ | 纯 Python SSH 隧道管理器, 被 core.tunnels 使用 |
+## 2. 信号-槽通讯契约（硬约束）
 
-## 数据域 ↔ 实现映射
+为保证 Qt GUI 线程安全与进程稳定，全员必须遵守以下契约：
 
-| 数据域 | core 模块 | UI 页面 | 说明 |
-|--------|-----------|---------|------|
-| 会话/工作区/归档 | sessions.py | ui/pages_sessions.py | 远程部署下写操作拒绝 |
-| Agent 模式 | data.py | ui/pages_agents.py | .agent-presets 只读 |
-| Profile 管理 | profiles.py | ui/pages_profiles.py | 复制/删除, web 拒删 |
-| 插件管理 | plugins.py | ui/pages_plugins.py | 官方 dsh plugin 命令经 service.run_cmd |
-| 任务看板 | data.py | ui/pages_taskboard.py | ledger-v2 + scheduler-v2 只读 |
-| 模型用量/价格 | data.py | ui/pages_usage.py | zstd 解压聚合, 价格表可编辑 |
-| LLM/模型配置 | data.py | ui/pages_llm.py | settings.yaml agent-default-model |
-| 备份/日志/凭据 | ops.py | ui/pages_ops.py | 备份排除凭据 |
-| SSH 密钥 | keys.py | ui/pages_keys.py | 私钥内容绝不读取 |
-| 版本/自更新 | version.py | ui/pages_version.py | 控制台自身更新 |
-| 部署管理 | deployments.py | ui/pages_deployments.py | 远程只读快照 |
-| 隧道/本机 dsh | dshctl.py + tunnels.py | dsh-console-aio.py(TunnelsPage) | 卡片动作经 service 信号桥 |
-| 总览 | data.py | dsh-console-aio.py(OverviewPage) | 部署状态快照(尚未走 service, 已知例外) |
+### 2.1 线程与通信红线
+1. **业务层（`core/`）零 Qt 依赖**：纯 Python 逻辑，只向调用方返回纯数据字典或通过回调抛出事件。
+2. **`services.py` 是唯一线程出口**：除个别本地毫秒级小文件快读外，所有耗时 I/O、子进程、SSH 网络操作必须由 `DshService` 启动后台线程执行。
+3. **禁止跨线程操作 UI**：后台线程**严禁**直接调用任何 QWidget 的方法，**严禁**跨线程无锁修改共享可变数据。所有结果必须通过 Qt Signal 投递回主线程事件循环。
 
-## 信号-槽契约（硬约束）
+### 2.2 `DshService` 核心信号表
+```python
+class DshService(QObject):
+    status   = Signal(str)                  # 底部状态栏文案更新
+    log      = Signal(str, str)             # 日志区输出: (text, tag) -> tag 为 "ok"|"err"|"warn"|""
+    card     = Signal(str, bool)            # 隧道/服务卡片状态: (card_key, is_online)
+    monitor  = Signal(object)               # 右栏探测结果: (local_ports, ssh_proc_count, remote_tunnels)
+    finished = Signal(str, bool)            # 操作完成通知: (op_key, is_success)
+    result   = Signal(str, object)          # 业务数据回填: (op_key, payload_dict)
+```
 
-- 业务层(core) **不 import PySide**，只向调用方抛纯数据事件/回调。
-- services.py 是**唯一**起后台线程并转 Qt 信号的地方；UI 只订阅信号 + 调 service 方法。
-- 禁止跨线程/跨进程直接改 UI（用户硬约束）。完整契约见 `docs/UI_LAYERING.md`。
+### 2.3 工作线程模板
+* `_run_result_op(op, func, *args)`：适用于带进度/日志 `events` 回调的业务函数（`func(events=None, ...)`），执行完毕后 emit `result(op, payload)` 与 `finished(op, ok)`。
+* `_run_core_op(op, func, *args)`：适用于纯数据读取函数，自动包装为 `{"data": res, "err": ""}` 后 emit `result(op, payload)`。
 
-## 测试与安全边界
+### 2.4 Signal 连接与生命周期（页面销毁防护）
+* **长生命周期接收者（MainWindow 级别）**：如主日志区、底部状态栏，仅在 `MainWindow` 初始化时 connect 一次，避免页面反复重建导致槽函数叠加。
+* **短生命周期接收者（Page 级别）**：各页面在 `_build` 时 connect 自身所需的 `service.result` / `service.finished`，页面销毁时 Qt 会自动解除其槽绑定。
+* **`safe_emit` 防护**：页面自建信号向自身发送时，一律使用 `BasePage.safe_emit(sig, *args)`，自动捕获并忽略页面快速切换销毁时引发的 `RuntimeError: Internal C++ object already deleted`。
 
-- 默认 `python -m pytest tests/` 只跑**纯单元 294 例**（`-m "not gui"`）；
-  构造 MainWindow 的测试(`test_gui_ui.py` / `test_gui_smoke.py`)一律 `-m gui` 人工执行——
-  **绝不自动跑会触碰端口 3080 真实 dsh 的测试**(历史事故教训)。
-- 纯单元测试隔离手段: DSH_AIO_CONFIG 假配置 + DSH_HOME 假目录 + monkeypatch 子进程 +
-  service 通道拦截 + threading.Thread.start 硬拦截。
-- 凭据安全红线: 私钥/API key 只显示存在性与指纹/环境变量名, 绝不读写明文; 远程写操作一律确认。
+---
 
-## 历史（tkinter 时代, 已废弃）
+## 3. 数据域与模块映射
 
-- 旧设计: 零依赖(仅 stdlib) tkinter 主程序 + `mgmt_*.py` 独立 Toplevel 管理窗口 +
-  `core/data.py` 数据层 + "dsh 管理"菜单。
-- 已由 PySide6 主框架替代(`07b70fd`), 旧 tkinter 主程序归档 `legacy/dsh-console-aio-tkinter.py`;
-  迁移记录见 `docs/PYSIDE_MIGRATION.md` 与 `RELEASE_NOTES.md`。
+| 数据域 | core 业务模块 | UI 页面 / 承载 | 关键职责与安全红线 |
+|---|---|---|---|
+| **隧道管理** | `tunnel_mgr.py` + `tunnels.py` | 主文件 `TunnelsPage` | 纯 Python SSH 隧道管理，无 .ps1 依赖；PID 存盘防孤儿进程 |
+| **隧道方案规划** | `tunnel_planner.py` | `TunnelsPage` 规划器卡片 | 拓扑快照保存/切换，本地/远端端口冲突检测 |
+| **本机 dsh 操控** | `dshctl.py` | `pages_dsh.py` (DSH 管理) | 启停进程、一键更新 (git pull + clean + build)、版本比对 |
+| **环境与安装** | `env.py` | `pages_dsh.py` (页面内分步) | 工具链检查 (git/node/npm/pnpm)、一键全新安装、彻底卸载守卫 |
+| **总览概览** | `data.py` + `diagnostics.py` | 主文件 `OverviewPage` | 运行状态卡 + 数据域指标速览 + 部署列表 |
+| **会话与工作区** | `sessions.py` | `pages_sessions.py` | 会话分组、归档、恢复、彻底删除；**远程部署只读** |
+| **插件管理** | `plugins.py` | `pages_plugins.py` | cordis.yml 语法解析、patch 层启停、官方 CLI 安装；**远程只读** |
+| **Profile 管理** | `profiles.py` | `pages_profiles.py` | profile 列出、复制、删除 (web 主配置保护)；**远程只读** |
+| **模型用量与价格**| `data.py` + `cache.py` | `pages_usage.py` | session zstd 批量解压聚合、按天/模型趋势图、价格表持久化 |
+| **LLM 配置** | `data.py` | `pages_llm.py` | 默认模型切换、provider 浏览；**apiKeyEnv 仅读环境变量名** |
+| **SSH 密钥** | `keys.py` | `pages_keys.py` | 密钥生成、指纹计算、公钥查看；**私钥内容绝不读取** |
+| **备份与运维** | `ops.py` | `pages_ops.py` | `~/.dsh` 一键备份压缩包；**自动排除凭据文件** |
+| **部署管理** | `deployments.py` | `pages_deployments.py` | 多主机配置、SSH 免密探测、只读快照 |
+| **日志查看** | `logs.py` | `pages_logs.py` | dsh web 落盘日志实时 tail、着色与关键词过滤 |
+| **设置与诊断** | `config.py` + `diagnostics.py` | `pages_settings.py` | 端口/命名热重载、一键诊断报告生成、配置导入导出 |
+| **主题引擎** | `ui/theme.py` | `pages_theme.py` | TOKENS 全局色板、亚克力/明暗变体切换、实时 QSS 编译生成 |
+| **关于与更新** | `version.py` | `pages_version.py` | 控制台自身版本比对、Release 自动下载与自更新 |
+
+---
+
+## 4. 数据与配置存储
+
+| 配置文件 / 路径 | 定位与读取方式 | 安全与隔离规则 |
+|---|---|---|
+| `config.json` | 仓库根目录（打包后在 exe 旁） | **必须 gitignored**。统一通过 `core.config.default_config_path()` 获取绝对路径，支持 `DSH_AIO_CONFIG` 环境变量覆盖。 |
+| `~/.dsh/` | dsh 本体运行时主目录 | 存放 profiles、sessions、storages、settings.yaml 等，支持 `DSH_HOME` 环境变量覆盖。 |
+| `model_prices.json` | 软件运行目录（`config.json` 同级） | 自定义模型价格表持久化，统一通过 `core.data` 加载与保存。 |
+| `themes/*.json` | `themes/` 目录（gitignored） | 用户自定义保存的主题配色方案。 |
+| `tunnel-pids.json` | 软件运行目录（gitignored） | 正在运行的 SSH 隧道进程 PID 记录，用于退出或异常时的精准清理。 |
+
+---
+
+## 5. 测试与安全红线
+
+1. **端口 3080 安全红线**：
+   - 默认单元测试（`pytest tests/`）只跑纯单元测试层（`-m "not gui"`）。
+   - 绝不自动运行任何会触碰 3080 端口真实 dsh 实例的测试；GUI 构造测试仅供人工带 `-m gui` 显式执行。
+2. **Windows `os.kill` 陷阱防线**：
+   - Windows 下严禁使用 `os.kill(pid, 0)`（等同于广播 `CTRL_C_EVENT`，会直接杀死共享控制台的宿主 web 进程）；进程探活一律使用 `tasklist` CSV 或底层 Win32 API。
+3. **打包路径规则**：
+   - 打包（PyInstaller frozen）环境下，`__file__` 指向临时解压目录 `_MEIxxxxxx`。所有需要持久化落盘的文件（如 `config.json`、`model_prices.json`、日志等）**严禁**使用 `__file__` 相对路径推导，必须使用 `core.config.default_config_path()` 获取真实 exe 所在目录。
+4. **敏感信息保护**：
+   - 私钥、API Token 等敏感信息只做存在性检测，绝不读取明文、绝不写入日志、绝不上传诊断报告。
+
+---
+
+## 6. 历史归档索引
+
+* 阶段性 PySide6 页面迁移历史：`docs/archive/PYSIDE_MIGRATION.md`
+* 早期设计方案（ABC 方案与 v0.3 调研）：`docs/archive/PLANS.md`
+* 初始 UI 分层重构设计稿：`docs/archive/UI_LAYERING.md`
+* 上游 Harness ConPTY 信号 Bug 分析稿：`docs/archive/ISSUE_harness_os_kill_ctrlc.md`
+* 旧版个人运维指南：`docs/archive/个人使用指南.txt`

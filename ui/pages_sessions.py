@@ -10,18 +10,18 @@
 # P1 多栏展开: 分组|会话|会话详情 三栏(ModernList + three_split), 第三栏显示选中会话完整信息。
 
 import json
-import threading
 import time
 
+from core import cache as core_cache
 from core import data as dsh_data
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QMessageBox, QTextEdit,
     QScrollArea, QWidget)
 
 from ui.base import BasePage
-from ui.widgets import ModernList, card_wrap, three_split
+from ui.widgets import ModernList, RefreshIndicator, card_wrap, three_split
 
 
 def _human_size(n):
@@ -45,8 +45,7 @@ _REMOTE_READONLY_MSG = "远程部署下暂不支持写操作（远程只读）�
 
 
 class SessionPage(BasePage):
-    # 会话与工作区管理: BasePage 范式, app 为 MainWindow; 写操作经 service 信号桥。
-    _data = Signal(object, object, str)     # (ws, groups, err) 刷新读取(页面内后台线程)
+    # 会话与工作区管理: BasePage 范式, app 为 MainWindow; 全部操作经 service 信号桥。
 
     def __init__(self, app, parent=None):
         self._remote = None
@@ -58,9 +57,9 @@ class SessionPage(BasePage):
         self._sel_group = None
         self._sel_session = None    # 选中会话名(详情栏展示用)
         self._last_op_msg = None
-        self._pending = None   # 正在等待的 service op: "sessions-archive" / "sessions-delete"
+        self._busy = False
+        self._pending = None   # 正在等待的 service op: "sessions-read" / "sessions-archive" / "sessions-delete"
         super().__init__(app, parent)
-        self._data.connect(self._apply_data)
         self.app.service.result.connect(self._on_result)
         self.app.service.finished.connect(self._on_finished)
         self._refresh()
@@ -70,15 +69,19 @@ class SessionPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        # 状态文字在标题右侧(原底部状态条位置让给横向滚动条)
+        # 状态文字在标题右侧, 新增 RefreshIndicator 状态指示灯
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_row.addWidget(QLabel("会话与工作区管理", objectName="cardTitle"))
+        self._spinner = RefreshIndicator()
+        self._spinner.setToolTip("刷新状态: 绿=无变化 / 黄=数据有变化 / 红=获取错误")
+        title_row.addWidget(self._spinner)
+        title_row.addStretch(1)
         self._status_lbl = QLabel("就绪", objectName="monVal")
-        head = QHBoxLayout()
-        head.addWidget(QLabel("会话与工作区管理", objectName="cardTitle"))
-        head.addStretch(1)
-        head.addWidget(self._status_lbl)
-        root.addLayout(head)
-        hint = QLabel("会话数据存放在 ~/.dsh/sessions；归档只写 workspace.json，不移动数据。",
-                      objectName="cardHint")
+        title_row.addWidget(self._status_lbl)
+        root.addLayout(title_row)
+        hint = QLabel("会话数据存放在 ~/.dsh/sessions；归档只写 workspace.json，不移动数据；"
+                      "进页自动取缓存+按需刷新。", objectName="cardHint")
         hint.setWordWrap(True)
         root.addWidget(hint)
 
@@ -159,34 +162,57 @@ class SessionPage(BasePage):
     # ---- service 信号槽(接收者=本页, 销毁自动断开) ----
     def _on_result(self, op, payload):
         # result(op, payload) 按 op 分派; 其他页面的 op 直接忽略。
-        if op == "sessions-archive":
+        if op == "sessions-read":
+            self._busy = False
+            self._set_btns(True)
+            self._spinner.set_loading(False)
+            err = payload.get("err") or ""
+            data = payload.get("data")
+            if err or not isinstance(data, dict):
+                self._apply_data({}, [], str(err or "读取失败"))
+                self._spinner.set_status("err")
+                self._spinner.setToolTip("数据获取错误: " + str(err))
+                return
+            changed = core_cache.data_changed("sessions", data)
+            core_cache.write_cache("sessions", data)
+            self._apply_data(data.get("ws") or {}, data.get("groups") or [], "")
+            if changed:
+                self._spinner.set_status("warn")
+                self._spinner.setToolTip("数据有变化(已刷新)")
+            else:
+                self._spinner.set_status("ok")
+                self._spinner.setToolTip("无变化(缓存已是最新)")
+        elif op == "sessions-archive":
             self._after_op(payload)
         elif op == "sessions-delete":
             self._after_op(payload)
 
     def _on_finished(self, op, ok):
-        # 兜底: _run_result_op 契约保证 result+finished 成对到达, 正常路径 result 槽
-        # 已收尾; 若 result 槽漏执行导致 busy 悬挂, 在这里解除按钮禁用。
         if op == self._pending:
             self._pending = None
             self._set_btns(True)
 
-    # ---- 刷新(纯读, 页面内后台线程 + safe_emit) ----
-    def _refresh(self):
+    # ---- 刷新(先读缓存, mtime 变化或强制时后台拉取) ----
+    def _refresh(self, force=False):
+        if self._busy:
+            return
+        src_mtime = dsh_data.sessions_source_mtime(self._remote)
+        cache_data, _ = core_cache.read_cache("sessions")
+        if not force and cache_data is not None and not core_cache.needs_refresh("sessions", src_mtime):
+            # 缓存已是最新: 直接呈现, 标记"无变化"(绿)
+            ws = cache_data.get("ws") or {}
+            groups = cache_data.get("groups") or []
+            self._apply_data(ws, groups, "")
+            self._spinner.set_status("ok")
+            self._spinner.setToolTip("无变化(缓存已是最新)")
+            return
+
+        self._busy = True
+        self._pending = "sessions-read"
         self._set_status("正在读取会话数据...")
         self._set_btns(False)
-
-        def worker():
-            err = None
-            ws = groups = None
-            try:
-                ws = dsh_data.read_workspace(remote=self._remote)
-                groups = dsh_data.list_sessions(remote=self._remote)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._data, ws or {}, groups or [], err)
-
-        threading.Thread(target=worker, daemon=True).start()
+        self._spinner.set_loading(True)
+        self.app.service.read_sessions(self._remote)
 
     def _apply_data(self, ws, groups, err):
         self._set_btns(True)
@@ -205,7 +231,7 @@ class SessionPage(BasePage):
             self._last_op_msg = None
         else:
             total = sum(g.get("count") or 0 for g in groups)
-            self._set_status("已刷新: %d 个分组, %d 个会话" % (len(groups), total))
+            self._set_status("已就绪: %d 个分组, %d 个会话" % (len(groups), total))
 
     def _fill_groups(self, groups):
         self._group_map = {}
@@ -343,7 +369,7 @@ class SessionPage(BasePage):
             return
         self.app.loge("[会话管理] " + msg, "ok")
         self._last_op_msg = msg + "（已刷新）"
-        self._refresh()
+        self._refresh(force=True)
 
     def _set_btns(self, on):
         for b in (self._btn_refresh, self._btn_archive, self._btn_delete):

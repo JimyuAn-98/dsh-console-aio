@@ -38,6 +38,19 @@ def tmp_path():
     shutil.rmtree(d, ignore_errors=True)
 
 
+@pytest.fixture(autouse=True)
+def isolate_real_config_and_home(tmp_path, monkeypatch):
+    """全局安全防护: 强制将 DSH_AIO_CONFIG 与 DSH_HOME 隔离开真实用户环境。"""
+    safe_dir = tmp_path / "_safety"
+    safe_dir.mkdir(parents=True, exist_ok=True)
+    fake_cfg = safe_dir / "config.json"
+    fake_cfg.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("DSH_AIO_CONFIG", str(fake_cfg))
+    fake_home = safe_dir / "dsh_home"
+    fake_home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("DSH_HOME", str(fake_home))
+
+
 @pytest.fixture
 def tmp_base(tmp_path):
     """提供一个临时目录作为 tunnel_mgr 的 base_dir（含空 config）。"""

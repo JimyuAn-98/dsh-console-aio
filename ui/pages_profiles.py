@@ -10,15 +10,16 @@
 
 import json
 import os
-import threading
 
+from core import cache as core_cache
 from core import data as dsh_data
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem,
     QPushButton, QHeaderView, QMessageBox, QInputDialog)
 
 from ui.base import BasePage
+from ui.widgets import RefreshIndicator
 
 # 仓库根目录(本文件位于 ui/ 下, 上溯一级), config.json 存放于此
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,8 +41,7 @@ def _load_dash_cmd():
 
 
 class ProfilePage(BasePage):
-    # Profile 管理: BasePage 范式, app 为 MainWindow; 写操作业务经 service 信号桥。
-    _data = Signal(object, str)         # (profiles, err) 列表读取线程回包
+    # Profile 管理: BasePage 范式, app 为 MainWindow; 全部业务经 service 信号桥。
 
     def __init__(self, app, parent=None):
         self._remote = None
@@ -49,9 +49,9 @@ class ProfilePage(BasePage):
         if _dep and _dep.get("host"):
             self._remote = dsh_data.DshRemote(_dep)
         self._is_web_current = "web" in _load_dash_cmd()
-        self._pending = None   # 正在等待的 service op: "profile-copy" / "profile-delete"
+        self._busy = False
+        self._pending = None   # 正在等待的 service op: "profiles-list" / "profile-copy" / "profile-delete"
         super().__init__(app, parent)
-        self._data.connect(self._apply_data)
         self.app.service.result.connect(self._on_result)
         self.app.service.finished.connect(self._on_finished)
         self._refresh()
@@ -61,14 +61,19 @@ class ProfilePage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_row.addWidget(QLabel("Profile 管理", objectName="cardTitle"))
+        self._spinner = RefreshIndicator()
+        self._spinner.setToolTip("刷新状态: 绿=无变化 / 黄=数据有变化 / 红=获取错误")
+        title_row.addWidget(self._spinner)
+        title_row.addStretch(1)
         self._status_lbl = QLabel("就绪", objectName="monVal")
-        head = QHBoxLayout()
-        head.addWidget(QLabel("Profile 管理", objectName="cardTitle"))
-        head.addStretch(1)
-        head.addWidget(self._status_lbl)
-        root.addLayout(head)
+        title_row.addWidget(self._status_lbl)
+        root.addLayout(title_row)
         hint = QLabel("dsh 用 dsh --profile <名> 启动；dsh web 等价 dsh --profile web。"
-                      "web 是默认 Profile，不可删除。", objectName="cardHint")
+                      "web 是默认 Profile，不可删除；进页自动取缓存+按需刷新。", objectName="cardHint")
+        hint.setWordWrap(True)
         root.addWidget(hint)
 
         self._table = self._make_table(
@@ -97,7 +102,6 @@ class ProfilePage(BasePage):
         btns.addStretch(1)
         root.addLayout(btns)
 
-
     def _make_table(self, headers, anchors, widths, stretch_col):
         t = QTableWidget(0, len(headers))
         t.setHorizontalHeaderLabels(headers)
@@ -114,41 +118,66 @@ class ProfilePage(BasePage):
         t.setSelectionMode(QTableWidget.SingleSelection)
         return t
 
-    # ---- 列表读取(纯读暂留页面直连: 后台线程 + safe_emit 回主线程) ----
-    def _refresh(self):
+    # ---- 列表读取(先读缓存, mtime 变化或强制时后台拉取) ----
+    def _refresh(self, force=False):
+        if self._busy:
+            return
+        src_mtime = dsh_data.profiles_source_mtime(self._remote)
+        cache_data, _ = core_cache.read_cache("profiles")
+        if not force and cache_data is not None and not core_cache.needs_refresh("profiles", src_mtime):
+            # 缓存已是最新: 直接用缓存呈现, 标记"无变化"(绿)
+            self._apply_data(cache_data, "")
+            self._spinner.set_status("ok")
+            self._spinner.setToolTip("无变化(缓存已是最新)")
+            return
+
+        self._busy = True
+        self._pending = "profiles-list"
         self._set_status("正在读取 Profile 列表...")
         self._set_btns(False)
-
-        def worker():
-            err = None
-            profiles = None
-            try:
-                profiles = dsh_data.list_profiles(remote=self._remote)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._data, profiles or [], err)
-
-        threading.Thread(target=worker, daemon=True).start()
+        self._spinner.set_loading(True)
+        self.app.service.list_profiles(self._remote)
 
     def _apply_data(self, profiles, err):
         self._set_btns(True)
+        profiles = profiles or []
         self._table.setRowCount(len(profiles))
         for r, p in enumerate(profiles):
             cur = "✓" if (self._is_web_current and p["name"] == "web") else ""
             self._table.setItem(r, 0, QTableWidgetItem(p["name"]))
-            self._table.setItem(r, 1, QTableWidgetItem("✓" if p["cordis"] else "—"))
-            self._table.setItem(r, 2, QTableWidgetItem("✓" if p["patch"] else "—"))
-            self._table.setItem(r, 3, QTableWidgetItem("✓" if p["pkg"] else "—"))
+            self._table.setItem(r, 1, QTableWidgetItem("✓" if p.get("cordis") else "—"))
+            self._table.setItem(r, 2, QTableWidgetItem("✓" if p.get("patch") else "—"))
+            self._table.setItem(r, 3, QTableWidgetItem("✓" if p.get("pkg") else "—"))
             self._table.setItem(r, 4, QTableWidgetItem(cur))
         if err:
             self._set_status("读取失败: " + err)
         else:
-            self._set_status("已加载 %d 个 Profile" % len(profiles))
+            self._set_status("已就绪: %d 个 Profile" % len(profiles))
 
     # ---- service 信号槽(接收者=本页, 销毁自动断开) ----
     def _on_result(self, op, payload):
         # result(op, payload) 按 op key 分派; 其他页面的 op 直接忽略。
-        if op == "profile-copy":
+        if op == "profiles-list":
+            self._busy = False
+            self._set_btns(True)
+            self._spinner.set_loading(False)
+            err = payload.get("err") or ""
+            data = payload.get("data")
+            if err or not isinstance(data, list):
+                self._apply_data([], str(err or "读取失败"))
+                self._spinner.set_status("err")
+                self._spinner.setToolTip("数据获取错误: " + str(err))
+                return
+            changed = core_cache.data_changed("profiles", data)
+            core_cache.write_cache("profiles", data)
+            self._apply_data(data, "")
+            if changed:
+                self._spinner.set_status("warn")
+                self._spinner.setToolTip("数据有变化(已刷新)")
+            else:
+                self._spinner.set_status("ok")
+                self._spinner.setToolTip("无变化(缓存已是最新)")
+        elif op == "profile-copy":
             self._pending = None
             self._after_op("复制 Profile", payload)
         elif op == "profile-delete":
@@ -167,7 +196,7 @@ class ProfilePage(BasePage):
         msg = payload.get("msg", "")
         err = payload.get("err", "")
         self._set_btns(True)
-        self._refresh()
+        self._refresh(force=True)
         if err:
             QMessageBox.critical(self, title, err)
             self._set_status("操作失败: " + err)

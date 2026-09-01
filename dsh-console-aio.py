@@ -22,6 +22,7 @@ from PySide6.QtCore import Qt, Signal, QObject, QTimer, QEvent, QPoint, QPropert
 from PySide6.QtGui import (QTextCursor, QColor, QCursor, QIcon, QPixmap,
                            QShortcut, QKeySequence)
 
+from core import cache as core_cache
 from core import data as dsh_data
 from core import config as dsh_config
 from core import tunnel_planner as dsh_planner
@@ -30,7 +31,7 @@ from ui import theme as dsh_theme
 from ui.palette import CommandPalette
 from ui.theme import build_qss
 from ui import win32_frame as wframe
-from ui.widgets import ModernList, card_wrap
+from ui.widgets import ModernList, RefreshIndicator, card_wrap
 
 # 白色齿轮 SVG(内嵌, 无需打包资源文件; QSvgRenderer 渲染为 QIcon)
 _GEAR_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e6e6e6">'
@@ -240,13 +241,12 @@ def _ov_size(n):
 
 class OverviewPage(BasePage):
     # 部署总览: 运行状态卡 + 数据速览 + 部署列表 + 隧道速览。
-    # 数据经页面级 Signal + safe_emit 回主线程(修复旧实现经 bridge 发进底部日志区的 bug);
-    # 全部纯读: 本机文件/端口探测 + 远程快照(DshRemote 只读) + 反向隧道 ssh 查监听。
-    _data = Signal(object)   # worker 结果 payload(dict)
+    # 数据经 service 信号桥调度回主线程; 接入 core/cache 缓存, 进页秒开+按需刷新。
 
     def __init__(self, app, parent=None):
+        self._busy = False
         super().__init__(app, parent)
-        self._data.connect(self._apply_data)
+        self.app.service.result.connect(self._on_result)
         self.refresh()
 
     def _build(self):
@@ -255,15 +255,19 @@ class OverviewPage(BasePage):
         root.setSpacing(8)
 
         head = QHBoxLayout()
+        head.setSpacing(8)
         head.addWidget(QLabel("部署总览", objectName="cardTitle"))
+        self._spinner = RefreshIndicator()
+        self._spinner.setToolTip("刷新状态: 绿=无变化 / 黄=数据有变化 / 红=获取错误")
+        head.addWidget(self._spinner)
         head.addStretch(1)
         self._status_lbl = QLabel("就绪", objectName="monVal")
         head.addWidget(self._status_lbl)
         refresh = QPushButton("刷新", objectName="primary")
-        refresh.clicked.connect(self.refresh)
+        refresh.clicked.connect(lambda: self.refresh(force=True))
         head.addWidget(refresh)
         root.addLayout(head)
-        root.addWidget(QLabel("本机与远程部署的实时状态、数据速览与隧道探测(纯读获取)。",
+        root.addWidget(QLabel("本机与远程部署的实时状态、数据速览与隧道探测(纯读获取, 进页自动取缓存)。",
                               objectName="cardHint"))
 
         # 运行状态卡: dsh web 探测 + 本体版本
@@ -306,101 +310,47 @@ class OverviewPage(BasePage):
         self._tunnel_lbl.setWordWrap(True)
         root.addWidget(card_wrap("隧道状态", self._tunnel_lbl))
 
-    def refresh(self):
-        self._set_status("正在读取总览数据...")
+    # ── 读取(先读缓存, mtime 变化或强制时后台拉取) ──
+    def refresh(self, force=False):
+        if self._busy and not force:
+            return
         cfg = CONFIG
+        src_mtime = dsh_data.overview_source_mtime(cfg)
+        cache_data, _ = core_cache.read_cache("overview")
+        if not force and cache_data is not None and not core_cache.needs_refresh("overview", src_mtime):
+            # 缓存已是最新: 秒开直接呈现, 标绿
+            self._apply_data(cache_data)
+            self._spinner.set_status("ok")
+            self._spinner.setToolTip("无变化(缓存已是最新)")
+            return
+
+        self._busy = True
+        self._set_status("正在读取总览数据...")
+        self._spinner.set_loading(True)
         depls = dsh_data.load_deployments()
         smoke = bool(getattr(self.app, "smoke", False))
+        self.app.service.read_overview(cfg, depls, smoke=smoke, op="overview-read")
 
-        def worker():
-            payload = {"dash_port": int(cfg.get("dash_port") or 3080),
-                       "deploys": [], "probe": {}, "remote_probe": None,
-                       "local_ports": cfg.get("local_ports", []),
-                       "remote_tunnels": cfg.get("remote_tunnels", []),
-                       "local_name": cfg.get("local_name") or "本机",
-                       "ssh_name": cfg.get("ssh_name") or "公网中转"}
-            # dsh web 探测 + 本体版本(仓库 package.json, 仅本机)
-            try:
-                payload["web_ok"], payload["web_ms"] = \
-                    self.app.service.ctl.probe("127.0.0.1", payload["dash_port"])
-            except Exception:
-                payload["web_ok"], payload["web_ms"] = False, -1
-            try:
-                with open(os.path.join(cfg.get("dash_repo") or "", "package.json"),
-                          encoding="utf-8") as f:
-                    payload["dsh_version"] = (json.load(f) or {}).get("version")
-            except Exception:
-                payload["dsh_version"] = None
-
-            # 部署快照: 本机必做; 远程只读(smoke/占位配置跳过)
-            def snap_for(dep, is_local):
-                if not is_local and (smoke or not dep.get("host")
-                                     or str(dep.get("host")).startswith("YOUR_")):
-                    return {"ok": False, "error": "未配置/演示模式"}
-                try:
-                    return dsh_data.deployment_snapshot(
-                        dsh_data.DshRemote(None if is_local else dep))
-                except Exception as e:
-                    return {"ok": False, "error": str(e)}
-
-            payload["deploys"].append({"dep": {"name": payload["local_name"]},
-                                       "snap": snap_for(None, True), "local": True})
-            for d in depls:
-                payload["deploys"].append({"dep": d, "snap": snap_for(d, False),
-                                           "local": False})
-
-            # 数据速览(纯读, 单项失败置 None 不拖垮整页)
-            try:
-                u = dsh_data.usage_stats()
-                total, priced, calls = 0.0, False, 0
-                for name, m in (u.get("models") or {}).items():
-                    if not isinstance(m, dict):
-                        continue
-                    calls += int(m.get("calls") or 0)
-                    c = dsh_data.estimate_cost(name, int(m.get("input") or 0),
-                                               int(m.get("output") or 0),
-                                               int(m.get("cache") or 0))
-                    if c is not None:
-                        total += c
-                        priced = True
-                payload["usage"] = {"ok": bool(u.get("ok")), "models": len(u.get("models") or {}),
-                                    "calls": calls,
-                                    "cost": ("%.2f 元" % total) if priced else "未定价",
-                                    "error": u.get("error")}
-            except Exception as e:
-                payload["usage"] = {"ok": False, "error": str(e)}
-            try:
-                payload["tasks"] = len(((dsh_data.read_taskboard().get("ledger") or {})
-                                        .get("tasks") or []))
-            except Exception:
-                payload["tasks"] = None
-            try:
-                groups = dsh_data.list_sessions()
-                payload["sessions"] = {"groups": len(groups),
-                                       "count": sum(g.get("count") or 0 for g in groups),
-                                       "bytes": sum(g.get("bytes") or 0 for g in groups)}
-            except Exception:
-                payload["sessions"] = None
-            try:
-                payload["archived"] = len(dsh_data.read_workspace()
-                                          .get("archivedSessionIds") or [])
-            except Exception:
-                payload["archived"] = None
-
-            # 隧道探测: 本机端口本机探; 反向隧道经 ssh 查公网监听(只读)
-            for port, label, note in payload["local_ports"]:
-                try:
-                    payload["probe"][("L", int(port))] = \
-                        self.app.service.ctl.probe("127.0.0.1", int(port))[0]
-                except Exception:
-                    payload["probe"][("L", int(port))] = False
-            try:
-                payload["remote_probe"] = self.app.service.ctl.probe_remote_tunnels()
-            except Exception:
-                payload["remote_probe"] = None
-            self.safe_emit(self._data, payload)
-
-        threading.Thread(target=worker, daemon=True).start()
+    def _on_result(self, op, payload):
+        if op == "overview-read":
+            self._busy = False
+            self._spinner.set_loading(False)
+            err = payload.get("err")
+            data = payload.get("data")
+            if err or not isinstance(data, dict):
+                self._set_status("总览读取失败: " + str(err or "未知错误"))
+                self._spinner.set_status("err")
+                self._spinner.setToolTip("数据获取错误: " + str(err or "未知错误"))
+                return
+            changed = core_cache.data_changed("overview", data)
+            core_cache.write_cache("overview", data)
+            self._apply_data(data)
+            if changed:
+                self._spinner.set_status("warn")
+                self._spinner.setToolTip("数据有变化(已刷新)")
+            else:
+                self._spinner.set_status("ok")
+                self._spinner.setToolTip("无变化(缓存已是最新)")
 
     def _apply_data(self, p):
         # 运行状态卡

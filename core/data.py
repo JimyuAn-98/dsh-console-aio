@@ -9,6 +9,7 @@ import re
 import sys
 import io
 import json
+import time
 import zipfile
 import datetime
 import shutil
@@ -1013,3 +1014,239 @@ def deployment_snapshot(remote):
     except Exception as e:
         snap["error"] = str(e)
     return snap
+
+
+# ── 各数据域源时间戳探测(用于缓存比对) ────────────────
+def sessions_source_mtime(remote=None):
+    # 会话数据源时间戳(秒): sessions 目录下所有 session.jsonl.zstd 与 workspace.json 的最新 mtime。
+    if remote and remote.is_remote:
+        return 0
+    latest = usage_source_mtime()
+    wp = os.path.join(dsh_home(), "storages", "workspace.json")
+    if os.path.isfile(wp):
+        try:
+            mt = os.path.getmtime(wp)
+            if mt > latest:
+                latest = mt
+        except OSError:
+            pass
+    return latest
+
+
+def plugins_source_mtime(profile, remote=None):
+    # 插件配置数据源时间戳(秒): 该 profile 下 cordis.yml / cordis.patch.yml / package.json 的最新 mtime。
+    if remote and remote.is_remote:
+        return 0
+    pdir = os.path.join(dsh_home(), "profiles", profile or "web")
+    latest = 0
+    if os.path.isdir(pdir):
+        for fn in ("cordis.yml", "cordis.patch.yml", "package.json"):
+            fp = os.path.join(pdir, fn)
+            if os.path.isfile(fp):
+                try:
+                    mt = os.path.getmtime(fp)
+                    if mt > latest:
+                        latest = mt
+                except OSError:
+                    pass
+    return latest
+
+
+def taskboard_source_mtime(remote=None):
+    # 任务看板数据源时间戳(秒): ledger-v2.json 与 scheduler-v2.json 的最新 mtime。
+    if remote and remote.is_remote:
+        return 0
+    tdir = os.path.join(dsh_home(), "task-board")
+    latest = 0
+    if os.path.isdir(tdir):
+        for fn in ("ledger-v2.json", "scheduler-v2.json"):
+            fp = os.path.join(tdir, fn)
+            if os.path.isfile(fp):
+                try:
+                    mt = os.path.getmtime(fp)
+                    if mt > latest:
+                        latest = mt
+                except OSError:
+                    pass
+    return latest
+
+
+def agent_presets_source_mtime(remote=None):
+    # Agent 模式数据源时间戳(秒): .agent-presets 各子目录 preset.yml 的最新 mtime。
+    if remote and remote.is_remote:
+        return 0
+    base = os.path.join(dsh_home(), ".agent-presets")
+    latest = 0
+    if os.path.isdir(base):
+        for d in os.listdir(base):
+            fp = os.path.join(base, d, "preset.yml")
+            if os.path.isfile(fp):
+                try:
+                    mt = os.path.getmtime(fp)
+                    if mt > latest:
+                        latest = mt
+                except OSError:
+                    pass
+    return latest
+
+
+def profiles_source_mtime(remote=None):
+    # Profile 列表数据源时间戳(秒): profiles 目录及其子目录配置文件的最新 mtime。
+    if remote and remote.is_remote:
+        return 0
+    base = os.path.join(dsh_home(), "profiles")
+    latest = 0
+    if os.path.isdir(base):
+        try:
+            latest = max(latest, os.path.getmtime(base))
+        except OSError:
+            pass
+        for d in os.listdir(base):
+            dp = os.path.join(base, d)
+            if os.path.isdir(dp):
+                try:
+                    latest = max(latest, os.path.getmtime(dp))
+                except OSError:
+                    pass
+                for fn in ("cordis.yml", "cordis.patch.yml", "package.json"):
+                    fp = os.path.join(dp, fn)
+                    if os.path.isfile(fp):
+                        try:
+                            latest = max(latest, os.path.getmtime(fp))
+                        except OSError:
+                            pass
+    return latest
+
+
+def read_sessions_data(remote=None):
+    # 组合读取会话域数据(工作区 + 会话分组列表), 供 service 一次拉取。
+    _r = remote if remote is not None else DshRemote(None)
+    ws = read_workspace(remote=_r)
+    groups = list_sessions(remote=_r)
+    return {"ws": ws or {}, "groups": groups or []}
+
+
+def collect_overview_data(cfg, depls, smoke=False):
+    # 部署总览全量纯数据获取(零 Qt, 纯 Python 纯读)。
+    import socket
+    port = int(cfg.get("dash_port") or 3080)
+    payload = {
+        "dash_port": port,
+        "deploys": [],
+        "local_ports": cfg.get("local_ports", []),
+        "remote_tunnels": cfg.get("remote_tunnels", []),
+        "local_name": cfg.get("local_name") or "本机",
+        "ssh_name": cfg.get("ssh_name") or "公网中转",
+    }
+    # dsh web 探测(纯 socket 连接探活与计时)
+    web_ok, web_ms = False, -1
+    t0 = time.time()
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.8):
+            web_ok = True
+            web_ms = int((time.time() - t0) * 1000)
+    except OSError:
+        web_ok, web_ms = False, -1
+    payload["web_ok"] = web_ok
+    payload["web_ms"] = web_ms
+
+    # 本机 dsh 版本(dash_repo/package.json)
+    try:
+        with open(os.path.join(cfg.get("dash_repo") or "", "package.json"),
+                  encoding="utf-8") as f:
+            payload["dsh_version"] = (json.load(f) or {}).get("version")
+    except Exception:
+        payload["dsh_version"] = None
+
+    # 部署快照: 本机必做; 远程只读(smoke/占位跳过)
+    def snap_for(dep, is_local):
+        if not is_local and (smoke or not dep.get("host")
+                             or str(dep.get("host")).startswith("YOUR_")):
+            return {"ok": False, "error": "未配置/演示模式"}
+        try:
+            return deployment_snapshot(DshRemote(None if is_local else dep))
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    payload["deploys"].append({
+        "dep": {"name": payload["local_name"]},
+        "snap": snap_for(None, True),
+        "local": True,
+    })
+    for d in depls:
+        payload["deploys"].append({
+            "dep": d,
+            "snap": snap_for(d, False),
+            "local": False,
+        })
+
+    # 数据速览
+    try:
+        u = usage_stats()
+        total, priced, calls = 0.0, False, 0
+        for name, m in (u.get("models") or {}).items():
+            if not isinstance(m, dict):
+                continue
+            calls += int(m.get("calls") or 0)
+            c = estimate_cost(name, int(m.get("input") or 0),
+                              int(m.get("output") or 0),
+                              int(m.get("cache") or 0))
+            if c is not None:
+                total += c
+                priced = True
+        payload["usage"] = {
+            "ok": bool(u.get("ok")),
+            "models": len(u.get("models") or {}),
+            "calls": calls,
+            "cost": ("%.2f 元" % total) if priced else "未定价",
+            "error": u.get("error"),
+        }
+    except Exception as e:
+        payload["usage"] = {"ok": False, "error": str(e)}
+
+    try:
+        payload["tasks"] = len(((read_taskboard().get("ledger") or {}).get("tasks") or []))
+    except Exception:
+        payload["tasks"] = None
+
+    try:
+        groups = list_sessions()
+        payload["sessions"] = {
+            "groups": len(groups),
+            "count": sum(g.get("count") or 0 for g in groups),
+            "bytes": sum(g.get("bytes") or 0 for g in groups),
+        }
+    except Exception:
+        payload["sessions"] = None
+
+    try:
+        profs = list_profiles()
+        payload["profiles"] = len(profs)
+    except Exception:
+        payload["profiles"] = None
+
+    try:
+        presets = list_agent_presets()
+        payload["presets"] = len(presets)
+    except Exception:
+        payload["presets"] = None
+
+    return payload
+
+
+def overview_source_mtime(cfg=None):
+    # 部署总览数据源时间戳: 取会话、任务板、profiles 以及 package.json 的最大 mtime
+    times = [
+        sessions_source_mtime(),
+        taskboard_source_mtime(),
+        profiles_source_mtime(),
+        agent_presets_source_mtime(),
+    ]
+    if isinstance(cfg, dict) and cfg.get("dash_repo"):
+        pkg = os.path.join(cfg["dash_repo"], "package.json")
+        try:
+            if os.path.isfile(pkg):
+                times.append(os.path.getmtime(pkg))
+        except OSError:
+            pass
+    return max(times) if times else 0.0

@@ -35,8 +35,8 @@ ui/                 前端页面包（pages_*.py: 各功能页含 设置/主题/
 app/                信号桥层（services.py: DshService, 唯一起后台线程并转 Qt 信号）
 tools/              工具（dump_ui.py 离屏渲染 dump; preview_theme.py 主题配色预览截图）
 tests/              pytest 测试（纯单元默认跑; 构造 MainWindow 的测试须 -m gui 人工）
-docs/               文档（ROADMAP.md 路线 + ARCHITECTURE.md 架构 + UI_LAYERING.md 分层契约 +
-                    TESTING.md + BUGS.md 问题清单 + PLANS.md 历史归档 + VISION 愿景探索）
+docs/               文档（ARCHITECTURE.md 架构唯一权威 + ROADMAP.md 路线 +
+                    TESTING.md 测试 + BUGS.md 问题清单 + plans/ 计划沉淀 + archive/ 历史归档 + VISION 愿景探索）
 installer/          Inno Setup 安装脚本(installer.iss) + 语言文件
 legacy/             旧 .ps1 / 旧 tkinter 主程序（只读历史参考，不再调用）
 .agents/notes/      Agent Note 决策记录（见 .agents/notes/README.md）
@@ -53,14 +53,23 @@ build_win.bat       一键打包: PyInstaller onefile exe + Inno Setup 安装包
 app/services.py 信号桥（唯一线程出口，信号-槽硬约束）→ ui/ 页面 + 主程序（只展示 + 订阅信号 + 调 service）。
 ui/ 包每页面一个 pages_*.py，继承 BasePage(app)，左导航路由注册在 NAV_ITEMS/_show_page。
 
-## 命令
+## 运行环境与命令
 
-    python -m py_compile dsh-console-aio.py core/*.py ui/*.py app/*.py tests/*.py   # 编译检查（每次改动必跑）
-    python dsh-console-aio.py                                # 运行 GUI
-    git diff --cached --check                                   # 提交前检查（文件尾换行等）
-    git push origin HEAD                                        # 推送（分支 main）
-build_win.bat                                                # 一键打包: PyInstaller onefile exe + Inno Setup 安装包(distsetup.exe)
-installer/installer.iss                                      # Inno Setup 安装脚本(版本号在 #define MyAppVersion)
+- **Python 环境**：通过 conda 托管，绝对路径为 `C:\Users\1\.conda\envs\console\python.exe`（已装好 PySide6 / pytest 等全套依赖）。
+
+```bash
+# 编译检查（每次改动必跑）
+python -m compileall -q dsh-console-aio.py core ui app tests
+
+# 纯单元测试（默认不跑 GUI 窗口）
+python -m pytest tests/ -q
+
+# 运行 GUI
+python dsh-console-aio.py
+
+# 一键打包（PyInstaller onefile exe + Inno Setup 安装包）
+build_win.bat
+```
 
 文档约定：HANDOFF.md **仅在用户要求交接时更新**（平时不维护，不随每次改动刷新）。
 
@@ -102,7 +111,8 @@ installer/installer.iss                                      # Inno Setup 安装
 ## 文档
 
 - 功能/方案变更：同步更新 docs/ROADMAP.md（路线与状态）与 RELEASE_NOTES.md；README 中英文同步。
-  历史方案归档进 docs/PLANS.md，已知问题进 docs/BUGS.md。
+  历史方案归档进 docs/archive/，已知问题进 docs/BUGS.md。
+- 实施方案与计划：每次计划文件统一保存至 `docs/plans/YYYYMMDD-主题-vX.md` 沉淀归档。
 - 关键决策（为什么 + 放弃了什么）：写 .agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic.md，格式见 .agents/notes/README.md。
 - 已归档的 note 视为冻结：不编辑、不作为当前权威。
 

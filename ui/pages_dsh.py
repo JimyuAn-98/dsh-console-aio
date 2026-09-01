@@ -12,9 +12,8 @@
 
 import json
 import os
-import threading
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QMessageBox,
@@ -70,14 +69,7 @@ OPS = {
 
 class DshManagePage(BasePage):
     # DSH 管理: BasePage 范式, app 为 MainWindow。仅本机操作; 更新有确认, 无远程写。
-    _tags_done = Signal(list, str)     # (tag 名称列表, 错误文案) 后台线程 -> UI
-    _env_done = Signal(dict)           # 工具版本 dict -> UI(填环境检查表)
-    _install_step = Signal(int, str)   # 安装进度 (n, 文案)
-    _install_line = Signal(str)        # 安装流式日志行
-    _install_done = Signal(bool, str)  # (是否成功, 结果文案)
-    _uninstall_step = Signal(int, str)  # 卸载进度 (n, 文案)
-    _uninstall_line = Signal(str)       # 卸载流式日志行
-    _uninstall_done = Signal(bool, str)  # (是否成功, 结果文案)
+    # 全部后台任务经 service 信号桥分发(dshctl/env/tags)。
 
     def __init__(self, app, parent=None):
         self._cards = {}               # key -> 状态圆点(仅 dsh-web 有)
@@ -86,17 +78,34 @@ class DshManagePage(BasePage):
         self._uninst_running = False
         super().__init__(app, parent)
         self.app.service.card.connect(self._apply_card)
-        self._tags_done.connect(self._on_tags)
-        self._env_done.connect(self._apply_env)
-        self._install_step.connect(self._on_install_step)
-        self._install_line.connect(self._on_install_line)
-        self._install_done.connect(self._on_install_done)
-        self._uninstall_step.connect(self._on_uninstall_step)
-        self._uninstall_line.connect(self._on_uninstall_line)
-        self._uninstall_done.connect(self._on_uninstall_done)
+        self.app.service.log.connect(self._on_service_log)
+        self.app.service.step.connect(self._on_service_step)
+        self.app.service.result.connect(self._on_result)
         for key, on in self.app._card_state.items():
             self._set_card(key, on)
         self._fetch_tags()
+
+    def _on_service_log(self, text, _tag=""):
+        if self._inst_running:
+            self._on_install_line(text)
+        if self._uninst_running:
+            self._on_uninstall_line(text)
+
+    def _on_service_step(self, step, text):
+        if self._inst_running:
+            self._on_install_step(step, text)
+        if self._uninst_running:
+            self._on_uninstall_step(step, text)
+
+    def _on_result(self, op, payload):
+        if op == "dsh-tool-versions":
+            self._apply_env(payload.get("data") or {})
+        elif op == "dsh-tags":
+            self._on_tags(payload.get("data") or [], payload.get("err", ""))
+        elif op == "dsh-install":
+            self._on_install_done(not payload.get("err"), payload.get("err") or payload.get("msg", ""))
+        elif op == "dsh-uninstall":
+            self._on_uninstall_done(not payload.get("err"), payload.get("err") or payload.get("msg", ""))
 
     def _build(self):
         root = QVBoxLayout(self)
@@ -254,18 +263,11 @@ class DshManagePage(BasePage):
         return card
 
     def _env_refresh(self):
-        # 后台线程顺序探测版本(core, 纯读), 结果经信号回主线程填表
+        # 经 service 信号桥探测工具链版本(纯读)
         for key, (ver_item, st_item) in self.env_rows.items():
             ver_item.setText("...")
             st_item.setText("")
-        def worker():
-            try:
-                res = core_env.tool_versions(TOOLS)
-            except Exception as e:
-                res = {}
-                self.app.loge("[环境] 版本探测失败: %s" % e, "err")
-            self.safe_emit(self._env_done, res)
-        threading.Thread(target=worker, daemon=True).start()
+        self.app.service.check_tool_versions(TOOLS, op="dsh-tool-versions")
 
     def _apply_env(self, res):
         # 语义色逐帧读 TOKENS(明/暗变体实时自适应, 不硬编码 Qt.black/绿, 否则暗色下版本黑字看不清)
@@ -388,18 +390,7 @@ class DshManagePage(BasePage):
         self._inst_bar.setValue(0)
         self._inst_step_lbl.setText("正在安装…")
         self._inst_log.clear()
-
-        def events(kind, payload):
-            if kind == "log":
-                self.safe_emit(self._install_line, payload)
-            elif kind == "step":
-                self.safe_emit(self._install_step, payload[0], payload[1])
-
-        def worker():
-            r = core_env.install_dsh(events, url, target)
-            self.safe_emit(self._install_done, not r["err"], r["err"] or r["msg"])
-
-        threading.Thread(target=worker, daemon=True).start()
+        self.app.service.install_dsh(url, target, op="dsh-install")
 
     def _on_install_step(self, step, text):
         self._inst_bar.setValue(step)
@@ -510,18 +501,7 @@ class DshManagePage(BasePage):
         # 进度条范围: 保留数据=3 步, 删数据=4 步
         self._uninst_bar.setRange(0, 4 if not keep_data else 3)
         self._uninst_step_lbl.setText("正在卸载…")
-
-        def events(kind, payload):
-            if kind == "log":
-                self.safe_emit(self._uninstall_line, payload)
-            elif kind == "step":
-                self.safe_emit(self._uninstall_step, payload[0], payload[1])
-
-        def worker():
-            r = core_env.uninstall_dsh(events, keep_data)
-            self.safe_emit(self._uninstall_done, not r["err"], r["err"] or r["msg"])
-
-        threading.Thread(target=worker, daemon=True).start()
+        self.app.service.uninstall_dsh(keep_data=keep_data, op="dsh-uninstall")
 
     def _on_uninstall_step(self, step, text):
         self._uninst_bar.setValue(step)
@@ -579,13 +559,7 @@ class DshManagePage(BasePage):
 
     def _fetch_tags(self):
         self._tags_view.setPlainText("正在获取 GitHub tags(api.github.com)...")
-        def run():
-            from core.dshctl import fetch_dsh_tags
-            try:
-                self.safe_emit(self._tags_done, fetch_dsh_tags(), "")
-            except Exception as e:
-                self.safe_emit(self._tags_done, [], "获取失败: %s" % e)
-        threading.Thread(target=run, daemon=True).start()
+        self.app.service.fetch_dsh_tags(op="dsh-tags")
 
     def _on_tags(self, tags, err):
         if err:

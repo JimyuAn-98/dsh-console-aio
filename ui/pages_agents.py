@@ -8,6 +8,7 @@
 
 import os
 
+from core import cache as core_cache
 from core import data as core_data
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -15,7 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton, QMessageBox, QPlainTextEdit)
 
 from ui.base import BasePage
-from ui.widgets import ModernList, card_wrap
+from ui.widgets import ModernList, RefreshIndicator, card_wrap
 
 
 def _fmt_scalar(v):
@@ -58,7 +59,10 @@ def _fmt_yaml(data, indent=0):
                         for kk, vv in items[1:]:
                             if isinstance(vv, (dict, list)):
                                 lines.append(pad + "    " + str(kk) + ":")
-                                lines.extend(_fmt_yaml(vv, indent + 1))
+                                lines.extend(_fmt_yaml(vv, indent + 3))
+                            elif isinstance(vv, list):
+                                lines.append(pad + "    " + str(kk) + ":")
+                                lines.extend(_fmt_yaml(vv, indent + 3))
                             else:
                                 lines.append(pad + "    " + str(kk) + ": " + _fmt_scalar(vv))
                     else:
@@ -67,23 +71,9 @@ def _fmt_yaml(data, indent=0):
                 lines.append(pad + str(k) + ": " + _fmt_scalar(v))
     elif isinstance(data, list):
         for item in data:
-            if isinstance(item, dict):
-                items = list(item.items())
-                if not items:
-                    lines.append(pad + "- {}")
-                    continue
-                k0, v0 = items[0]
-                if isinstance(v0, (dict, list)):
-                    lines.append(pad + "- " + str(k0) + ":")
-                    lines.extend(_fmt_yaml(v0, indent + 1))
-                else:
-                    lines.append(pad + "- " + str(k0) + ": " + _fmt_scalar(v0))
-                for kk, vv in items[1:]:
-                    if isinstance(vv, (dict, list)):
-                        lines.append(pad + "  " + str(kk) + ":")
-                        lines.extend(_fmt_yaml(vv, indent + 1))
-                    else:
-                        lines.append(pad + "  " + str(kk) + ": " + _fmt_scalar(vv))
+            if isinstance(item, (dict, list)):
+                lines.append(pad + "-")
+                lines.extend(_fmt_yaml(item, indent + 1))
             else:
                 lines.append(pad + "- " + _fmt_scalar(item))
     else:
@@ -100,6 +90,7 @@ class AgentPage(BasePage):
         if _dep and _dep.get("host"):
             self._remote = core_data.DshRemote(_dep)
         self._presets = []
+        self._busy = False
         self._pending = None
         super().__init__(app, parent)
         self.app.service.result.connect(self._on_result)
@@ -111,14 +102,19 @@ class AgentPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_row.addWidget(QLabel("Agent 模式管理", objectName="cardTitle"))
+        self._spinner = RefreshIndicator()
+        self._spinner.setToolTip("刷新状态: 绿=无变化 / 黄=数据有变化 / 红=获取错误")
+        title_row.addWidget(self._spinner)
+        title_row.addStretch(1)
         self._status_lbl = QLabel("就绪", objectName="monVal")
-        head = QHBoxLayout()
-        head.addWidget(QLabel("Agent 模式管理", objectName="cardTitle"))
-        head.addStretch(1)
-        head.addWidget(self._status_lbl)
-        root.addLayout(head)
-        hint = QLabel("Agent 模式是会话级选择（session 记录 agent-preset/selected），控制台仅做浏览与说明。",
-                      objectName="cardHint")
+        title_row.addWidget(self._status_lbl)
+        root.addLayout(title_row)
+        hint = QLabel("Agent 模式是会话级选择（session 记录 agent-preset/selected），控制台仅做浏览与说明；"
+                      "进页自动取缓存+按需刷新。", objectName="cardHint")
+        hint.setWordWrap(True)
         root.addWidget(hint)
 
         body = QHBoxLayout()
@@ -153,28 +149,59 @@ class AgentPage(BasePage):
         self._btn_open = QPushButton("打开 .agent-presets 目录")
         self._btn_open.clicked.connect(self._open_dir)
         self._btn_refresh = QPushButton("刷新")
-        self._btn_refresh.clicked.connect(self._refresh)
+        self._btn_refresh.clicked.connect(lambda: self._refresh(force=True))
         for b in (self._btn_open, self._btn_refresh):
             btns.addWidget(b)
         btns.addStretch(1)
         root.addLayout(btns)
 
 
-    # ── 列表(service 信号桥) ──
-    def _refresh(self):
+    # ── 列表(先读缓存, mtime 变化或强制时后台拉取) ──
+    def _refresh(self, force=False):
+        if self._busy:
+            return
+        src_mtime = core_data.agent_presets_source_mtime(self._remote)
+        cache_data, _ = core_cache.read_cache("agents")
+        if not force and cache_data is not None and not core_cache.needs_refresh("agents", src_mtime):
+            # 缓存已是最新: 直接呈现, 标记"无变化"(绿)
+            self._apply_data(cache_data, "")
+            self._spinner.set_status("ok")
+            self._spinner.setToolTip("无变化(缓存已是最新)")
+            return
+
+        self._busy = True
+        self._pending = "agents-list"
         self._set_status("正在读取 Agent 模式列表...")
         self._set_btns(False)
-        self._pending = "agents-list"
+        self._spinner.set_loading(True)
         self.app.service.list_agent_presets(self._remote)
 
     def _on_result(self, op, payload):
         if op == "agents-list":
+            self._busy = False
             self._pending = None
-            self._apply_data(payload.get("data") or [], payload.get("err", ""))
+            self._spinner.set_loading(False)
+            err = payload.get("err") or ""
+            data = payload.get("data")
+            if err or not isinstance(data, list):
+                self._apply_data([], str(err or "读取失败"))
+                self._spinner.set_status("err")
+                self._spinner.setToolTip("数据获取错误: " + str(err))
+                return
+            changed = core_cache.data_changed("agents", data)
+            core_cache.write_cache("agents", data)
+            self._apply_data(data, "")
+            if changed:
+                self._spinner.set_status("warn")
+                self._spinner.setToolTip("数据有变化(已刷新)")
+            else:
+                self._spinner.set_status("ok")
+                self._spinner.setToolTip("无变化(缓存已是最新)")
 
     def _on_finished(self, op, ok):
         # 兜底: result 槽漏执行导致 busy 悬挂时解除
         if op == self._pending:
+            self._busy = False
             self._pending = None
             self._set_btns(True)
 

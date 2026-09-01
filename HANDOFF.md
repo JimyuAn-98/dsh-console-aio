@@ -31,7 +31,7 @@ installer/           Inno Setup 脚本
 
 > 注意：**总览页与隧道页不在独立 pages_*.py**，实现在主文件 `dsh-console-aio.py` 内
 > （`OverviewPage` 概览 worker 在 245-403；`TunnelsPage` 在 1281+，含隧道方案规划器）。
-> `docs/UI_LAYERING.md` 是分层契约的权威来源，动 service/core 前先读它。
+> `docs/ARCHITECTURE.md` 是分层契约的权威来源，动 service/core 前先读它。
 
 ## 三、铁律（必须遵守）
 
@@ -118,7 +118,7 @@ installer/           Inno Setup 脚本
 
 ### 5.6 完成标准 & 验证
 - 标准：`grep -r threading.Thread ui/` 仅剩 base.py 无；`grep -r "core import" ui/` 页面不再
-  直接 import 业务模块（除纯常量）。UI_LAYERING 验收清单（§4）四条全过。
+  直接 import 业务模块（除纯常量）。分层验收清单四条全过（见 docs/ARCHITECTURE.md）。
 - 验证：每次改动 py_compile + 相关纯单元；离屏 17 页导航冒烟（含总览/隧道/设置/会话/
   profiles/插件/DSH 页）；核心逻辑在 core 层加纯单测。
 - 每完成一项在 `docs/ROADMAP.md`「未做/候选」的"技术债"行勾掉，并更新 RELEASE_NOTES + 决策

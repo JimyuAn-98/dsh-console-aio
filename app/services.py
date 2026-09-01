@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # app/services.py - 接口层(可 import PySide): 唯一"起后端线程 + 转结果"的地方。
 #
-# 硬约束(见 docs/UI_LAYERING.md): 后端(core)与 UI 之间一律走 Qt 信号-槽。
+# 硬约束(见 docs/ARCHITECTURE.md): 后端(core)与 UI 之间一律走 Qt 信号-槽。
 # 本类持有 QObject + Signal; 后台线程跑 core 的函数, 把它的 events 回调转发到
 # Signal.emit —— Qt 会自动把信号排队到接收者线程(线程安全)。后端线程绝不直接改 UI,
 # UI 只 connect 信号 + 调本类的触发方法。
@@ -19,6 +19,7 @@ class DshService(QObject):
     # 后端 -> UI 的唯一通道(线程安全, 由 events 回调转发)
     status   = Signal(str)               # 一条状态文案
     log      = Signal(str, str)          # (text, tag)
+    step     = Signal(int, str)          # (step_idx, step_text) 步骤进度
     card     = Signal(str, bool)         # (隧道key, 是否在线)
     monitor  = Signal(object)            # (local_map, ssh_count, remote) 探测结果;
                                          # None 哨兵 = 本轮探测线程异常, UI 只解除 busy 不刷新
@@ -47,10 +48,16 @@ class DshService(QObject):
     def _events(self):
         def cb(kind, payload):
             if kind == "log":
-                text, tag = payload
+                if isinstance(payload, tuple) and len(payload) == 2:
+                    text, tag = payload
+                else:
+                    text, tag = str(payload), ""
                 self.log.emit(text, tag)
             elif kind == "status":
-                self.status.emit(payload)
+                self.status.emit(str(payload))
+            elif kind == "step":
+                if isinstance(payload, (tuple, list)) and len(payload) >= 2:
+                    self.step.emit(int(payload[0]), str(payload[1]))
             elif kind == "card":
                 key, on = payload
                 self.card.emit(key, on)
@@ -246,6 +253,46 @@ class DshService(QObject):
         # 写 settings.yaml(数据层写前 .bak); 写业务唯一出口, 页面组装好完整 data 传入。
         from core import data as _data
         self._run_core_op(op, _data.write_settings, data)
+
+    # ---- 阶段4 扩充: 总览/会话/Profile/环境/安装/设置 统一经 service ----
+    def read_overview(self, cfg, depls, smoke=False, op="overview-read"):
+        from core import data as _data
+        self._run_core_op(op, _data.collect_overview_data, cfg, depls, smoke)
+
+    def read_sessions(self, remote=None, op="sessions-read"):
+        from core import data as _data
+        self._run_core_op(op, _data.read_sessions_data, remote)
+
+    def list_profiles(self, remote=None, op="profiles-list"):
+        from core import data as _data
+        self._run_core_op(op, _data.list_profiles, remote)
+
+    def check_tool_versions(self, tools, op="dsh-tool-versions"):
+        from core import env as _env
+        self._run_core_op(op, _env.tool_versions, tools)
+
+    def fetch_dsh_tags(self, op="dsh-tags"):
+        from core.dshctl import fetch_dsh_tags
+        self._run_core_op(op, fetch_dsh_tags)
+
+    def install_dsh(self, url, target, op="dsh-install"):
+        from core import env as _env
+        self._run_result_op(op, _env.install_dsh, url, target)
+
+    def uninstall_dsh(self, keep_data=True, op="dsh-uninstall"):
+        from core import env as _env
+        self._run_result_op(op, _env.uninstall_dsh, keep_data)
+
+    def test_ssh(self, host, user, port=22, op="settings-test-ssh"):
+        from core import env as _env
+        self._run_core_op(op, _env.test_ssh, host, user, port)
+
+    def generate_diagnostics(self, cfg, app_version, base_dir, op="settings-gen-diag"):
+        from core import diagnostics as _diag
+        def _gen():
+            data = _diag.collect(None, cfg, app_version, base_dir)
+            return _diag.render(data)
+        self._run_core_op(op, _gen)
 
     # ---- 构造 ----
     @classmethod

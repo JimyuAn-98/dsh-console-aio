@@ -231,6 +231,7 @@ class TestUninstallDsh:
         # config 里没有 dash_repo: 不报错, 标记未删除, 提示"未检测到已安装"
         monkeypatch.setattr(env_mod.DshCtl, "stop_dsh", lambda self, events=None: True)
         monkeypatch.setattr(dsh_config, "load_config", lambda path=None: {"dash_repo": ""})
+        monkeypatch.setattr(dsh_config, "save_config", lambda *a, **k: True)
         r = env_mod.uninstall_dsh(None, keep_data=True)
         assert r["err"] == "" and r["removed_repo"] is False and r["removed_data"] is False
         assert "未检测到" in r["msg"]
@@ -252,6 +253,7 @@ class TestUninstallDsh:
         repo.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(env_mod.DshCtl, "stop_dsh", lambda self, events=None: True)
         monkeypatch.setattr(dsh_config, "load_config", lambda path=None: {"dash_repo": str(repo)})
+        monkeypatch.setattr(dsh_config, "save_config", lambda *a, **k: True)
         monkeypatch.setenv("DSH_HOME", _os.path.expanduser("~"))   # 数据目录 == 主目录
         monkeypatch.setattr(env_mod.shutil, "rmtree", lambda p, **k: None)  # 双保险绝不真删
         r = env_mod.uninstall_dsh(None, keep_data=False)

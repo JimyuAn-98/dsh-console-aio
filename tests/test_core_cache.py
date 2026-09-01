@@ -103,3 +103,55 @@ class TestDataChanged:
         from core.cache import json_sig
         assert json_sig({"x": 1, "y": [2, 3]}) == json_sig({"y": [2, 3], "x": 1})
         assert json_sig({"x": 1}) != json_sig({"x": 2})
+
+
+class TestMtimeAndDataAggregators:
+    def test_mtime_detectors_and_aggregators(self, tmp_path, monkeypatch):
+        import core.data as d
+        monkeypatch.setattr(d, "dsh_home", lambda: str(tmp_path))
+
+        # 构造假的 sessions 目录与 workspace.json
+        sdir = tmp_path / "sessions" / "test_group" / "sess1"
+        sdir.mkdir(parents=True)
+        zfile = sdir / "session.jsonl.zstd"
+        zfile.write_bytes(b"dummy")
+        stdir = tmp_path / "storages"
+        stdir.mkdir()
+        wfile = stdir / "workspace.json"
+        wfile.write_text('{"global": {"workspaceIds": ["w1"], "archivedSessionIds": []}}', encoding="utf-8")
+
+        # 构造 profiles 目录
+        pdir = tmp_path / "profiles" / "web"
+        pdir.mkdir(parents=True)
+        (pdir / "cordis.yml").write_text("name: web", encoding="utf-8")
+
+        # 构造 task-board 目录
+        tdir = tmp_path / "task-board"
+        tdir.mkdir(parents=True)
+        (tdir / "ledger-v2.json").write_text('{"tasks": []}', encoding="utf-8")
+
+        # 构造 .agent-presets 目录
+        adir = tmp_path / ".agent-presets" / "p1"
+        adir.mkdir(parents=True)
+        (adir / "preset.yml").write_text("description: test", encoding="utf-8")
+
+        # 验证各探测函数返回时间戳 > 0
+        assert d.sessions_source_mtime() > 0
+        assert d.plugins_source_mtime("web") > 0
+        assert d.taskboard_source_mtime() > 0
+        assert d.agent_presets_source_mtime() > 0
+        assert d.profiles_source_mtime() > 0
+        assert d.overview_source_mtime() > 0
+
+        # 验证 read_sessions_data
+        sdata = d.read_sessions_data()
+        assert "ws" in sdata and "groups" in sdata
+        assert sdata["ws"].get("workspaceIds") == ["w1"]
+
+        # 验证 collect_overview_data
+        cfg = {"dash_port": 3080, "dash_repo": str(tmp_path)}
+        ov = d.collect_overview_data(cfg, [], smoke=True)
+        assert ov["dash_port"] == 3080
+        assert isinstance(ov["deploys"], list)
+        assert len(ov["deploys"]) >= 1
+        assert d.overview_source_mtime(cfg) > 0

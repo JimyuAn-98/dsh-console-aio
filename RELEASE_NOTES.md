@@ -3,7 +3,20 @@
 
 ## v0.8.0 (未发布)
 
-### 浅色主题 + 明/暗变体切换（小菜①）
+### 通用缓存层全面推广 + 技术债统一收口（2026-09-01）
+
+- **缓存层全面推广**：
+  - 部署总览（`OverviewPage`）、会话管理（`SessionsPage`）、Profile（`ProfilesPage`）、插件（`PluginsPage`）、任务看板（`TaskboardPage`）、Agent 模式（`AgentPage`）全面接入 `core/cache.py` 缓存与 `RefreshIndicator` 刷新指示器；
+  - 进页优先读取本地缓存，数据源未变动时直接呈现并标记“无变化(缓存已是最新)”（绿色指示灯），数据源有变动或用户点击刷新时才发起后台读取并标记“数据有变化(已刷新)”（黄色指示灯），错误时标记红色；
+  - 插件页切换 Profile 时智能联动独立缓存（`plugins_<profile>`）；各写操作（插件启停、Profile 编辑、会话归档等）执行完毕后强制刷新并写入新缓存。
+- **纯数据层探测与聚合**（`core/data.py`）：
+  - 实现了各域源时间戳感知函数：`sessions_source_mtime`、`plugins_source_mtime`、`taskboard_source_mtime`、`agent_presets_source_mtime`、`profiles_source_mtime`、`overview_source_mtime`；
+  - 实现了脱离 Qt 的聚合纯数据读取函数：`read_sessions_data`（会话与工作区）与 `collect_overview_data`（总览纯数据快照）。
+- **Service 信号桥收口与页面裸线程彻底清除**：
+  - `DshService` 扩充：新增 `step` 进度信号，补齐 `read_overview`、`read_sessions`、`list_profiles`、`check_tool_versions`、`fetch_dsh_tags`、`install_dsh`、`uninstall_dsh`、`test_ssh`、`generate_diagnostics` 标准方法；
+  - UI 页面层治理：彻底移除了 `ui/pages_dsh.py`（4 裸线程 + 8 私有 Signal）、`ui/pages_settings.py`（2 裸线程 + 2 私有 Signal）、`ui/pages_sessions.py`、`ui/pages_profiles.py`、`ui/pages_plugins.py`、`dsh-console-aio.py`（OverviewPage）中的所有裸线程（`threading.Thread`）与私有 `Signal`，全部统一接入 `DshService` 信号桥；
+  - 严格遵循 `AGENTS.md` 架构约束，UI 层实现完全零线程创建、纯事件驱动。
+- **测试完备**：400 个纯单元测试（含新增 `tests/test_services.py` 及 mtime 探测测试）+ 83 个 GUI 冒烟测试全部通过。
 
 - **新增浅色主题**：`ui/theme.py` 新增 `LIGHT_TOKENS` 全套浅色变体（背景/文字/边框/控件/
   滚动条全面反色为浅色系），与深色同一 token 键、同一 QSS 模板

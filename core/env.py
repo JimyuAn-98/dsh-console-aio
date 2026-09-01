@@ -8,7 +8,7 @@
 #   events("log", text)            逐行输出/说明
 #   events("step", (n, text))      安装步骤进度(1..4)
 # 其余函数为同步调用(对话框在其自有线程中调用, 线程归 UI 层所有 —— 阶段3 决策:
-# 业务全部下沉本模块, 对话框线程保留, 详见 docs/UI_LAYERING.md)。
+# 业务全部下沉本模块, 对话框线程保留, 详见 docs/ARCHITECTURE.md)。
 # 子进程一律 CREATE_NO_WINDOW + text=True errors="replace" + 超时(AGENTS.md 约定)。
 
 import os

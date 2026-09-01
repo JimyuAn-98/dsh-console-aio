@@ -7,10 +7,9 @@
 # self._config_path 默认 None(走 DSH_AIO_CONFIG/默认路径), 测试可注入 tmp 路径。
 
 import json
-import threading
 import time
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QFormLayout,
@@ -25,8 +24,7 @@ from ui.base import BasePage
 
 class SettingsPage(BasePage):
     # 设置: BasePage 范式, app 为 MainWindow。页面随导航重建, 字段每次从磁盘回填。
-    _ssh_done = Signal(str, object)   # (结果文案, True/False/None)
-    _diag_done = Signal(str)          # 诊断报告文本(页面自有线程 -> UI)
+    # 异步操作(SSH 测试/诊断生成)全部经 service 信号桥调度。
 
     HELP = {
         "ssh_server": "公网可达的中转服务器 IP/域名(需已配置免密 SSH 登录)",
@@ -64,12 +62,28 @@ class SettingsPage(BasePage):
         self._config_path = None   # None = DSH_AIO_CONFIG/默认路径; 测试注入 tmp 路径
         self._diag_running = False
         super().__init__(app, parent)
-        self._ssh_done.connect(self._on_ssh_done)
-        self._diag_done.connect(self._on_diag_done)
+        self.app.service.result.connect(self._on_result)
         tab = getattr(app, "_pending_settings_tab", None)
         if tab:
             self._tabs.setCurrentIndex(1 if tab == "monitor" else 0)
             app._pending_settings_tab = None
+
+    def _on_result(self, op, payload):
+        if op == "settings-test-ssh":
+            err = payload.get("err")
+            r = payload.get("data") or {}
+            if err:
+                msg, ok = "测试异常: " + str(err), False
+            elif r.get("ok"):
+                msg, ok = "✅ SSH 连接成功, 免密可用", True
+            else:
+                msg, ok = "❌ 失败 - 检查 IP/用户名/免密配置: " + str(r.get("detail") or "连接失败"), False
+            self._on_ssh_done(msg, ok)
+        elif op == "settings-gen-diag":
+            err = payload.get("err")
+            data = payload.get("data")
+            text = data if (not err and data) else ("诊断生成失败: " + str(err or "未知错误"))
+            self._on_diag_done(text)
 
     def _build(self):
         root = QVBoxLayout(self)
@@ -201,18 +215,7 @@ class SettingsPage(BasePage):
             return
         self._test_btn.setEnabled(False)
         self._set_test("测试中…", None)
-
-        def worker():
-            r = core_env.test_ssh(host, user, port)
-            if r["err"]:
-                msg, ok = "测试异常: " + r["err"], False
-            elif r["ok"]:
-                msg, ok = "✅ SSH 连接成功, 免密可用", True
-            else:
-                msg, ok = "❌ 失败 - 检查 IP/用户名/免密配置: " + r["detail"], False
-            self.safe_emit(self._ssh_done, msg, ok)
-
-        threading.Thread(target=worker, daemon=True).start()
+        self.app.service.test_ssh(host, user, port, op="settings-test-ssh")
 
     def _set_test(self, msg, ok):
         self._test_lbl.setText(msg)
@@ -376,7 +379,7 @@ class SettingsPage(BasePage):
         return page
 
     def _gen_diag(self):
-        # 页面自有线程(与 SSH 测试同范式): collect 只做本机只读探测, 数秒内返回
+        # 经 service 信号桥生成诊断报告(工具链只读探测, 敏感信息打码)
         if self._diag_running:
             return
         self._diag_running = True
@@ -384,14 +387,7 @@ class SettingsPage(BasePage):
         cfg = dsh_config.load_config(self._config_path)
         app_version = getattr(self.app, "APP_VERSION", "?")
         base_dir = getattr(getattr(self.app, "service", None), "base_dir", ".")
-
-        def run():
-            try:
-                text = dsh_diag.render(dsh_diag.collect(None, cfg, app_version, base_dir))
-            except Exception as e:   # 探测异常也要给 UI 一个收尾, 不让 busy 卡死
-                text = "诊断生成失败: %r" % e
-            self.safe_emit(self._diag_done, text)
-        threading.Thread(target=run, daemon=True).start()
+        self.app.service.generate_diagnostics(cfg, app_version, base_dir, op="settings-gen-diag")
 
     def _on_diag_done(self, text):
         self._diag_running = False

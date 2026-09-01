@@ -11,18 +11,18 @@
 # 接收者是页面自身, 页面销毁 Qt 自动断开; log/status 不在页面 connect(主窗口级已接)。
 
 import os
-import threading
 
+from core import cache as core_cache
 from core import data as dsh_data
 from core import plugins as core_plugins
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit, QScrollArea,
     QPushButton, QMessageBox, QComboBox, QTextEdit, QWidget)
 
 from ui.base import BasePage
-from ui.widgets import ModernList, card_wrap, three_split
+from ui.widgets import ModernList, RefreshIndicator, card_wrap, three_split
 
 
 def _entry_src_text(e):
@@ -55,7 +55,6 @@ _REMOTE_READONLY_MSG = "远程部署下暂不支持写操作（远程只读）�
 
 class PluginPage(BasePage):
     # 插件管理: BasePage 范式, app 为 MainWindow。
-    _profiles = Signal(object, str)        # (profiles, err) Profile 列表结果(纯读线程)
 
     def __init__(self, app, parent=None):
         self._remote = None
@@ -69,7 +68,6 @@ class PluginPage(BasePage):
         self._pending = None    # 正在等待的 service op
         self._last_op_msg = None
         super().__init__(app, parent)
-        self._profiles.connect(self._apply_profiles)
         self.app.service.result.connect(self._on_result)
         self.app.service.finished.connect(self._on_finished)
         self._load_profiles()
@@ -79,15 +77,20 @@ class PluginPage(BasePage):
         root.setContentsMargins(18, 16, 18, 12)
         root.setSpacing(8)
 
-        # 状态文字在标题右侧(原底部状态条位置让给横向滚动条)
+        # 状态文字在标题右侧, 增加 RefreshIndicator
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_row.addWidget(QLabel("插件管理", objectName="cardTitle"))
+        self._spinner = RefreshIndicator()
+        self._spinner.setToolTip("刷新状态: 绿=无变化 / 黄=数据有变化 / 红=获取错误")
+        title_row.addWidget(self._spinner)
+        title_row.addStretch(1)
         self._status_lbl = QLabel("就绪", objectName="monVal")
-        head = QHBoxLayout()
-        head.addWidget(QLabel("插件管理", objectName="cardTitle"))
-        head.addStretch(1)
-        head.addWidget(self._status_lbl)
-        root.addLayout(head)
-        hint = QLabel("停用/启用写入 cordis.patch.yml；安装/卸载经官方 dsh plugin 命令执行。",
-                      objectName="cardHint")
+        title_row.addWidget(self._status_lbl)
+        root.addLayout(title_row)
+        hint = QLabel("停用/启用写入 cordis.patch.yml；安装/卸载经官方 dsh plugin 命令执行；"
+                      "进页自动取缓存+按需刷新。", objectName="cardHint")
+        hint.setWordWrap(True)
         root.addWidget(hint)
 
         top = QHBoxLayout()
@@ -95,9 +98,13 @@ class PluginPage(BasePage):
         top.addWidget(QLabel("Profile:"))
         self._profile_cb = QComboBox()
         self._profile_cb.setMinimumWidth(200)
+        self._profile_cb.currentIndexChanged.connect(lambda: self._refresh(force=False))
         top.addWidget(self._profile_cb)
         self._btn_refresh = QPushButton("刷新")
-        self._btn_refresh.clicked.connect(self._refresh)
+        self._btn_refresh.clicked.connect(lambda: self._refresh(force=True))
+        top.addWidget(self._btn_refresh)
+        top.addStretch(1)
+        root.addLayout(top)
         top.addWidget(self._btn_refresh)
         self._btn_open_patch = QPushButton("打开 patch 文件")
         self._btn_open_patch.clicked.connect(self._open_patch)
@@ -201,23 +208,11 @@ class PluginPage(BasePage):
         # dsh plugin/dump-config 命令必须在 dsh 仓库目录执行; 取 service 的 config 派生值
         return self.app.service.ctl.d.get("dash_repo") or ""
 
-    # ── Profile 列表(纯读过渡态: 页面线程 + safe_emit) ──
+    # ── Profile 列表(经 service 信号桥) ──
     def _load_profiles(self):
-        # 只列有 cordis.yml 或 cordis.patch.yml 的 profile; 读取是 IO, 放后台线程。
         self._set_busy(True)
         self._set_status("正在读取 Profile 列表...")
-        remote = self._remote
-
-        def worker():
-            err = None
-            profiles = None
-            try:
-                profiles = dsh_data.list_profiles(remote=remote)
-            except Exception as e:
-                err = str(e)
-            self.safe_emit(self._profiles, profiles or [], err)
-
-        threading.Thread(target=worker, daemon=True).start()
+        self.app.service.list_profiles(self._remote, op="plugins-profiles-list")
 
     def _apply_profiles(self, profiles, err):
         if err:
@@ -229,25 +224,42 @@ class PluginPage(BasePage):
             return
         usable = [p for p in profiles if p.get("cordis") or p.get("patch")]
         names = [p["name"] for p in usable]
+        self._profile_cb.blockSignals(True)
         self._profile_cb.clear()
         self._profile_cb.addItems(names)
+        self._profile_cb.blockSignals(False)
         if names:
             self._profile_cb.setCurrentIndex(0)
-            self._refresh()
+            self._refresh(force=False)
         else:
             self._set_busy(False)
             self._list.set_rows([])
             self._entries = []
             self._set_status("未找到可用 profile(~/.dsh/profiles 下没有 cordis.yml / cordis.patch.yml)")
 
-    # ── 列表加载(service: entries + id 映射一并回包) ──
-    def _refresh(self):
+    # ── 列表加载(先读缓存, mtime 变化或强制时后台拉取) ──
+    def _refresh(self, force=False):
         profile = self._profile_cb.currentText().strip()
         if not profile:
             return
+        if self._busy and not force:
+            return
+        src_mtime = dsh_data.plugins_source_mtime(profile, self._remote)
+        cache_key = "plugins_" + profile
+        cache_data, _ = core_cache.read_cache(cache_key)
+        if not force and cache_data is not None and not core_cache.needs_refresh(cache_key, src_mtime):
+            # 缓存已是最新: 直接呈现, 标记"无变化"(绿)
+            self._id_map = cache_data.get("id_map") or {}
+            self._cordis_states = cache_data.get("cordis_states") or {}
+            self._apply_refresh(cache_data.get("entries") or [], "")
+            self._spinner.set_status("ok")
+            self._spinner.setToolTip("无变化(缓存已是最新)")
+            return
+
         self._set_busy(True)
         self._pending = "plugins-load"
         self._set_status("正在读取插件列表...")
+        self._spinner.set_loading(True)
         self.app.service.load_plugins(profile, self._remote)
 
     def _apply_refresh(self, entries, err):
@@ -289,11 +301,31 @@ class PluginPage(BasePage):
 
     # ── service 信号槽(接收者=本页, 销毁自动断开) ──
     def _on_result(self, op, payload):
-        if op == "plugins-load":
+        if op == "plugins-profiles-list":
             self._pending = None
+            self._apply_profiles(payload.get("data") or [], payload.get("err", ""))
+        elif op == "plugins-load":
+            self._pending = None
+            self._spinner.set_loading(False)
+            profile = self._profile_cb.currentText().strip()
+            cache_key = "plugins_" + profile
+            err = payload.get("err") or ""
+            if err:
+                self._apply_refresh([], err)
+                self._spinner.set_status("err")
+                self._spinner.setToolTip("数据获取错误: " + str(err))
+                return
             self._id_map = payload.get("id_map") or {}
             self._cordis_states = payload.get("cordis_states") or {}
-            self._apply_refresh(payload.get("entries") or [], payload.get("err", ""))
+            changed = core_cache.data_changed(cache_key, payload)
+            core_cache.write_cache(cache_key, payload)
+            self._apply_refresh(payload.get("entries") or [], "")
+            if changed:
+                self._spinner.set_status("warn")
+                self._spinner.setToolTip("数据有变化(已刷新)")
+            else:
+                self._spinner.set_status("ok")
+                self._spinner.setToolTip("无变化(缓存已是最新)")
         elif op == "plugins-toggle":
             self._pending = None
             self._after_toggle(payload)
@@ -362,7 +394,7 @@ class PluginPage(BasePage):
 
     def _after_stream(self, ok):
         self._last_op_msg = "已" + ("完成" if ok else "失败") + "(详见主界面日志区)"
-        self._refresh()
+        self._refresh(force=True)
 
     # ── 禁用 / 启用(patch 层, service 信号桥) ──
     def _disable(self):
@@ -429,11 +461,11 @@ class PluginPage(BasePage):
             QMessageBox.critical(self, "操作失败", err)
             self._set_status("操作失败: " + err)
             self.app.loge("[插件] " + err, "err")
-            self._refresh()
+            self._refresh(force=True)
             return
         self.app.loge("[插件] " + msg, "ok")
         self._last_op_msg = msg + "（已刷新）"
-        self._refresh()
+        self._refresh(force=True)
 
     # ── 其它 ──
     def _selected_entry(self):

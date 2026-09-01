@@ -766,11 +766,11 @@ class TestDeployments:
         result = load_deployments()
         assert isinstance(result, list)
 
-    def test_load_deployments_with_data(self, tmp_path):
-        """有 deployments 数组时正确读取。"""
+    def test_load_deployments_with_data(self, tmp_path, monkeypatch):
+        """有 deployments 时正确读取。"""
         from core.data import load_deployments
         import core.data as dd
-        # 临时覆盖 __file__ 路径(阶段4 后 _config_path 在 core.data, 按其 __file__ 定位)
+        monkeypatch.delenv("DSH_AIO_CONFIG", raising=False)
         cfg = {"deployments": [
             {"name": "lab", "host": "192.168.1.100", "user": "admin", "port": 22}
         ]}
@@ -786,9 +786,10 @@ class TestDeployments:
         finally:
             dd.__file__ = old
 
-    def test_save_and_load_deployments(self, tmp_path):
+    def test_save_and_load_deployments(self, tmp_path, monkeypatch):
         from core.data import save_deployments, load_deployments
         import core.data as dd
+        monkeypatch.delenv("DSH_AIO_CONFIG", raising=False)
         cfg_path = os.path.join(str(tmp_path), "config.json")
         with open(cfg_path, "w") as f:
             json.dump({}, f)
