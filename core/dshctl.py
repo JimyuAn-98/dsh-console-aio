@@ -12,10 +12,66 @@
 
 import json
 import os
+import re
 import socket
 import subprocess
 import threading
 import urllib.request
+
+_RUNTIME_TOKENS = {}
+
+
+def extract_auth_token(text):
+    # 从 dsh 启动输出或日志中提取 32 字节鉴权 Token 与完整链接
+    if not text:
+        return None, None
+    clean = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', str(text))
+    m = re.search(r'https?://(?:127\.0\.0\.1|localhost):\d+/\?token=([a-zA-Z0-9_-]+)', clean)
+    if m:
+        return m.group(1), m.group(0)
+    m2 = re.search(r'\?token=([a-zA-Z0-9_-]+)', clean)
+    if m2:
+        return m2.group(1), None
+    return None, None
+
+
+def get_runtime_token(node_name="local", refresh=False):
+    # 获取节点的运行时鉴权 Token (local 节点支持从最新日志实时刷新)
+    if node_name == "local":
+        if refresh or "local" not in _RUNTIME_TOKENS or not _RUNTIME_TOKENS["local"]:
+            tok = scan_log_for_token()
+            if tok:
+                _RUNTIME_TOKENS["local"] = tok
+                return tok
+    return _RUNTIME_TOKENS.get(node_name)
+
+
+def clear_runtime_token(node_name="local"):
+    _RUNTIME_TOKENS.pop(node_name, None)
+
+
+def set_runtime_token(node_name, token):
+    if token and isinstance(token, str):
+        _RUNTIME_TOKENS[node_name] = token.strip()
+
+
+def scan_log_for_token():
+    # 从本地 dsh-web.out.log / dsh-web.err.log 倒序扫描提取最新 Token
+    logdir = os.path.join(os.environ.get("TEMP", "."), "dsh-dash")
+    for fname in ("dsh-web.out.log", "dsh-web.err.log"):
+        log_file = os.path.join(logdir, fname)
+        if not os.path.isfile(log_file):
+            continue
+        try:
+            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()[-100:]
+            for line in reversed(lines):
+                token, _ = extract_auth_token(line)
+                if token:
+                    return token
+        except Exception:
+            pass
+    return None
 
 
 def fetch_dsh_tags(per_page=8):
@@ -75,6 +131,16 @@ class DshCtl:
             self._status(events, "已触发本机 dsh 启动 -> http://127.0.0.1:%d" % dash_port)
             if events:
                 events("card", ("dsh-web", True))
+
+            def _poll_token():
+                import time
+                for _ in range(10):
+                    time.sleep(0.5)
+                    tok = scan_log_for_token()
+                    if tok:
+                        set_runtime_token("local", tok)
+                        break
+            threading.Thread(target=_poll_token, daemon=True).start()
             return True
         except FileNotFoundError:
             self._log(events, "  找不到 %s, 请确认 pnpm 在 PATH 或修改配置" % dash_cmd[0], "err")
@@ -103,6 +169,8 @@ class DshCtl:
                          else "停止本机 dsh 出错")
             if events:
                 events("card", ("dsh-web", False))
+            if r.returncode == 0:
+                clear_runtime_token("local")
             return r.returncode == 0
         except subprocess.TimeoutExpired:
             self._log(events, "  [停止] 超时(60s)", "err")

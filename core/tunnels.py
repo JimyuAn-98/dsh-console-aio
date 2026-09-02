@@ -12,7 +12,8 @@
 
 import threading
 
-from core.tunnel_mgr import Tunnel  # 仓库根在 sys.path 时可导入(与主程序一致)
+from core.tunnel_mgr import (
+    Tunnel, push_node_token, pull_node_token)
 
 
 class TunnelManager:
@@ -72,9 +73,26 @@ class TunnelManager:
         if events:
             events("status", "%s 已启动 (Python)" % key)
             events("card", (key, True))
+        if key == "dsh-tunnel-reverse":
+            self._sync_push_token(events)
         if mode == "persist":
             self._persist(key, t, events)
         return True
+
+    def _sync_push_token(self, events=None):
+        from core.dshctl import get_runtime_token
+        tok = get_runtime_token("local")
+        if not tok:
+            return
+        ssh_server = self.d.get("ssh_server") or ""
+        ssh_user = self.d.get("ssh_user") or ""
+        local_name = self.d.get("local_name") or "local"
+
+        def _push():
+            ok = push_node_token(ssh_server, ssh_user, local_name, tok)
+            if ok and events:
+                events("log", ("  [信箱] 鉴权 Token 已同步至公网信箱 (%s)" % local_name, "ok"))
+        threading.Thread(target=_push, daemon=True).start()
 
     def stop(self, key, events=None):
         if key in self._py_persist and self._py_persist.get(key):
@@ -102,7 +120,9 @@ class TunnelManager:
                 if not t.is_running():
                     if events:
                         events("log", ("  [%s] 隧道断开, 尝试重连..." % key, "warn"))
-                    t.start()
+                    if t.start():
+                        if key == "dsh-tunnel-reverse":
+                            self._sync_push_token(events)
                 stop_flag.wait(5)
         threading.Thread(target=loop, daemon=True).start()
 
@@ -112,4 +132,4 @@ class TunnelManager:
         self._py_persist.clear()
 
 
-__all__ = ["TunnelManager"]
+__all__ = ["TunnelManager", "push_node_token", "pull_node_token"]

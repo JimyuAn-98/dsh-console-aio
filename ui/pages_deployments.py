@@ -189,7 +189,10 @@ class DeploymentPage(BasePage):
         self._test_btn.clicked.connect(self._test_connection)
         self._refresh_btn = QPushButton("刷新总览")
         self._refresh_btn.clicked.connect(self._refresh_all)
-        for b in (self._add_btn, self._del_btn, self._test_btn, self._refresh_btn):
+        self._copy_link_btn = QPushButton("复制免密链接")
+        self._copy_link_btn.setToolTip("复制选中部署节点的免密访问链接（含鉴权 Token）")
+        self._copy_link_btn.clicked.connect(self._copy_auth_link)
+        for b in (self._add_btn, self._del_btn, self._test_btn, self._refresh_btn, self._copy_link_btn):
             btns.addWidget(b)
         btns.addStretch(1)
         note = QLabel("本机不可删除；状态来自 deployment_snapshot(在线/离线/未测试)",
@@ -346,6 +349,36 @@ class DeploymentPage(BasePage):
             self._del_btn.setEnabled(row is not None and not is_local)
         if self._test_btn is not None:
             self._test_btn.setEnabled(row is not None and not is_local)
+        if getattr(self, "_copy_link_btn", None) is not None:
+            self._copy_link_btn.setEnabled(row is not None)
+
+    def _copy_auth_link(self):
+        row = self._selected_row()
+        if not row:
+            return
+        dep = row["deployment"]
+        from core.dshctl import get_runtime_token
+        from core import config as dsh_config
+        from PySide6.QtWidgets import QApplication
+        cfg = dsh_config.load_config()
+        if dep is None:
+            tok = get_runtime_token("local")
+            port = cfg.get("dash_port") or 3080
+            name = _LOCAL_NAME
+        else:
+            name = dep.get("name") or "remote"
+            tok = get_runtime_token(name)
+            port = dep.get("web_port") or dep.get("forward_port") or dep.get("local_port")
+            if not port and dep.get("port") and dep.get("port") != 22:
+                port = dep.get("port")
+            if not port and cfg.get("forward_ports"):
+                port = cfg.get("forward_ports")[0]
+            if not port:
+                port = cfg.get("lab_port") or 3080
+        url = ("http://127.0.0.1:%s/?token=%s" % (port, tok)) if tok else ("http://127.0.0.1:%s" % port)
+        QApplication.clipboard().setText(url)
+        self._op("已复制「%s」免密访问链接: %s" % (name, url), "ok")
+        self.app.loge("已复制「%s」免密访问链接至剪贴板: %s" % (name, url), "ok")
 
     def _fill_detail(self, row):
         # 只读展示快照字段; 未选中或未测过时用占位符

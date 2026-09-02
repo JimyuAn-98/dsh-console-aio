@@ -243,6 +243,68 @@ class Tunnel:
         return killed
 
 
+def _safe_node_key(node_name):
+    if not node_name:
+        return None
+    s = str(node_name).strip()
+    import re
+    if not re.match(r'^[a-zA-Z0-9_\-]+$', s):
+        return None
+    return s
+
+
+def push_node_token(ssh_server, ssh_user, node_name, token, timeout=8):
+    # 将节点鉴权 Token 经 SSH 写入公网服务器信箱文件 ~/.dsh_runtime/<node>.token (chmod 600)
+    if not ssh_server or not ssh_user or not node_name or not token:
+        return False
+    import re
+    if not re.match(r'^[a-zA-Z0-9_\-]+$', str(token)):
+        return False
+    key = _safe_node_key(node_name)
+    if not key:
+        return False
+    cmd = (
+        "mkdir -p ~/.dsh_runtime && "
+        "echo '%s' > ~/.dsh_runtime/%s.token && "
+        "chmod 600 ~/.dsh_runtime/%s.token" % (token, key, key)
+    )
+    try:
+        r = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+             "-o", "LogLevel=ERROR", "%s@%s" % (ssh_user, ssh_server), cmd],
+            capture_output=True, text=True, errors="replace", timeout=timeout,
+            creationflags=NO_WINDOW
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def pull_node_token(ssh_server, ssh_user, node_name, timeout=8):
+    # 经 SSH 从公网服务器信箱文件读取节点鉴权 Token
+    if not ssh_server or not ssh_user or not node_name:
+        return None
+    import re
+    key = _safe_node_key(node_name)
+    if not key:
+        return None
+    cmd = "cat ~/.dsh_runtime/%s.token 2>/dev/null" % key
+    try:
+        r = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+             "-o", "LogLevel=ERROR", "%s@%s" % (ssh_user, ssh_server), cmd],
+            capture_output=True, text=True, errors="replace", timeout=timeout,
+            creationflags=NO_WINDOW
+        )
+        if r.returncode == 0 and r.stdout:
+            t = r.stdout.strip()
+            if re.match(r'^[a-zA-Z0-9_\-]+$', t):
+                return t
+        return None
+    except Exception:
+        return None
+
+
 def _main_demo(argv):
     """命令行干跑演示(供测试, 不经 GUI):
        python tunnel_mgr.py <key> <host> <user> <port[,port..]> <start|stop|status>

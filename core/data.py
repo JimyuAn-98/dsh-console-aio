@@ -1159,6 +1159,9 @@ def collect_overview_data(cfg, depls, smoke=False):
         payload["dsh_version"] = None
 
     # 部署快照: 本机必做; 远程只读(smoke/占位跳过)
+    from core.dshctl import get_runtime_token, set_runtime_token
+    from core.tunnel_mgr import pull_node_token
+
     def snap_for(dep, is_local):
         if not is_local and (smoke or not dep.get("host")
                              or str(dep.get("host")).startswith("YOUR_")):
@@ -1168,16 +1171,43 @@ def collect_overview_data(cfg, depls, smoke=False):
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    # 本机节点
+    local_port = payload.get("dash_port") or 3080
+    local_tok = get_runtime_token("local", refresh=True) if payload.get("web_ok") else None
+    local_auth_url = ("http://127.0.0.1:%s/?token=%s" % (local_port, local_tok)) if local_tok else ("http://127.0.0.1:%s" % local_port)
+    payload["local_token"] = local_tok
+    payload["local_auth_url"] = local_auth_url
     payload["deploys"].append({
         "dep": {"name": payload["local_name"]},
         "snap": snap_for(None, True),
         "local": True,
+        "token": local_tok,
+        "auth_url": local_auth_url,
     })
+
+    # 远程节点 (若配置了公网 SSH 则尝试拉取信箱 Token)
+    ssh_srv = cfg.get("ssh_server") or ""
+    ssh_usr = cfg.get("ssh_user") or ""
     for d in depls:
+        dname = d.get("name") or "remote"
+        rtok = get_runtime_token(dname)
+        if not rtok and ssh_srv and ssh_usr and not smoke:
+            rtok = pull_node_token(ssh_srv, ssh_usr, dname)
+            if rtok:
+                set_runtime_token(dname, rtok)
+        dport = d.get("web_port") or d.get("forward_port") or d.get("local_port")
+        if not dport and d.get("port") and d.get("port") != 22:
+            dport = d.get("port")
+        if not dport and cfg.get("forward_ports"):
+            dport = cfg.get("forward_ports")[0]
+        if not dport:
+            dport = cfg.get("lab_port") or 3080
         payload["deploys"].append({
             "dep": d,
             "snap": snap_for(d, False),
             "local": False,
+            "token": rtok,
+            "auth_url": ("http://127.0.0.1:%s/?token=%s" % (dport, rtok)) if rtok else ("http://127.0.0.1:%s" % dport),
         })
 
     # 数据速览

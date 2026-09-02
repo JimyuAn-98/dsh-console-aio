@@ -54,7 +54,7 @@ class OverviewPage(BasePage):
         root.addWidget(QLabel("本机与远程部署的实时状态、数据速览与隧道探测(纯读获取, 进页自动取缓存)。",
                               objectName="cardHint"))
 
-        # 运行状态卡: dsh web 探测 + 本体版本
+        # 运行状态卡: dsh web 探测 + 本体版本 + 鉴权链接与捕获状态
         run = QFrame(objectName="card")
         rl = QHBoxLayout(run)
         rl.setContentsMargins(14, 10, 14, 10)
@@ -62,9 +62,18 @@ class OverviewPage(BasePage):
         self._web_lbl = QLabel("dsh web 检测中…", objectName="monVal")
         self._web_lbl.setTextFormat(Qt.RichText)
         rl.addWidget(self._web_lbl)
-        rl.addStretch(1)
+        rl.addSpacing(10)
+        self._local_token_lbl = QLabel("", objectName="monName")
+        self._local_token_lbl.setTextFormat(Qt.RichText)
+        self._local_token_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._local_token_lbl.setWordWrap(True)
+        rl.addWidget(self._local_token_lbl, 1)
+        self._copy_local_link_btn = QPushButton("复制本机链接")
+        self._copy_local_link_btn.setToolTip("复制本机带鉴权 Token 的完整访问链接")
+        self._copy_local_link_btn.setEnabled(False)
+        self._copy_local_link_btn.clicked.connect(self._copy_local_auth_url)
+        rl.addWidget(self._copy_local_link_btn)
         root.addWidget(run)
-
         # 数据速览: 四张迷你卡
         quick = QHBoxLayout()
         quick.setSpacing(8)
@@ -85,14 +94,81 @@ class OverviewPage(BasePage):
         root.addLayout(quick)
 
         # 部署列表(本机 + 远程, 快照字段进 meta)
+        dep_card = QFrame(objectName="card")
+        dv = QVBoxLayout(dep_card)
+        dv.setContentsMargins(12, 10, 12, 10)
+        dv.setSpacing(6)
+        dh = QHBoxLayout()
+        dh.addWidget(QLabel("部署", objectName="rightTitle"))
+        dh.addSpacing(10)
+        self._dep_auth_lbl = QLabel("", objectName="monName")
+        self._dep_auth_lbl.setTextFormat(Qt.RichText)
+        self._dep_auth_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._dep_auth_lbl.setWordWrap(True)
+        dh.addWidget(self._dep_auth_lbl, 1)
+        self._copy_link_btn = QPushButton("复制免密链接")
+        self._copy_link_btn.setToolTip("复制选中节点的免密访问链接（含鉴权 Token）")
+        self._copy_link_btn.setEnabled(False)
+        self._copy_link_btn.clicked.connect(self._copy_selected_auth_url)
+        dh.addWidget(self._copy_link_btn)
+        dv.addLayout(dh)
         self._dep_list = ModernList()
-        root.addWidget(card_wrap("部署", self._dep_list), 1)
+        self._dep_list.itemSelectionChanged.connect(self._on_dep_select)
+        self._dep_list.itemClicked.connect(lambda _: self._on_dep_select())
+        dv.addWidget(self._dep_list, 1)
+        root.addWidget(dep_card, 1)
 
         # 隧道速览(富文本圆点, 与右栏监控同口径)
         self._tunnel_lbl = QLabel("", objectName="monName")
         self._tunnel_lbl.setTextFormat(Qt.RichText)
         self._tunnel_lbl.setWordWrap(True)
         root.addWidget(card_wrap("隧道状态", self._tunnel_lbl))
+
+    def _selected_item_data(self):
+        row = self._dep_list.current_data()
+        return row.get("data") if (isinstance(row, dict) and "data" in row) else row
+
+    def _on_dep_select(self):
+        item = self._selected_item_data()
+        if not item:
+            self._copy_link_btn.setEnabled(False)
+            self._dep_auth_lbl.setText("")
+            return
+        url = item.get("auth_url") or ""
+        tok = item.get("token")
+        name = item.get("dep", {}).get("name") or "节点"
+        snap = item.get("snap") or {}
+        is_local = bool(item.get("local"))
+        is_online = (getattr(self, "_last_payload", {}).get("web_ok") if is_local else snap.get("ok"))
+        if is_online:
+            if tok:
+                self._dep_auth_lbl.setText(
+                    '<span style="color:#9a9ab0">「%s」免密链接: </span>'
+                    '<span style="color:#7ecb6a; font-family:Consolas,monospace;">%s</span>'
+                    % (name, url))
+            else:
+                self._dep_auth_lbl.setText(
+                    '<span style="color:#9a9ab0">「%s」免密链接: </span>'
+                    '<span style="color:#e0a050; font-family:Consolas,monospace;">%s (信箱未同步Token)</span>'
+                    % (name, url))
+            self._copy_link_btn.setEnabled(bool(url))
+        else:
+            self._dep_auth_lbl.setText(
+                '<span style="color:#9a9ab0">「%s」: </span>'
+                '<span style="color:#e07a7a;">离线 / 未配置</span>' % name)
+            self._copy_link_btn.setEnabled(False)
+
+    def _copy_selected_auth_url(self):
+        item = self._selected_item_data()
+        if not item:
+            return
+        url = item.get("auth_url")
+        name = item.get("dep", {}).get("name") or "节点"
+        if url:
+            from PySide6.QtWidgets import QApplication
+            QApplication.clipboard().setText(url)
+            self._set_status("已复制「%s」免密访问链接" % name)
+            self.app.loge("已复制「%s」免密访问链接至剪贴板: %s" % (name, url), "ok")
 
     # ── 读取(先读缓存, mtime 变化或强制时后台拉取) ──
     def refresh(self, force=False):
@@ -136,8 +212,23 @@ class OverviewPage(BasePage):
                 self._spinner.set_status("ok")
                 self._spinner.setToolTip("无变化(缓存已是最新)")
 
+    def _copy_local_auth_url(self):
+        url = getattr(self, "_last_payload", {}).get("local_auth_url")
+        if not url:
+            from core.dshctl import get_runtime_token
+            tok = get_runtime_token("local")
+            cfg = dsh_config.load_config()
+            port = cfg.get("dash_port") or 3080
+            url = ("http://127.0.0.1:%s/?token=%s" % (port, tok)) if tok else ("http://127.0.0.1:%s" % port)
+        if url:
+            from PySide6.QtWidgets import QApplication
+            QApplication.clipboard().setText(url)
+            self._set_status("已复制本机访问链接")
+            self.app.loge("已复制本机访问链接至剪贴板: %s" % url, "ok")
+
     def _apply_data(self, p):
         # 运行状态卡
+        self._last_payload = p
         if p.get("web_ok"):
             self._web_lbl.setText(
                 '<span style="color:#7ecb6a">●</span> dsh web :%s 在线'
@@ -145,10 +236,26 @@ class OverviewPage(BasePage):
                 % (p.get("dash_port"), p.get("web_ms") or 0)
                 + ('<span style="color:#9a9ab0"> · dsh 本体 v%s</span>' % p["dsh_version"]
                    if p.get("dsh_version") else ""))
+            tok = p.get("local_token")
+            auth_url = p.get("local_auth_url") or ("http://127.0.0.1:%s" % p.get("dash_port", 3080))
+            if tok:
+                self._local_token_lbl.setText(
+                    '<span style="color:#9a9ab0">鉴权链接: </span>'
+                    '<span style="color:#7ecb6a; font-family:Consolas,monospace;">%s</span>'
+                    % auth_url)
+                self._copy_local_link_btn.setEnabled(True)
+            else:
+                self._local_token_lbl.setText(
+                    '<span style="color:#9a9ab0">鉴权链接: </span>'
+                    '<span style="color:#e0a050; font-family:Consolas,monospace;">%s (未捕获到Token)</span>'
+                    % auth_url)
+                self._copy_local_link_btn.setEnabled(True)
         else:
             self._web_lbl.setText(
                 '<span style="color:#e07a7a">●</span> dsh web :%s 离线'
-                '<span style="color:#9a9ab0">（未启动时可在隧道页启动）</span>' % p.get("dash_port"))
+                '<span style="color:#9a9ab0">（可在控制台启动）</span>' % p.get("dash_port"))
+            self._local_token_lbl.setText('<span style="color:#9a9ab0">鉴权链接: 离线未生成</span>')
+            self._copy_local_link_btn.setEnabled(False)
 
         # 部署列表
         rows = []
@@ -166,17 +273,31 @@ class OverviewPage(BasePage):
             meta.append("预设 %s" % (snap.get("presets") or 0))
             meta.append("会话 %s · %s" % (snap.get("sessions") or 0,
                                           _ov_size(snap.get("session_bytes"))))
-            if snap.get("ok"):
-                badge, dot = ("在线", "ok"), "#7ecb6a"
+            tok = item.get("token")
+            is_local = bool(item.get("local"))
+            is_online = (p.get("web_ok") if is_local else snap.get("ok"))
+            if is_online:
+                dot = "#7ecb6a"
+                badges = [("在线", "ok")]
+                if tok:
+                    badges.append(("Token就绪", "ok"))
+                else:
+                    badges.append(("未同步Token", "warn"))
             else:
                 err = str(snap.get("error") or "")
                 if "未配置" in err:
                     badge, dot = ("未配置", "dim"), "#9a9ab0"
                 else:
                     badge, dot = ("离线", "err"), "#e07a7a"
+                badges = [badge]
             rows.append({"title": name, "meta": " · ".join(meta),
-                         "dot": dot, "badges": [badge], "data": item})
+                         "dot": dot, "badges": badges, "data": item})
+        cur = self._dep_list.currentRow()
         self._dep_list.set_rows(rows)
+        if rows:
+            target_row = cur if 0 <= cur < len(rows) else 0
+            self._dep_list.setCurrentRow(target_row)
+        self._on_dep_select()
 
         # 数据速览
         s = p.get("sessions")
