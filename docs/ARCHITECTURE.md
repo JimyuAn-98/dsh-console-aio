@@ -43,11 +43,12 @@
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ 3. 前端 UI 展示层 ui/ + 主程序 (只负责视图渲染 + 订阅信号 + 调用 service)    │
-│    dsh-console-aio.py 主窗口壳 (顶栏/左导航/右状态/底部日志) + 总览页/隧道页│
-│    ui/pages_*.py      15 个管理页面 (sessions/plugins/usage/settings/theme…) │
+│    dsh-console-aio.py 主窗口骨架 (顶栏/左导航/系统托盘常驻/底部日志/启动入口)│
+│    ui/pages_*.py      全 17 个管理页面 (overview/tunnels/dsh/sessions/theme…)│
+│    ui/monitor.py      右侧健康监控折叠栏 (StatusPanel) + 线程安全日志桥      │
 │    ui/base.py         BasePage (提供 safe_emit 页面销毁防崩机制)             │
 │    ui/theme.py        主题引擎 (TOKENS 实时换肤 / 明暗变体 / QSS 生成)       │
-│    ui/widgets.py      现代组件库 (卡片/列表/确认条/刷新指示器)               │
+│    ui/widgets.py      现代组件库 (卡片/列表/确认条 ConfirmBanner/刷新指示器) │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 

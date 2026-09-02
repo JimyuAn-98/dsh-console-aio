@@ -45,6 +45,8 @@ echo [1/2] PyInstaller onefile build (PySide6)...
   --name dsh-console-aio ^
   --icon logo.ico ^
   --hidden-import core --hidden-import core.tunnel_mgr ^
+  --hidden-import ui.monitor --hidden-import ui.pages_overview ^
+  --hidden-import ui.pages_tunnels --hidden-import ui.pages_dsh ^
   --hidden-import ui.pages_sessions --hidden-import ui.pages_agents ^
   --hidden-import ui.pages_profiles --hidden-import ui.pages_plugins ^
   --hidden-import ui.pages_taskboard --hidden-import ui.pages_usage ^
@@ -52,7 +54,6 @@ echo [1/2] PyInstaller onefile build (PySide6)...
   --hidden-import ui.pages_keys --hidden-import ui.pages_version ^
   --hidden-import ui.pages_deployments --hidden-import ui.pages_logs ^
   --hidden-import ui.pages_settings --hidden-import ui.pages_theme ^
-  --hidden-import ui.pages_dsh ^
   --add-data "ui/theme.qss;ui" ^
   --add-data "logo.png;." ^
   --add-data "RELEASE_NOTES.md;." ^

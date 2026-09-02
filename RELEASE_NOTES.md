@@ -3,6 +3,21 @@
 
 ## v0.8.0 (未发布)
 
+### 主入口模块化拆分与全 17 页面架构对称（2026-09-01）
+
+- **主入口大幅瘦身（`dsh-console-aio.py`）**：
+  - 将历史遗留在主入口文件中的 `OverviewPage`、`TunnelsPage` 与右侧监控栏彻底抽离拆分，主入口代码体量从 **1605 行骤降至 480 行（缩减约 70%）**；
+  - 主入口文件聚焦纯粹职责：`MainWindow` 顶级布局骨架、系统托盘管理、导航路由分发、F12 检查模式与 `main()` 启动入口。
+- **全 17 页面独立模块化（`ui/pages_*.py`）**：
+  - 新增 `ui/pages_overview.py`：独立承载总览页（`OverviewPage`）；
+  - 新增 `ui/pages_tunnels.py`：独立承载隧道页（`TunnelsPage`）与拓扑方案管理；
+  - 全系统 17 个功能管理页面全部标准化为 `ui/pages_*.py`，架构达到 100% 对齐与对称。
+- **监控组件解耦（`ui/monitor.py`）**：
+  - 新增 `ui/monitor.py`：独立承载右侧监控折叠栏（`RightBar` / `StatusPanel`）与跨线程安全日志桥（`LogBridge`）。
+- **构建与测试同步**：
+  - 同步更新 `build_win.bat`、`dsh-console-aio.spec` 与 `dsh-console-debug.spec` 的 `--hidden-import` 配置；
+  - 全量 404 纯单测 + 83 GUI 冒烟测试 + `--smoke` 离屏验证 100% 通过。
+
 ### 全页内联确认条（ConfirmBanner）收敛危险操作弹窗 + 系统托盘与常驻快捷运维（2026-09-01）
 
 - **全页内联确认条组件 `ConfirmBanner`（路线 B）**：

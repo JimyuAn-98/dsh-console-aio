@@ -3,7 +3,17 @@
 > 当前进展与未来计划的状态总览。**愿景细节/探索记录**见 `docs/VISION_部署子工具组.md`；
 > **历史方案归档**见 `docs/archive/PLANS.md`；**已知问题**见 `docs/BUGS.md`。
 
-## 当前状态（2026-08-30）
+## 当前状态（2026-09-01）
+
+- ✅ **主入口模块化拆分与全 17 页面架构对称（2026-09-01）**：
+  - `dsh-console-aio.py` 从 1605 行瘦身至 480 行（缩减 70%），只承载主窗口骨架、系统托盘与 `main()` 启动入口；
+  - 抽取 `ui/pages_overview.py`（总览页）、`ui/pages_tunnels.py`（隧道页），实现全 17 个页面全部标准化独立为 `ui/pages_*.py`；
+  - 抽取 `ui/monitor.py` 独立承载右侧监控折叠栏（`StatusPanel`）与线程安全日志桥（`LogBridge`）；
+  - 全量 404 单测 + 83 GUI 冒烟测试 + `--smoke` 离屏验证 100% 通过。
+- ✅ **全页内联确认条（ConfirmBanner）收敛危险操作弹窗 + 系统托盘与常驻快捷运维（2026-09-01）**：
+  - 新增 `ConfirmBanner` 组件（`ui/widgets.py` + `ui/theme.py`），支持 `level="danger"` 与 `level="warn"`，键盘 `Esc` 快捷取消；
+  - 全面替换全项目约 20 处阻塞式 `QMessageBox.question` 模态弹窗（会话、Profile、插件、部署、LLM、SSH 密钥、设置导入、主题、更新、DSH 卸载）；
+  - Windows 系统托盘常驻：关窗最小化到托盘维持隧道，鼠标悬停实时 Tooltip 状态监控，右键菜单免开主界面快捷启停 DSH 与隧道。
 
 - ✅ **P0 配置驱动完成**：三处机器命名可自定义、监测端口 GUI 编辑、保存即热重载
 - ✅ **P1 外观全部完成**：深色亚克力（`set_accent_blur` blurbehind）、保留原生标题栏、分栏拖拽、右栏收起动画、DSH 品牌 +
