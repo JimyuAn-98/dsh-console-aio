@@ -99,22 +99,11 @@ class TestSettingsPage:
         page = SettingsPage(_FakeApp())
         assert page._vars["dash_port"].text() == "3080"
         assert page._vars["dash_cmd"].text() == "pnpm.cmd dsh web"
-        assert page._local_tbl.rowCount() == 1
         assert page._in_local.text() == "本机"
         page.close()
         qapp_mod.processEvents()
 
-    def test_template_fill(self, qapp_mod, monkeypatch):
-        from ui.pages_settings import SettingsPage
-        import core.config as dsh_config
-        monkeypatch.setattr(dsh_config, "load_config", lambda path=None: {})
-        page = SettingsPage(_FakeApp())
-        page._apply("在家→中继隧道")
-        assert page._vars["ssh_server"].text() == "YOUR_PUBLIC_IP"
-        page.close()
-        qapp_mod.processEvents()
-
-    def test_save_merges_and_reloads(self, qapp_mod, monkeypatch):
+    def test_save_merges_reloads_and_purges_legacy(self, qapp_mod, monkeypatch):
         from ui.pages_settings import SettingsPage
         import core.config as dsh_config
         monkeypatch.setattr(dsh_config, "load_config", lambda path=None: dict(self.CFG))
@@ -125,8 +114,11 @@ class TestSettingsPage:
         page = SettingsPage(app)
         page._on_save()
         assert saved["dash_port"] == 3080
-        assert saved["local_ports"] == [[3080, "dsh web", ""]]
         assert saved["ssh_server"] == "YOUR_PUBLIC_IP"
+        assert saved["local_name"] == "本机"
+        # 验证老旧字段被成功剔除
+        for legacy_key in ("local_ports", "remote_tunnels", "forward_ports", "reverse_port", "lab_port", "lab_server", "lab_user"):
+            assert legacy_key not in saved
         assert app.reloaded is True
         page.close()
         qapp_mod.processEvents()

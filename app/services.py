@@ -94,7 +94,7 @@ class DshService(QObject):
                 self.finished.emit(op, False)
         threading.Thread(target=run, daemon=True).start()
 
-    def start_tunnel(self, key, mode, op=None):
+    def start_tunnel(self, key, mode="start", op=None):
         op = op or key
         ev = self._events()
 
@@ -104,6 +104,43 @@ class DshService(QObject):
                 self.finished.emit(op, True)
             except Exception as e:
                 ev("log", ("[%s] 异常: %s" % (key, e), "err"))
+                self.finished.emit(op, False)
+        threading.Thread(target=run, daemon=True).start()
+
+    def stop_tunnel(self, key, op=None):
+        op = op or key
+        ev = self._events()
+
+        def run():
+            try:
+                self.tunnels.stop(key, ev)
+                self.finished.emit(op, True)
+            except Exception as e:
+                ev("log", ("[%s] 停止异常: %s" % (key, e), "err"))
+                self.finished.emit(op, False)
+        threading.Thread(target=run, daemon=True).start()
+
+    def start_all_tunnels(self, op="start-all-tunnels"):
+        ev = self._events()
+
+        def run():
+            try:
+                n = self.tunnels.start_all(events=ev)
+                self.finished.emit(op, n > 0)
+            except Exception as e:
+                ev("log", ("[tunnels] 批量启动异常: %s" % e, "err"))
+                self.finished.emit(op, False)
+        threading.Thread(target=run, daemon=True).start()
+
+    def stop_all_tunnels(self, op="stop-all-tunnels"):
+        ev = self._events()
+
+        def run():
+            try:
+                self.tunnels.stop_all(events=ev)
+                self.finished.emit(op, True)
+            except Exception as e:
+                ev("log", ("[tunnels] 批量停止异常: %s" % e, "err"))
                 self.finished.emit(op, False)
         threading.Thread(target=run, daemon=True).start()
 

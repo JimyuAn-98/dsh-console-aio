@@ -63,8 +63,11 @@ def collect(events=None, cfg=None, app_version="", base_dir="."):
     def probe(port):
         return {"port": port, "online": dsh_tunnels.tcp_ok("127.0.0.1", port)}
 
-    ports = [probe(p) for p in (*d["forward_ports"], d["lab_port"]) if p]
+    probe_pts = [p[0] for p in (d.get("local_ports") or []) if p and p[0] != d.get("dash_port")]
+    ports = [probe(p) for p in probe_pts if p]
     deployments = [x for x in (cfg or {}).get("deployments") or [] if isinstance(x, dict)]
+    lab_srv = d.get("lab_server") or (deployments[0].get("host") if deployments else "")
+    lab_usr = d.get("lab_user") or (deployments[0].get("user") if deployments else "")
     return {
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "app_version": app_version,
@@ -73,17 +76,17 @@ def collect(events=None, cfg=None, app_version="", base_dir="."):
         "os": _os_line(),
         "tools": _tool_versions(),
         "local_name": d["local_name"],
-        "relay": {"name": d["ssh_name"], "host": mask_host(d["ssh_server"]),
-                  "user": mask_user(d["ssh_user"]), "configured": bool(d["ssh_server"])},
-        "lab": {"name": d["lab_name"], "host": mask_host(d["lab_server"]),
-                "user": mask_user(d["lab_user"]), "configured": bool(d["lab_server"])},
+        "relay": {"name": d["ssh_name"], "host": mask_host(d.get("ssh_server", "")),
+                  "user": mask_user(d.get("ssh_user", "")), "configured": bool(d.get("ssh_server"))},
+        "lab": {"name": d["lab_name"], "host": mask_host(lab_srv),
+                "user": mask_user(lab_usr), "configured": bool(lab_srv)},
         "dsh_web": probe(d["dash_port"]),
         "ports": ports,
-        "tunnels_configured": len(d["remote_tunnels"]),
+        "tunnels_configured": len(d.get("tunnels") or []),
         "tunnels": dsh_tunnels.tunnels_snapshot(base_dir),
         "deployments": len(deployments),
         "dash_repo_tail": os.path.basename((d["dash_repo"] or "").replace("\\", "/").rstrip("/")) or "(未配置)",
-        "local_ports_count": len(d["local_ports"]),
+        "local_ports_count": len(d.get("local_ports") or []),
     }
 
 

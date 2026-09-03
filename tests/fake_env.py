@@ -53,6 +53,7 @@ def make_fake_config_dict():
         "dash_port": 0,
         "dash_cmd": ["pnpm.cmd", "dsh", "web"],
         "poll_seconds": 4,
+        "tunnels": [],
         "local_ports": [],
         "remote_tunnels": [],
         "forward_ports": [],

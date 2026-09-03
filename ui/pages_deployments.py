@@ -371,6 +371,13 @@ class DeploymentPage(BasePage):
             port = dep.get("web_port") or dep.get("forward_port") or dep.get("local_port")
             if not port and dep.get("port") and dep.get("port") != 22:
                 port = dep.get("port")
+            if not port:
+                for tun in (cfg.get("tunnels") or []):
+                    if tun.get("mode") == "forward" and (tun.get("host") == dep.get("host") or tun.get("name") == name):
+                        fws = tun.get("forwards") or []
+                        if fws:
+                            port = fws[0].get("local_port") if isinstance(fws[0], dict) else fws[0][0]
+                            break
             if not port and cfg.get("forward_ports"):
                 port = cfg.get("forward_ports")[0]
             if not port:

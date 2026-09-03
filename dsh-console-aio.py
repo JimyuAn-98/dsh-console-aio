@@ -79,18 +79,16 @@ if getattr(sys, 'frozen', False) and BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 
-def _load_config():
-    try:
-        with open(CONFIG_PATH, encoding='utf-8') as f:
-            return json.load(f) or {}
-    except Exception:
-        return {}
+def _load_config(allow_empty=False):
+    if not allow_empty:
+        allow_empty = "--smoke" in sys.argv or os.environ.get("DSH_ALLOW_EMPTY_PORTS") == "1"
+    return dsh_config.load_derived(CONFIG_PATH, allow_empty_ports=allow_empty)
 
 
 CONFIG = _load_config()
 
 NAV_ITEMS = [
-    ('总览', 'overview'), ('DSH 管理', 'dsh'), ('隧道', 'tunnels'),
+    ('总览', 'overview'), ('DSH 管理', 'dsh'), ('SSH隧道管理', 'tunnels'),
     ('会话与工作区', 'sessions'),
     ('Agent 模式', 'agents'), ('Profile 管理', 'profiles'), ('插件管理', 'plugins'),
     ('任务看板', 'taskboard'), ('模型用量', 'usage'), ('LLM 配置', 'llm'),
@@ -113,6 +111,9 @@ class MainWindow(QMainWindow):
     def __init__(self, smoke=False):
         super().__init__()
         self.smoke = smoke
+        if smoke:
+            global CONFIG
+            CONFIG = _load_config(allow_empty=True)
         self.setWindowTitle("DSH Console · v" + APP_VERSION)
         if LOGO_PATH:
             self.setWindowIcon(QIcon(LOGO_PATH))   # 任务栏/Alt-Tab 图标
@@ -461,7 +462,7 @@ class MainWindow(QMainWindow):
 
     def reload_config(self):
         global CONFIG
-        CONFIG = _load_config()
+        CONFIG = _load_config(allow_empty=getattr(self, "smoke", False))
         _apply_items(CONFIG)
         self.service.reload_config()
         self._status_panel.reload(CONFIG)
@@ -592,18 +593,50 @@ class MainWindow(QMainWindow):
         self._set_status("本机端口 %d/%d · %s · ssh.exe %s"
                          % (len(local_ok), local_total, ssh_txt, sc))
 
-        # 动态更新托盘 Tooltip
+        # 动态更新托盘 Tooltip (按当前方案丰富化展示)
         if getattr(self, "_tray", None) and self._tray.isVisible():
             dash_port = CONFIG.get("dash_port", 3080)
-            dsh_ok = (local or {}).get(dash_port, (False, -1))[0]
-            dsh_status_txt = "运行中 (:%d)" % dash_port if dsh_ok else "未运行"
-            tun_active = len([1 for p, ok in (remote or {}).items() if ok])
-            tun_total = len(CONFIG.get("remote_tunnels", []))
-            if tun_active > 0:
-                tun_status_txt = "运行中 (%d/%d 活跃)" % (tun_active, tun_total)
+            dsh_entry = (local or {}).get(dash_port, (False, -1))
+            dsh_ok = bool(dsh_entry[0])
+            dsh_ms = dsh_entry[1] if len(dsh_entry) > 1 else -1
+            if dsh_ok:
+                dsh_txt = "运行中 (:%d, %dms)" % (dash_port, dsh_ms) if dsh_ms >= 0 else ("运行中 (:%d)" % dash_port)
+                dsh_line = "● 本机 dsh: %s" % dsh_txt
             else:
-                tun_status_txt = "已停止"
-            self._tray.setToolTip("dsh 控制台\n● dsh: %s\n● 隧道: %s" % (dsh_status_txt, tun_status_txt))
+                dsh_line = "○ 本机 dsh: 未运行 (:%d)" % dash_port
+
+            plan_name = CONFIG.get("tunnel_plans_active") or "默认方案"
+            tunnels = dsh_config.normalize_tunnels(CONFIG, allow_empty_ports=True)
+            card_states = card_states_from_monitor(local, remote, CONFIG)
+
+            tun_lines = []
+            active_count = 0
+            for tun in tunnels:
+                tid = tun.get("id")
+                tname = tun.get("name") or tid or "未命名"
+                mode = tun.get("mode") or "forward"
+                is_on = bool(card_states.get(tid, False))
+                if is_on:
+                    active_count += 1
+                sym = "●" if is_on else "○"
+                st = "在线" if is_on else "已停止"
+                forwards = tun.get("forwards") or []
+                if mode == "forward":
+                    pts = [str(fw.get("local_port") if isinstance(fw, dict) else fw[0]) for fw in forwards if fw]
+                    ports_txt = (":" + ",".join(pts)) if pts else "无端口"
+                else:
+                    pts = [str(fw.get("local_port") if isinstance(fw, dict) else fw[0]) for fw in forwards if fw]
+                    ports_txt = ("公网:" + ",".join(pts)) if pts else "无端口"
+                tun_lines.append("%s %s: %s (%s)" % (sym, tname, st, ports_txt))
+
+            if tunnels:
+                header = "DSH 控制台 · %s (%d/%d 隧道在线)" % (plan_name, active_count, len(tunnels))
+                tooltip = header + "\n" + dsh_line + "\n" + "\n".join(tun_lines)
+            else:
+                header = "DSH 控制台 · %s" % plan_name
+                tooltip = header + "\n" + dsh_line + "\n（当前方案暂无隧道）"
+
+            self._tray.setToolTip(tooltip)
 
     # ---- 系统托盘与后台常驻 ----
     def _init_tray(self):
@@ -638,10 +671,10 @@ class MainWindow(QMainWindow):
         act_restart_dsh.triggered.connect(lambda: self.service.restart_dsh(CONFIG))
 
         menu.addSeparator()
-        act_start_tun = menu.addAction("🚇 启动隧道")
-        act_start_tun.triggered.connect(lambda: self.service.start_tunnels(CONFIG, CONFIG.get("forward_ports", [])))
-        act_stop_tun = menu.addAction("⏹️ 停止隧道")
-        act_stop_tun.triggered.connect(lambda: self.service.stop_tunnels(CONFIG.get("forward_ports", [])))
+        act_start_tun = menu.addAction("🚇 启动全部隧道")
+        act_start_tun.triggered.connect(lambda: self.service.start_all_tunnels())
+        act_stop_tun = menu.addAction("⏹️ 停止全部隧道")
+        act_stop_tun.triggered.connect(lambda: self.service.stop_all_tunnels())
 
         menu.addSeparator()
         act_quit = menu.addAction("❌ 退出控制台")

@@ -89,8 +89,8 @@ class DshService(QObject):
 
 | 数据域 | core 业务模块 | UI 页面 / 承载 | 关键职责与安全红线 |
 |---|---|---|---|
-| **隧道管理** | `tunnel_mgr.py` + `tunnels.py` | `pages_tunnels.py` | 纯 Python SSH 隧道管理，无 .ps1 依赖；PID 存盘防孤儿进程 |
-| **隧道方案规划** | `tunnel_planner.py` | `pages_tunnels.py` (规划器卡片) | 拓扑快照保存/切换，本地/远端端口冲突检测 |
+| **隧道管理与向导** | `tunnel_mgr.py` + `tunnels.py` | `pages_tunnels.py` + `dialog_tunnel_wizard.py` | 声明式通用 TunnelItem 模型，场景向导 + 端口冲突检测，批量启停，PID 存盘 |
+| **隧道方案规划** | `tunnel_planner.py` | `pages_tunnels.py` (规划器卡片) | 整套动态拓扑快照保存/切换，本地/远端端口冲突检测 |
 | **本机 dsh 操控** | `dshctl.py` | `pages_dsh.py` (DSH 管理) | 启停进程、一键更新 (git pull + clean + build)、版本比对 |
 | **环境与安装** | `env.py` | `pages_dsh.py` (页面内分步) | 工具链检查 (git/node/npm/pnpm)、一键全新安装、彻底卸载守卫 |
 | **总览概览** | `data.py` + `diagnostics.py` | `pages_overview.py` | 运行状态卡 + 数据域指标速览 + 部署列表 |

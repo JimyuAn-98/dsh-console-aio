@@ -11,21 +11,62 @@
   "ssh_timeout": 10,
   "update_timeout": 1800,
 
-  "local_ports": [
-    [3080, "本机dsh", "GUI"],
-    [8090, "本机8090", "在家隧道→实验室dshGUI"],
-    [8022, "本机8022", "在家隧道→实验室dshSSH"],
-    [8091, "本机8091", "在家隧道→本机GUI"],
-    [3090, "本机3090", "实验室→实验室dshGUI"]
-  ],
-  "remote_tunnels": [
-    [8090, "公网服务器:8090", "←实验室dsh GUI"],
-    [8022, "公网服务器:8022", "←实验室dsh SSH"],
-    [8091, "公网服务器:8091", "←本机GUI"]
-  ],
-  "forward_ports": [8090, 8022, 8091],
+  "local_name": "本机",
+  "lab_name": "实验室",
+  "ssh_name": "公网中转",
 
   "deployments": [
     {"name": "实验室服务器", "host": "YOUR_LAB_IP", "user": "YOUR_USER", "port": 22, "dsh_home": "~/.dsh"}
-  ]
+  ],
+
+  "tunnels": [
+    {
+      "id": "tun_office_relay",
+      "name": "在家访问中转正向隧道",
+      "mode": "forward",
+      "host": "YOUR_PUBLIC_SERVER_IP",
+      "user": "tunnel",
+      "ssh_port": 22,
+      "forwards": [
+        {"local_port": 8090, "remote_host": "127.0.0.1", "remote_port": 8090, "desc": "办公室 dsh GUI"}
+      ],
+      "auto_restart": true,
+      "enabled": true
+    },
+    {
+      "id": "tun_local_reverse",
+      "name": "本机反向暴露隧道",
+      "mode": "reverse",
+      "host": "YOUR_PUBLIC_SERVER_IP",
+      "user": "tunnel",
+      "ssh_port": 22,
+      "forwards": [
+        {"local_port": 8091, "remote_host": "127.0.0.1", "remote_port": 3080, "desc": "本机 dsh -> 公网 :8091"}
+      ],
+      "auto_restart": true,
+      "enabled": true
+    }
+  ],
+
+  "tunnel_plans": [
+    {
+      "name": "默认方案",
+      "tunnels": [
+        {
+          "id": "tun_office_relay",
+          "name": "在家访问中转正向隧道",
+          "mode": "forward",
+          "host": "YOUR_PUBLIC_SERVER_IP",
+          "user": "tunnel",
+          "ssh_port": 22,
+          "forwards": [
+            {"local_port": 8090, "remote_host": "127.0.0.1", "remote_port": 8090, "desc": "办公室 dsh GUI"}
+          ],
+          "auto_restart": true,
+          "enabled": true
+        }
+      ]
+    }
+  ],
+  "tunnel_plans_active": "默认方案"
 }

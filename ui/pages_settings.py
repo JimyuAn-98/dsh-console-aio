@@ -34,28 +34,13 @@ class SettingsPage(BasePage):
         "dash_repo": "本机 dsh 仓库绝对路径, 如 D:/Applications/deepseek-harness",
         "dash_port": "本机 dsh GUI 端口(默认 3080)",
         "dash_cmd": "启动命令(空格分隔): pnpm.cmd dsh web",
-        "forward_ports": "在家正向隧道本机端口, 逗号分隔: 8090,8022,8091",
-        "lab_server": "实验室服务器 IP(局域网直连用)",
-        "lab_user": "实验室服务器 SSH 用户名",
-        "lab_port": "实验室 dsh 本机映射端口(默认 3090)",
-        "reverse_port": "本机 dsh 暴露到中继的端口(公网服务器:端口 → 本机)",
         "poll_seconds": "本机健康检查间隔(秒)",
         "remote_poll_seconds": "SSH 直查中继监听状态的间隔(秒)",
     }
     LABELS = {
         "ssh_server": "服务器 IP/域名", "ssh_user": "用户名", "ssh_port": "SSH 端口",
         "dash_repo": "仓库路径", "dash_port": "端口", "dash_cmd": "启动命令",
-        "forward_ports": "在家正向端口", "lab_server": "实验室 IP",
-        "lab_user": "实验室用户", "lab_port": "实验室映射端口",
-        "reverse_port": "反向端口", "poll_seconds": "本机轮询(秒)",
-        "remote_poll_seconds": "远端轮询(秒)",
-    }
-    TEMPLATES = {
-        "在家→中继隧道": {"ssh_server": "YOUR_PUBLIC_IP", "ssh_user": "YOUR_USER",
-                      "forward_ports": "8090,8022,8091", "reverse_port": "8091"},
-        "实验室→直连实验室dsh": {"lab_server": "YOUR_LAB_IP", "lab_user": "YOUR_USER",
-                          "lab_port": "3090"},
-        "本机→中继反向": {"reverse_port": "8091"},
+        "poll_seconds": "本机轮询(秒)", "remote_poll_seconds": "远端轮询(秒)",
     }
 
     def __init__(self, app, parent=None):
@@ -99,7 +84,7 @@ class SettingsPage(BasePage):
         head.addWidget(self._status_lbl)
         root.addLayout(head)
         self._config_file_lbl = QLabel(
-            "配置在页面内完成, 不弹窗; 保存后端口/命名/监控点即时热重载。配置文件: %s"
+            "配置在页面内完成, 不弹窗; 保存后端口/命名即时热重载。配置文件: %s"
             % (self._config_path or dsh_config.default_config_path()),
             objectName="cardHint")
         self._config_file_lbl.setWordWrap(True)
@@ -115,7 +100,7 @@ class SettingsPage(BasePage):
 
         # 内容纵向可滚动(配置项多, 视口不足时出纵向滚动条)
         self._tabs = QTabWidget(objectName="card")
-        self._tabs.addTab(self._build_tunnel_tab(), "隧道与部署")
+        self._tabs.addTab(self._build_basic_tab(), "基础与服务")
         self._tabs.addTab(self._build_monitor_tab(), "监控与命名")
         self._tabs.addTab(self._build_diag_tab(), "诊断与配置")
         content = QWidget()
@@ -132,45 +117,39 @@ class SettingsPage(BasePage):
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
 
-    # ── Tab 1: 隧道与部署(原 ConfigDialog) ──
-    def _build_tunnel_tab(self):
+    # ── Tab 1: 核心连接与基础服务 ──
+    def _build_basic_tab(self):
         page = QWidget()
         v = QVBoxLayout(page)
         v.setContentsMargins(12, 10, 12, 10)
-        v.setSpacing(6)
+        v.setSpacing(8)
 
-        v.addWidget(QLabel("场景模板 (一键填充, 把占位符改成真实 IP/用户名)", objectName="rightTitle"))
-        tpl_row = QHBoxLayout()
+        # 引导提示条
+        tip = QLabel("💡 提示：SSH 端口转发规则、拓扑与远程部署已统一收敛至「隧道」和「部署管理」页面维护；此处配置本机服务与默认连接参数。")
+        tip.setStyleSheet("background: rgba(88, 166, 255, 0.1); border: 1px solid #388bfd; border-radius: 4px; padding: 8px 12px; color: #58a6ff;")
+        tip.setWordWrap(True)
+        v.addWidget(tip)
+
         cfg = dsh_config.load_config(self._config_path)
-        for name in list(self.TEMPLATES) + ["自定义"]:
-            btn = QPushButton(name)
-            btn.clicked.connect(lambda _=False, n=name: self._apply(n))
-            tpl_row.addWidget(btn)
-        tpl_row.addStretch(1)
-        v.addLayout(tpl_row)
 
         form = QFormLayout()
         self._form = form
-        self._sec(form, "① 公网中转服务器")
+        self._sec(form, "① 默认公网中转服务器")
         self._field(cfg, "ssh_server", None)
         self._field(cfg, "ssh_user", None)
         self._field(cfg, "ssh_port", "22")
-        self._test_btn = QPushButton("测试 SSH 连接")
+        self._test_btn = QPushButton("测试 SSH 连通性")
         self._test_btn.clicked.connect(self._test_ssh)
         self._test_lbl = QLabel("")
         self._test_lbl.setWordWrap(True)
         form.addRow(self._test_btn, self._test_lbl)
-        self._sec(form, "② 本机 dsh")
+
+        self._sec(form, "② 本机 dsh 服务配置")
         self._field(cfg, "dash_repo", None)
         self._field(cfg, "dash_port", None)
         self._field(cfg, "dash_cmd", None)
-        self._sec(form, "③ 隧道参数")
-        self._field(cfg, "forward_ports", None)
-        self._field(cfg, "lab_server", None)
-        self._field(cfg, "lab_user", None)
-        self._field(cfg, "lab_port", None)
-        self._field(cfg, "reverse_port", None)
-        self._sec(form, "④ 轮询与超时")
+
+        self._sec(form, "③ 健康检查与轮询间隔")
         self._field(cfg, "poll_seconds", None)
         self._field(cfg, "remote_poll_seconds", None)
         v.addLayout(form)
@@ -184,7 +163,7 @@ class SettingsPage(BasePage):
 
     def _field(self, cfg, key, placeholder):
         # 一个配置字段: 表单行, 帮助文本做悬停 tooltip
-        label = QLabel(self.LABELS[key] + ":")
+        label = QLabel(self.LABELS.get(key, key) + ":")
         default = cfg.get(key)
         if key == "dash_cmd" and isinstance(default, list):
             default = " ".join(default)
@@ -192,19 +171,11 @@ class SettingsPage(BasePage):
             default = placeholder
         edit = QLineEdit()
         edit.setText(str(default if default is not None else ""))
-        label.setToolTip(self.HELP[key])
-        edit.setToolTip(self.HELP[key])
+        if key in self.HELP:
+            label.setToolTip(self.HELP[key])
+            edit.setToolTip(self.HELP[key])
         self._vars[key] = edit
         self._form.addRow(label, edit)
-
-    def _apply(self, name):
-        # 场景模板一键填充; 自定义/未知模板不动作
-        tpl = self.TEMPLATES.get(name)
-        if not tpl:
-            return
-        for k, val in tpl.items():
-            if k in self._vars:
-                self._vars[k].setText(val)
 
     def _test_ssh(self):
         # SSH 测试: 后台线程调 core(免密/超时细节在 core.env), 信号回主线程内联更新
@@ -228,108 +199,64 @@ class SettingsPage(BasePage):
         self._set_test(msg, ok)
 
     def _collect_basic(self):
-        # 隧道与部署字段收集(与原 ConfigDialog._on_save 一致); 非法整数抛 ValueError
+        # 核心连接与基础服务收集; 非法整数抛 ValueError
         cfg = {}
-        cfg["ssh_server"] = self._vars["ssh_server"].text().strip() or "YOUR_PUBLIC_IP"
-        cfg["ssh_user"] = self._vars["ssh_user"].text().strip() or "tunnel"
+        cfg["ssh_server"] = self._vars["ssh_server"].text().strip()
+        cfg["ssh_user"] = self._vars["ssh_user"].text().strip()
+        try:
+            cfg["ssh_port"] = int(self._vars["ssh_port"].text().strip() or 22)
+        except ValueError:
+            cfg["ssh_port"] = 22
         cfg["dash_repo"] = self._vars["dash_repo"].text().strip()
         cfg["dash_port"] = int(self._vars["dash_port"].text().strip())
         cfg["dash_cmd"] = self._vars["dash_cmd"].text().strip().split()
-        # forward_ports 支持 "8090,8022,8091" 或 "[8090, 8022, 8091]" 两种写法
-        fp_raw = self._vars["forward_ports"].text().strip().strip("[]").replace(" ", "")
-        cfg["forward_ports"] = [int(x) for x in fp_raw.split(",") if x]
         cfg["poll_seconds"] = int(self._vars["poll_seconds"].text().strip())
         cfg["remote_poll_seconds"] = int(self._vars["remote_poll_seconds"].text().strip())
-        cfg["lab_server"] = self._vars["lab_server"].text().strip()
-        cfg["lab_user"] = self._vars["lab_user"].text().strip()
-        lp = self._vars["lab_port"].text().strip()
-        cfg["lab_port"] = int(lp) if lp else 3090
-        rp = self._vars["reverse_port"].text().strip()
-        cfg["reverse_port"] = int(rp) if rp else 8091
         return cfg
 
-    # ── Tab 2: 监控与命名(原 MonitorSettingsDialog) ──
+    # ── Tab 2: 监控与命名 ──
     def _build_monitor_tab(self):
         page = QWidget()
         v = QVBoxLayout(page)
         v.setContentsMargins(12, 10, 12, 10)
-        v.setSpacing(6)
+        v.setSpacing(10)
 
         v.addWidget(QLabel("机器命名(右栏/卡片/部署下拉跟随)", objectName="rightTitle"))
         form = QFormLayout()
         self._in_local = QLineEdit("本机")
         self._in_lab = QLineEdit("实验室")
         self._in_ssh = QLineEdit("公网中转")
-        form.addRow("本机名称", self._in_local)
-        form.addRow("实验室名称", self._in_lab)
-        form.addRow("公网中转名称", self._in_ssh)
+        form.addRow("本机名称:", self._in_local)
+        form.addRow("实验室名称:", self._in_lab)
+        form.addRow("公网中转名称:", self._in_ssh)
         v.addLayout(form)
-
-        v.addWidget(QLabel("监测端口(增删改后保存, 右栏监控点/卡片/探测即时跟随)", objectName="rightTitle"))
-        self._tabs2 = QTabWidget()
-        self._local_tbl = self._make_table()
-        self._remote_tbl = self._make_table()
-        self._tabs2.addTab(self._local_tbl, "本机端口")
-        self._tabs2.addTab(self._remote_tbl, "公网隧道")
-        v.addWidget(self._tabs2, 1)
-
-        btns = QHBoxLayout()
-        add = QPushButton("添加一行")
-        add.clicked.connect(lambda: self._current_tbl().insertRow(self._current_tbl().rowCount()))
-        dele = QPushButton("删除选中")
-        dele.clicked.connect(self._del_row)
-        btns.addWidget(add)
-        btns.addWidget(dele)
-        btns.addStretch(1)
-        v.addLayout(btns)
 
         # 字段回填
         cfg = dsh_config.load_config(self._config_path)
         self._in_local.setText(cfg.get("local_name") or "本机")
         self._in_lab.setText(cfg.get("lab_name") or "实验室")
         self._in_ssh.setText(cfg.get("ssh_name") or "公网中转")
-        self._fill(self._local_tbl, cfg.get("local_ports", []))
-        self._fill(self._remote_tbl, cfg.get("remote_tunnels", []))
+
+        # 动态健康监控说明卡片（替代原手工编辑端口表）
+        mon_box = QFrame(objectName="card")
+        mv = QVBoxLayout(mon_box)
+        mv.setContentsMargins(14, 12, 14, 12)
+        mv.setSpacing(6)
+        m_title = QLabel("健康监控与端口探测机制", objectName="cardTitle")
+        mv.addWidget(m_title)
+        m_desc = QLabel(
+            "• 本机与公网监控点已完全接入动态隧道系统（单一事实源）。\n"
+            "• 右侧健康监控栏与公网隧道状态由当前生效的「隧道拓扑方案」自动实时派生。\n"
+            "• 如需增加、修改或删除端口监测规则，请直接前往「隧道」页面编辑对应隧道或切换拓扑方案，无需在此手动维护端口表。",
+            objectName="cardHint"
+        )
+        m_desc.setStyleSheet("color: #aaa; line-height: 1.6;")
+        m_desc.setWordWrap(True)
+        mv.addWidget(m_desc)
+        v.addWidget(mon_box)
+
+        v.addStretch(1)
         return page
-
-    def _make_table(self):
-        t = QTableWidget(0, 3)
-        t.setHorizontalHeaderLabels(["端口", "名称", "备注"])
-        t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        t.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        t.verticalHeader().setVisible(False)
-        t.setAlternatingRowColors(True)
-        t.setMaximumHeight(220)
-        return t
-
-    def _current_tbl(self):
-        return self._local_tbl if self._tabs2.currentIndex() == 0 else self._remote_tbl
-
-    def _fill(self, tbl, rows):
-        for port, name, note in rows:
-            r = tbl.rowCount()
-            tbl.insertRow(r)
-            tbl.setItem(r, 0, QTableWidgetItem(str(port)))
-            tbl.setItem(r, 1, QTableWidgetItem(name))
-            tbl.setItem(r, 2, QTableWidgetItem(note))
-
-    def _collect_tbl(self, tbl):
-        rows = []
-        for r in range(tbl.rowCount()):
-            try:
-                port = int((tbl.item(r, 0) or QTableWidgetItem("")).text().strip())
-            except ValueError:
-                port = 0
-            name = (tbl.item(r, 1) or QTableWidgetItem("")).text().strip()
-            note = (tbl.item(r, 2) or QTableWidgetItem("")).text().strip()
-            if port > 0:
-                rows.append([port, name, note])
-        return rows
-
-    def _del_row(self):
-        tbl = self._current_tbl()
-        for idx in sorted({i.row() for i in tbl.selectedIndexes()}, reverse=True):
-            tbl.removeRow(idx)
 
     # ── Tab 3: 诊断与配置(报告外发求助 / 配置导出导入) ──
     def _build_diag_tab(self):
@@ -475,26 +402,26 @@ class SettingsPage(BasePage):
             confirm_text="确认覆盖导入"
         )
 
-    # ── 保存(两页合一, 磁盘为基准合并; core 自动 .bak) ──
+    # ── 保存(基础服务与机器命名, 磁盘为基准合并; core 自动 .bak) ──
     def _on_save(self):
         try:
             fields = self._collect_basic()
-            ports = self._collect_tbl(self._local_tbl)
-            tunnels = self._collect_tbl(self._remote_tbl)
         except ValueError:
-            self._set_save("保存未执行: 端口/轮询间隔/端口列表必须是整数", err=True)
+            self._set_save("保存未执行: 端口或轮询间隔必须是有效整数", err=True)
             return
         cfg = dsh_config.load_config(self._config_path)
         cfg.update(fields)
-        cfg["local_ports"] = ports
-        cfg["remote_tunnels"] = tunnels
         cfg["local_name"] = self._in_local.text().strip() or "本机"
         cfg["lab_name"] = self._in_lab.text().strip() or "实验室"
         cfg["ssh_name"] = self._in_ssh.text().strip() or "公网中转"
+        # 彻底清理历史遗留隧道字段，避免污染配置与破坏动态监控
+        for legacy_key in ("local_ports", "remote_tunnels", "forward_ports", "reverse_port", "lab_port", "lab_server", "lab_user"):
+            cfg.pop(legacy_key, None)
+
         if not dsh_config.save_config(cfg, self._config_path):
             self._set_save("保存失败: config.json 写入失败(可能被占用), 请重试", err=True)
             return
-        self._set_save("已保存并热重载(端口/命名即时生效; 隧道 SSH 参数下次启动隧道生效)")
+        self._set_save("已保存并热重载(基础参数与机器命名已生效)")
         self.app.reload_config()
 
     def _set_save(self, text, err=False):

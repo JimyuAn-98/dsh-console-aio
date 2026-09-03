@@ -210,6 +210,60 @@ class TestRightBar:
         main_win.right.set_state("NONEXISTENT", True, 100)
         qapp_mod.processEvents()
 
+    def test_right_bar_grouped_by_tunnel_cards(self, qapp_mod):
+        from ui.monitor import RightBar
+        cfg = {
+            "dash_port": 3080,
+            "local_name": "本机",
+            "tunnels": [
+                {
+                    "id": "tun_office",
+                    "name": "办公室正向隧道",
+                    "mode": "forward",
+                    "forwards": [{"local_port": 8090, "remote_port": 8090, "desc": "办公室Web"}],
+                },
+                {
+                    "id": "tun_reverse",
+                    "name": "本机反向暴露",
+                    "mode": "reverse",
+                    "forwards": [{"local_port": 8091, "remote_port": 3080, "desc": "反向暴露"}],
+                }
+            ]
+        }
+        bar = RightBar(cfg)
+        # 验证单元格包含基础服务和隧道端口
+        assert "L3080" in bar._cells
+        assert "L8090" in bar._cells
+        assert "R8091" in bar._cells
+        # 验证包含了卡片名称分类
+        sec_texts = [s.text() for s in bar._sections]
+        assert any("办公室正向隧道" in t for t in sec_texts)
+        assert any("本机反向暴露" in t for t in sec_texts)
+        # 验证收起与展开
+        bar.set_compact(True)
+        assert bar._compact is True
+        bar.set_compact(False)
+        assert bar._compact is False
+
+    def test_tray_tooltip_rich_content(self, main_win, qapp_mod, monkeypatch):
+        # 验证托盘 rich tooltip 包含方案名与隧道明细
+        class _FakeTray:
+            def __init__(self):
+                self.tip = ""
+                self._visible = True
+            def isVisible(self):
+                return self._visible
+            def setToolTip(self, t):
+                self.tip = t
+
+        fake_tray = _FakeTray()
+        monkeypatch.setattr(main_win, "_tray", fake_tray)
+        local = {3080: (True, 15), 8090: (True, 25), "__ssh__": (True, 50)}
+        remote = {8091: False}
+        main_win._apply_monitor(local, 1, remote)
+        assert "DSH 控制台" in fake_tray.tip
+        assert "dsh" in fake_tray.tip
+
 
 class TestTunnelsPage:
     # 隧道页卡片构造 + 动作按钮接线(不点真实启停)
@@ -237,6 +291,36 @@ class TestTunnelsPage:
         qapp_mod.processEvents()
         page._apply_card("dsh-tunnel", False)
         qapp_mod.processEvents()
+
+    def test_wizard_dialog_scenes_and_collect(self, qapp_mod):
+        from ui.dialog_tunnel_wizard import TunnelWizardDialog
+        cfg = {"ssh_server": "1.2.3.4", "ssh_user": "ubuntu", "dash_port": 3080}
+        dlg = TunnelWizardDialog(cfg=cfg)
+        assert dlg._r_fwd.isChecked()
+        item, err = dlg._collect_data()
+        assert err == ""
+        assert item["mode"] == "forward"
+        assert item["host"] == "1.2.3.4"
+        assert item["forwards"][0]["local_port"] == 8090
+
+        # 切到内网穿透
+        dlg._r_rev.setChecked(True)
+        item, err = dlg._collect_data()
+        assert err == ""
+        assert item["mode"] == "reverse"
+        assert item["forwards"][0]["remote_port"] == 3080
+
+        # 切到自定义模式并测试多端口行
+        dlg._tabs.setCurrentIndex(1)
+        dlg._c_name.setText("自定义测试")
+        dlg._c_host.setText("5.6.7.8")
+        dlg._c_user.setText("root")
+        dlg._add_fwd_row(9000, "127.0.0.1", 9000, "测试")
+        item, err = dlg._collect_data()
+        assert err == ""
+        assert item["name"] == "自定义测试"
+        assert len(item["forwards"]) >= 2
+        dlg.close()
 
 
 class TestOverviewPage:

@@ -137,16 +137,49 @@ class RightBar(QFrame):
 
     def _build_content(self, cfg):
         self._clear_layout(self._content)
-        local = cfg.get("local_name") or "本机"
-        ssh = cfg.get("ssh_name") or "公网中转"
-        self._add_section(local + "端口")
         self._cells = {}
-        for port, label, note in cfg.get("local_ports", []):
-            self._add_cell("L" + str(port), label, note, port)
-        self._content.addSpacing(6)
-        self._add_section(ssh + " 反向隧道")
-        for port, label, note in cfg.get("remote_tunnels", []):
-            self._add_cell("R" + str(port), label, note, port)
+        self._sections = []
+        local = (cfg or {}).get("local_name") or "本机"
+        dash_p = (cfg or {}).get("dash_port") or 0
+
+        # 1. 本机服务端口 (固定分组)
+        self._add_section(local + "服务端口")
+        if dash_p and dash_p > 0:
+            self._add_cell("L%d" % dash_p, local + " dsh", "GUI", dash_p)
+
+        # 2. 拓扑方案动态隧道卡片分组 (复用卡片名称作为分类标题)
+        from core.config import normalize_tunnels
+        tunnels = normalize_tunnels(cfg, allow_empty_ports=True)
+
+        if tunnels:
+            for tun in tunnels:
+                tname = tun.get("name") or tun.get("id") or "未命名隧道"
+                mode = tun.get("mode") or "forward"
+                mode_tag = " (正向)" if mode == "forward" else " (反向)"
+                self._content.addSpacing(6)
+                self._add_section(tname + mode_tag)
+                forwards = tun.get("forwards") or []
+                if not forwards:
+                    hint = QLabel("（未配置端口规则）", objectName="cardHint")
+                    self._content.addWidget(hint)
+                    self._sections.append(hint)
+                for fw in forwards:
+                    lp = fw.get("local_port") if isinstance(fw, dict) else (fw[0] if len(fw) >= 1 else None)
+                    rp = fw.get("remote_port") if isinstance(fw, dict) else (fw[2] if len(fw) >= 3 else None)
+                    desc = fw.get("desc") if isinstance(fw, dict) else (fw[3] if len(fw) >= 4 else "")
+                    if not lp:
+                        continue
+                    if mode == "forward":
+                        note = desc or ("→ :%s" % (rp or lp))
+                        self._add_cell("L%d" % lp, "本机 %d" % lp, note, lp)
+                    else:  # mode == "reverse"
+                        note = desc or ("← 本机:%s" % (rp or dash_p or 3080))
+                        self._add_cell("R%d" % lp, "公网 :%d" % lp, note, lp)
+        elif not (dash_p and dash_p > 0):
+            hint = QLabel("（暂无监控项）", objectName="cardHint")
+            self._content.addWidget(hint)
+            self._sections.append(hint)
+
         self._content.addStretch(1)
 
     def reload(self, cfg):
@@ -154,7 +187,9 @@ class RightBar(QFrame):
 
     def _add_section(self, text):
         lbl = QLabel(text, objectName="rightTitle")
+        lbl.setWordWrap(True)
         self._content.addWidget(lbl)
+        self._sections.append(lbl)
 
     def _add_cell(self, key, name, note, port):
         wrap = QWidget()
@@ -201,6 +236,8 @@ class RightBar(QFrame):
         self._btn_toggle.setText("«" if on else "»")
         self._btn_toggle.setToolTip("展开状态栏" if on else "收起为窄条")
         self.setMinimumWidth(0 if on else 210)
+        for sec in getattr(self, "_sections", []):
+            sec.setVisible(not on)
         for dot, nm, detail, val in self._cells.values():
             detail.setVisible(not on)
             val.setVisible(not on)

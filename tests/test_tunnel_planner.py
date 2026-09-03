@@ -13,12 +13,15 @@ _CFG = {"dash_port": 3080, "lab_port": 3090, "reverse_port": 8091,
 
 def test_snapshot_and_apply_roundtrip():
     plan = dsh_planner.snapshot_plan(_CFG, "在家")
-    assert plan["forward_ports"] == [8090, 8022, 8091]
+    assert plan["name"] == "在家"
+    assert isinstance(plan.get("tunnels"), list) and len(plan["tunnels"]) > 0
     cfg2 = dsh_planner.apply_plan({"dash_port": 3080}, plan)
-    assert cfg2["forward_ports"] == [8090, 8022, 8091]
-    assert cfg2["reverse_port"] == 8091
+    assert len(cfg2["tunnels"]) == len(plan["tunnels"])
     assert cfg2["tunnel_plans_active"] == "在家"
     assert cfg2["dash_port"] == 3080          # 非方案字段不被动
+    # 验证旧字段被从配置中清理
+    assert "forward_ports" not in cfg2
+    assert "reverse_port" not in cfg2
 
 
 def test_upsert_delete_find():
@@ -59,12 +62,14 @@ def test_validate_occupied_warn(monkeypatch):
 
 
 def test_self_check_states(monkeypatch):
-    monkeypatch.setattr(dsh_tunnels, "tcp_ok", lambda host, port: port == 8090)
+    monkeypatch.setattr(dsh_tunnels, "tcp_ok", lambda host, port, timeout=0.5: port == 8090)
     monkeypatch.setattr(dsh_tunnels, "tunnels_snapshot",
                         lambda base_dir: {"dsh-tunnel": {"pid": 1, "alive": True}})
     rows = dsh_planner.self_check(_CFG, base_dir=".")
     by_name = {n: (s, d) for n, s, d in rows}
-    assert by_name["dsh-tunnel(中继转发)"][0] is True
-    assert "进程 存活" in by_name["dsh-tunnel(中继转发)"][1]
-    assert by_name["connect-lab-dsh(实验室)"][0] is False    # 已配置但 3090 探测不通
-    assert by_name["dsh-tunnel-reverse(反向)"][0] is None    # 无 pid 记录 -> 未配置
+    relay_name = next(n for n in by_name if "正向" in n or "dsh-tunnel" in n)
+    assert by_name[relay_name][0] is True
+    assert "进程存活" in by_name[relay_name][1]
+    lab_name = next(n for n in by_name if "实验室" in n or "connect-lab-dsh" in n)
+    assert by_name[lab_name][0] is None
+    assert "未启动" in by_name[lab_name][1]

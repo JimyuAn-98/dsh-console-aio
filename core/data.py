@@ -1198,6 +1198,13 @@ def collect_overview_data(cfg, depls, smoke=False):
         dport = d.get("web_port") or d.get("forward_port") or d.get("local_port")
         if not dport and d.get("port") and d.get("port") != 22:
             dport = d.get("port")
+        if not dport:
+            for tun in (cfg.get("tunnels") or []):
+                if tun.get("mode") == "forward" and (tun.get("host") == d.get("host") or tun.get("name") == dname):
+                    fws = tun.get("forwards") or []
+                    if fws:
+                        dport = fws[0].get("local_port") if isinstance(fws[0], dict) else fws[0][0]
+                        break
         if not dport and cfg.get("forward_ports"):
             dport = cfg.get("forward_ports")[0]
         if not dport:
