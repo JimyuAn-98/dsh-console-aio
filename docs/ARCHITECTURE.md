@@ -91,7 +91,7 @@ class DshService(QObject):
 |---|---|---|---|
 | **隧道管理与向导** | `tunnel_mgr.py` + `tunnels.py` | `pages_tunnels.py` + `dialog_tunnel_wizard.py` | 声明式通用 TunnelItem 模型，场景向导 + 端口冲突检测，批量启停，PID 存盘 |
 | **隧道方案规划** | `tunnel_planner.py` | `pages_tunnels.py` (规划器卡片) | 整套动态拓扑快照保存/切换，本地/远端端口冲突检测 |
-| **本机 dsh 操控** | `dshctl.py` | `pages_dsh.py` (DSH 管理) | 启停进程、启动日志流式观测与报错捕获、一键更新 (git pull + clean + build)、GitHub Releases 版本发布日志查看 |
+| **本机 dsh 操控** | `dshctl.py` | `pages_dsh.py` (DSH 管理) | 启停进程、启动日志流式观测与报错捕获、一键更新 (git pull + clean + build)、GitHub Releases 版本发布日志查看、部署指定版本 (切换/固定/回退，config.dsh_version_pin) |
 | **环境与安装** | `env.py` | `pages_dsh.py` (页面内分步) | 工具链检查 (git/node/npm/pnpm)、一键全新安装、彻底卸载守卫 |
 | **总览概览** | `data.py` + `diagnostics.py` | `pages_overview.py` | 运行状态卡 + 数据域指标速览 + 部署列表 |
 | **会话与工作区** | `sessions.py` | `pages_sessions.py` | 会话分组、归档、恢复、彻底删除；**远程部署只读** |

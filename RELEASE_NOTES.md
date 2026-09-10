@@ -12,6 +12,16 @@
 - **信号桥**（`app/services.py`）：`fetch_dsh_tags` → `fetch_dsh_releases(force)`；归属仓库固定官方 `deepseek-ai/deepseek-harness`；
 - 顺带把本页状态圆点硬编码色改为主题 token（浅色主题自适应）。
 
+### DSH 管理页：部署指定版本与版本固定（2026-09-10）
+
+- **部署指定版本**（`core/dshctl.py` 新增 `deploy_dsh_version`）：停 web -> `git fetch --tags` -> 校验 tag -> `git checkout <tag>` -> `pnpm install` -> clean + build -> 重启，并写 `config.dsh_version_pin`；
+- **工作区本地改动**：core 检测到未提交改动且未授权时不做任何改动，只回 `{"dirty": True}` 哨兵；页面以 **ConfirmBanner 二次确认**后才以 `allow_dirty=True` 重发；
+- **回退旧版本提示**：选中项比本机版本旧时，确认框提示"可能与 ~/.dsh 数据不兼容，建议先备份"；
+- **版本固定与更新联动**：`config.dsh_version_pin` 记录固定 tag，版本卡显示「已固定 @ tag」；固定状态下点「运行更新」先**弹窗确认**是否切回默认分支并更新到最新（`update_dsh(to_main=True)` 会 `git checkout <默认分支>` 再拉取，成功后清除固定）；
+- **安装也支持指定版本**：`install_dsh(..., version=...)` 在 clone 后 checkout 目标 tag 再安装构建；安装卡新增来源同一份 Releases 的「安装版本」下拉；
+- **更新/部署进度条**：`update_dsh`/`deploy_dsh_version` 全程发 `step` 事件，更新卡与版本卡新增 7 段进度条；
+- **新增纯读**：`dsh_repo_state`（当前 ref / 是否 detached / 是否脏 / pin）、`_default_branch`（优先 `origin/HEAD`，回退 `main`）。
+
 ## v0.8.0 (2026-09-10)
 
 ### 安装版一键更新：下载安装包并自动退出运行安装程序（2026-09-10）

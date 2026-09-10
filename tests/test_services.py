@@ -225,3 +225,23 @@ class TestDshService:
         assert seen == ["0.8.0"]
         assert got and got[0][0] == "version-installer"
         assert got[0][1]["path"] == "C:/tmp/setup.exe"
+
+    def test_service_deploy_dsh_version(self, qapp_mod, tmp_path, monkeypatch):
+        # 验证 service.deploy_dsh_version 起线程跑 ctl 并回 result("dsh-deploy-version")
+        from app.services import DshService
+        svc = DshService(str(tmp_path))
+        seen = []
+        monkeypatch.setattr(svc.ctl, "deploy_dsh_version",
+                            lambda ev, tag, allow_dirty=False: seen.append((tag, allow_dirty)) or
+                            {"err": "", "dirty": False, "msg": "ok", "tag": tag})
+        got = []
+        svc.result.connect(lambda op, p: got.append((op, p)))
+        svc.deploy_dsh_version("dsh-v1.0.0")
+        for _ in range(50):
+            qapp_mod.processEvents()
+            if got:
+                break
+            time.sleep(0.02)
+        assert seen == [("dsh-v1.0.0", False)]
+        assert got and got[0][0] == "dsh-deploy-version"
+        assert got[0][1]["tag"] == "dsh-v1.0.0"

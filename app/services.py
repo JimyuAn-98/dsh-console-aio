@@ -89,18 +89,24 @@ class DshService(QObject):
     def restart_dsh(self, op="dsh-restart"):
         self.start_dsh("restart", op=op)
 
-    def update_dsh(self, op="update-dsh"):
-        # dsh 完整更新(停 web -> git 拉取 -> 依赖 -> 构建 -> 重启), 业务在 dshctl.update_dsh。
+    def update_dsh(self, to_main=False, op="update-dsh"):
+        # dsh 完整更新(停 web -> 拉取 -> 依赖 -> 构建 -> 重启), 业务在 dshctl.update_dsh。
+        # to_main=True: 从固定版本切回默认分支再更新(UI 在固定状态下确认后传入)。
         ev = self._events()
 
         def run():
             try:
-                ok = self.ctl.update_dsh(ev)
+                ok = self.ctl.update_dsh(ev, to_main=to_main)
                 self.finished.emit(op, bool(ok))
             except Exception as e:
                 ev("log", ("[update] 异常: %s" % e, "err"))
                 self.finished.emit(op, False)
         threading.Thread(target=run, daemon=True).start()
+
+    def deploy_dsh_version(self, tag, allow_dirty=False, op="dsh-deploy-version"):
+        # 部署指定版本(切/回退到某个 Release tag), 业务在 dshctl.deploy_dsh_version;
+        # 工作区脏时 core 只回 {"dirty": True} 哨兵, 由页面二次确认后以 allow_dirty=True 重发。
+        self._run_result_op(op, self.ctl.deploy_dsh_version, tag, allow_dirty)
 
     def start_tunnel(self, key, mode="start", op=None):
         op = op or key
@@ -326,9 +332,9 @@ class DshService(QObject):
         from core.dshctl import fetch_dsh_releases
         self._run_core_op(op, fetch_dsh_releases, force)
 
-    def install_dsh(self, url, target, op="dsh-install"):
+    def install_dsh(self, url, target, version="", op="dsh-install"):
         from core import env as _env
-        self._run_result_op(op, _env.install_dsh, url, target)
+        self._run_result_op(op, _env.install_dsh, url, target, version)
 
     def uninstall_dsh(self, keep_data=True, op="dsh-uninstall"):
         from core import env as _env

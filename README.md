@@ -109,6 +109,7 @@
 | dash_repo | 本机 dsh 仓库路径 | <留空, 设置页里填> |
 | dash_port | 本机 dsh GUI 端口 | 3080 |
 | dash_cmd | 本机 dsh 启动命令 | ["pnpm.cmd","dsh","web"] |
+| dsh_version_pin | 固定部署的 dsh 版本 tag（空=跟随默认分支） | 空 |
 | local_ports | 本机端口监控 [端口,名称,说明] | 3080/8090/8022/8091/3090 |
 | remote_tunnels | 远端反向隧道监控 [端口,名称,说明] | 8090/8022/8091 |
 | local_name / lab_name / ssh_name | 三处机器命名（界面跟随） | 本机/实验室/公网中转 |
@@ -163,7 +164,7 @@
 | 页面 | 功能 |
 |------|------|
 | 总览 | 运行状态卡 + 数据速览（会话/用量/任务板/插件）+ 部署列表 + 隧道速览 |
-| DSH 管理 | 本机 dsh 操控（启动/重启/停止）+ 完整更新 + 环境/安装 + 版本发布日志（GitHub Releases 中文更新日志查看） |
+| DSH 管理 | 本机 dsh 操控（启动/重启/停止）+ 完整更新 + 环境/安装 + 版本发布日志（GitHub Releases 中文更新日志）+ 部署指定版本（切换/固定/回退） |
 | 隧道 | 隧道卡片启停/常驻 + 本机 dsh 启停/更新 |
 | 会话与工作区 | 分组/会话/详情三栏，归档/恢复/删除（二次确认） |
 | Agent 模式 | 窄列表按名字选 + preset.yml 只读详情 |
@@ -289,7 +290,7 @@ See the Chinese section above for the full field table.
 | Page | What it does |
 |--------|-------------|
 | Overview | run-status card + data quick-look (sessions/usage/tasks/plugins) + deployments + tunnels |
-| DSH manage | local dsh start/restart/stop + full update + env/install + release notes (GitHub Releases changelog viewer) |
+| DSH manage | local dsh start/restart/stop + full update + env/install + release notes (GitHub Releases changelog viewer) + deploy a specific version (switch/pin/rollback) |
 | Tunnels | tunnel card start/persist/stop + local dsh start/stop/update |
 | Sessions & workspace | group/session/detail columns, archive/restore/delete (double confirm) |
 | Agent presets | narrow name list + read-only preset.yml detail |

@@ -77,13 +77,18 @@ class DshManagePage(BasePage):
         self.env_rows = {}             # 环境检查表: key -> (版本, 状态) item
         self._releases = []            # GitHub Releases 列表(新->旧)
         self._local_ver = None         # 本机 dsh 版本(package.json)
+        self._pin = ""                 # 当前固定的版本 tag(config.dsh_version_pin)
+        self._pending_deploy_tag = ""  # 脏工作区确认后待部署的 tag
         self._inst_running = False
         self._uninst_running = False
+        self._update_running = False
+        self._deploy_running = False
         super().__init__(app, parent)
         self.app.service.card.connect(self._apply_card)
         self.app.service.log.connect(self._on_service_log)
         self.app.service.step.connect(self._on_service_step)
         self.app.service.result.connect(self._on_result)
+        self.app.service.finished.connect(self._on_finished)
         for key, on in self.app._card_state.items():
             self._set_card(key, on)
         self._fetch_releases()
@@ -99,6 +104,12 @@ class DshManagePage(BasePage):
             self._on_install_step(step, text)
         if self._uninst_running:
             self._on_uninstall_step(step, text)
+        if self._update_running:
+            self._update_bar.setValue(step)
+            self._update_step_lbl.setText(text)
+        if self._deploy_running:
+            self._deploy_bar.setValue(step)
+            self._deploy_step_lbl.setText(text)
 
     def _on_result(self, op, payload):
         if op == "dsh-tool-versions":
@@ -109,6 +120,21 @@ class DshManagePage(BasePage):
             self._on_install_done(not payload.get("err"), payload.get("err") or payload.get("msg", ""))
         elif op == "dsh-uninstall":
             self._on_uninstall_done(not payload.get("err"), payload.get("err") or payload.get("msg", ""))
+        elif op == "dsh-deploy-version":
+            self._on_deploy_result(payload)
+
+    def _on_finished(self, op, ok):
+        # 结束信号统一解除对应操作的忙态(update/deploy 走 finished, install/uninstall 走 result)
+        if op == "update-dsh":
+            self._update_running = False
+            self._update_btn.setEnabled(True)
+            if not ok:
+                self._update_step_lbl.setText("更新失败(详见日志)")
+        elif op == "dsh-deploy-version":
+            self._deploy_running = False
+            self._btn_rel_deploy.setEnabled(True)
+            if not ok:
+                self._deploy_step_lbl.setText("部署失败(详见日志)")
 
     def _build(self):
         root = QVBoxLayout(self)
@@ -186,11 +212,17 @@ class DshManagePage(BasePage):
         desc.setWordWrap(True)
         lv.addWidget(desc)
         btns = QHBoxLayout()
-        b = QPushButton("运行更新")
-        b.clicked.connect(self._run_update)
-        btns.addWidget(b)
+        self._update_btn = QPushButton("运行更新")
+        self._update_btn.clicked.connect(self._run_update)
+        btns.addWidget(self._update_btn)
         btns.addStretch(1)
         lv.addLayout(btns)
+        self._update_step_lbl = QLabel("未开始", objectName="monVal")
+        lv.addWidget(self._update_step_lbl)
+        self._update_bar = QProgressBar()
+        self._update_bar.setRange(0, 7)
+        self._update_bar.setValue(0)
+        lv.addWidget(self._update_bar)
 
         self._confirm_update = ConfirmBanner(self)
         lv.addWidget(self._confirm_update)
@@ -198,19 +230,39 @@ class DshManagePage(BasePage):
         return card
 
     def _run_update(self):
-        def do_update():
-            self.app.loge("[update-dsh] 开始完整更新...", "warn")
-            self.app.set_status("正在运行更新(构建较久, 请耐心)...")
-            self.app.service.update_dsh()
+        pinned = str(self._pin or "")
 
+        def start(to_main):
+            def run():
+                self._update_running = True
+                self._update_btn.setEnabled(False)
+                self._update_bar.setValue(0)
+                self._update_step_lbl.setText("正在更新…")
+                self.app.loge("[update-dsh] 开始完整更新...", "warn")
+                self.app.set_status("正在运行更新(构建较久, 请耐心)...")
+                self.app.service.update_dsh(to_main=to_main)
+            return run
+
+        if pinned:
+            self._confirm_update.ask(
+                "更新 dsh 本体（当前固定版本）",
+                "当前已固定到版本 <b>%s</b>。<br>"
+                "继续更新将切回默认分支并更新到最新代码（清除版本固定）。<br><br>"
+                "将执行：停止 web -> 切回默认分支 -> git 拉取 -> 清理 -> pnpm install -> "
+                "构建 -> 重启。" % pinned,
+                start(True),
+                level="warn",
+                confirm_text="切回主线并更新"
+            )
+            return
         self._confirm_update.ask(
             "更新 dsh 本体",
             "将对本机 dsh 执行完整更新：<br>"
             "1. 停止当前 dsh web<br>"
-            "2. git pull 拉取最新代码<br>"
+            "2. git fetch + git pull 拉取最新代码<br>"
             "3. 清理旧构建产物并 pnpm install<br>"
             "4. pnpm run build 构建并重启 dsh web",
-            do_update,
+            start(False),
             level="warn",
             confirm_text="确认开始更新"
         )
@@ -365,6 +417,12 @@ class DshManagePage(BasePage):
         drow.addWidget(self._inst_dir, 1)
         drow.addWidget(browse)
         v.addLayout(drow)
+        vrow = QHBoxLayout()
+        vrow.addWidget(QLabel("安装版本(默认最新):", objectName="cardHint"))
+        self._inst_ver = QComboBox()
+        self._inst_ver.addItem("最新(默认分支)", "")
+        vrow.addWidget(self._inst_ver, 1)
+        v.addLayout(vrow)
         row = QHBoxLayout()
         self._inst_start = QPushButton("开始安装", objectName="primary")
         self._inst_start.clicked.connect(self._start_install)
@@ -399,14 +457,16 @@ class DshManagePage(BasePage):
             QMessageBox.critical(self, "缺少仓库地址", "请填写 dsh 的 git 仓库地址。")
             return
         target = target or os.path.join(os.path.expanduser("~"), "dsh")
+        version = self._inst_ver.currentData() or ""
         self._inst_running = True
         self._inst_start.setEnabled(False)
         self._inst_url.setEnabled(False)
         self._inst_dir.setEnabled(False)
+        self._inst_ver.setEnabled(False)
         self._inst_bar.setValue(0)
         self._inst_step_lbl.setText("正在安装…")
         self._inst_log.clear()
-        self.app.service.install_dsh(url, target, op="dsh-install")
+        self.app.service.install_dsh(url, target, version=version, op="dsh-install")
 
     def _on_install_step(self, step, text):
         self._inst_bar.setValue(step)
@@ -422,6 +482,7 @@ class DshManagePage(BasePage):
         self._inst_start.setEnabled(True)
         self._inst_url.setEnabled(True)
         self._inst_dir.setEnabled(True)
+        self._inst_ver.setEnabled(True)
         if ok:
             self._inst_bar.setValue(4)
             self._inst_step_lbl.setText("完成")
@@ -558,22 +619,39 @@ class DshManagePage(BasePage):
         self._btn_rel_open.setEnabled(False)
         self._btn_rel_open.clicked.connect(self._open_selected_release)
         row.addWidget(self._btn_rel_open)
+        self._btn_rel_deploy = QPushButton("部署此版本")
+        self._btn_rel_deploy.setEnabled(False)
+        self._btn_rel_deploy.clicked.connect(self._deploy_selected)
+        row.addWidget(self._btn_rel_deploy)
         lv.addLayout(row)
+        self._deploy_step_lbl = QLabel("未部署", objectName="monVal")
+        lv.addWidget(self._deploy_step_lbl)
+        self._deploy_bar = QProgressBar()
+        self._deploy_bar.setRange(0, 7)
+        self._deploy_bar.setValue(0)
+        lv.addWidget(self._deploy_bar)
         self._rel_body = QTextEdit()
         self._rel_body.setReadOnly(True)
         self._rel_body.setMinimumHeight(220)
         self._rel_body.setPlaceholderText("选择版本查看更新日志…")
         lv.addWidget(self._rel_body, 1)
+
+        self._confirm_deploy = ConfirmBanner(self)
+        lv.addWidget(self._confirm_deploy)
         return card
 
     def _fetch_releases(self, force=False):
         # 经 service 信号桥拉 GitHub Releases(core 侧 TTL 缓存; force 供「刷新」按钮)
-        local = core_dshctl.dsh_local_version(dsh_config.load_config())
+        cfg = dsh_config.load_config()
+        local = core_dshctl.dsh_local_version(cfg)
         self._local_ver = local
+        self._pin = str(cfg.get("dsh_version_pin") or "")
+        base = ("v%s" % local) if local else "未知(未配置 dash_repo 或未安装)"
         self._local_ver_lbl.setText(
-            ("本机版本: v%s" % local) if local
-            else "本机版本: 未知(未配置 dash_repo 或未安装)")
+            "本机版本: %s · %s" % (base, ("已固定 @ %s" % self._pin) if self._pin
+                                    else "跟随默认分支"))
         self._btn_rel_open.setEnabled(False)
+        self._btn_rel_deploy.setEnabled(False)
         self._rel_body.setPlainText("正在获取发布信息(GitHub Releases)…")
         self.app.service.fetch_dsh_releases(force=force, op="dsh-releases")
 
@@ -585,6 +663,7 @@ class DshManagePage(BasePage):
             self._rel_body.setPlainText(
                 "发布信息获取失败: %s\n检查网络后可点「刷新」重试。" % err)
             self._btn_rel_open.setEnabled(False)
+            self._btn_rel_deploy.setEnabled(False)
             return
         self._releases = list(releases or [])
         if not self._releases:
@@ -606,6 +685,7 @@ class DshManagePage(BasePage):
         self._rel_cb.setCurrentIndex(sel)
         self._rel_cb.blockSignals(False)
         self._render_release(sel)
+        self._fill_install_versions()
 
     def _render_release(self, idx):
         # 单栏: 下拉选中 -> 渲染该版本中文更新日志(HTML 标题转 Markdown 后交给 setMarkdown)
@@ -618,6 +698,7 @@ class DshManagePage(BasePage):
             core_dshctl.cn_section(r.get("body") or ""))
         self._rel_body.setMarkdown(body if body.strip() else "(该版本没有更新日志正文)")
         self._btn_rel_open.setEnabled(bool(r.get("html_url")))
+        self._btn_rel_deploy.setEnabled(bool(r.get("tag")))
 
     def _open_selected_release(self):
         idx = self._rel_cb.currentIndex()
@@ -627,6 +708,91 @@ class DshManagePage(BasePage):
             os.startfile(url)
         except Exception as e:
             QMessageBox.critical(self, "无法打开", str(e))
+
+    def _fill_install_versions(self):
+        # 用同一份 Releases 列表填充安装卡的版本下拉(默认最新)
+        if not hasattr(self, "_inst_ver"):
+            return
+        cur = self._inst_ver.currentData()
+        self._inst_ver.blockSignals(True)
+        self._inst_ver.clear()
+        self._inst_ver.addItem("最新(默认分支)", "")
+        for r in self._releases:
+            tag = r.get("tag") or ""
+            if tag:
+                self._inst_ver.addItem(
+                    "v%s%s" % (r.get("version") or tag,
+                               " · 预发布" if r.get("prerelease") else ""), tag)
+        idx = self._inst_ver.findData(cur) if cur else 0
+        self._inst_ver.setCurrentIndex(idx if idx >= 0 else 0)
+        self._inst_ver.blockSignals(False)
+
+    def _deploy_selected(self):
+        # 版本卡「部署此版本」: 确认 -> 后台部署; 回退更旧版本时提示先备份
+        idx = self._rel_cb.currentIndex()
+        if not (0 <= idx < len(self._releases)):
+            return
+        r = self._releases[idx]
+        tag = str(r.get("tag") or "")
+        ver = str(r.get("version") or tag)
+        if not tag:
+            return
+        self._pending_deploy_tag = tag
+        older = False
+        if self._local_ver:
+            versions = [x.get("version") for x in self._releases]
+            if self._local_ver in versions:
+                older = idx > versions.index(self._local_ver)
+        warn = ("<br><br>⚠️ 这是比当前本机版本更旧的版本，可能与 ~/.dsh 数据不兼容；"
+                "建议先到「备份与凭据」页备份。") if older else ""
+        self._confirm_deploy.ask(
+            "部署版本 " + ver,
+            "将把本机 dsh 切换到 <b>%s</b>：<br>"
+            "1. 停止当前 dsh web<br>"
+            "2. git fetch --tags<br>"
+            "3. 校验版本<br>"
+            "4. git checkout %s<br>"
+            "5. pnpm install<br>"
+            "6. 清理并重新构建<br>"
+            "7. 重启 dsh web<br><br>"
+            "构建耗时较长，请耐心等待。%s" % (tag, tag, warn),
+            lambda: self._do_deploy(tag),
+            level="warn",
+            confirm_text="确认部署"
+        )
+
+    def _do_deploy(self, tag, allow_dirty=False):
+        self._deploy_running = True
+        self._btn_rel_deploy.setEnabled(False)
+        self._deploy_bar.setValue(0)
+        self._deploy_step_lbl.setText("正在部署 %s…" % tag)
+        self.app.set_status("正在部署 dsh 版本 " + tag)
+        self.app.service.deploy_dsh_version(tag, allow_dirty=allow_dirty)
+
+    def _on_deploy_result(self, payload):
+        # dirty 哨兵 = core 检测到工作区有改动且未授权; 二次确认后再以 allow_dirty 重发
+        if payload.get("dirty"):
+            tag = str(payload.get("tag") or self._pending_deploy_tag)
+            self._confirm_deploy.ask(
+                "工作区有本地改动",
+                "本机 dsh 仓库存在未提交的本地改动，切换版本可能失败或丢失改动。<br><br>"
+                "确定仍要继续部署 <b>%s</b> 吗？" % tag,
+                lambda: self._do_deploy(tag, allow_dirty=True),
+                level="danger",
+                confirm_text="仍然继续"
+            )
+            return
+        err = str(payload.get("err") or "")
+        if err:
+            self._deploy_step_lbl.setText("部署失败(详见日志)")
+            self.app.loge("[部署] 失败: " + err, "err")
+            QMessageBox.warning(self, "部署失败", err)
+            return
+        self._deploy_bar.setValue(self._deploy_bar.maximum())
+        self._deploy_step_lbl.setText("部署完成")
+        self.app.loge("[部署] " + str(payload.get("msg") or "完成"), "ok")
+        self.app.set_status("dsh 版本部署完成")
+        self._fetch_releases()   # 刷新本机版本与固定状态
 
     # ── 卡片状态(service.card 信号槽, 主线程) ──
     def _apply_card(self, key, on):

@@ -98,12 +98,14 @@ def _bridge(events):
     return cb
 
 
-def install_dsh(events=None, url=None, target=None):
-    # 一键安装 dsh: 环境预检 -> git clone -> pnpm install -> pnpm build -> 写 config.dash_repo。
-    # 契约: {"msg": 成功文案, "err": 中文失败文案, "target": 实际安装目录};
-    # 任一步失败立即返回(已执行的步骤不回滚, 与旧版一致)。
+def install_dsh(events=None, url=None, target=None, version=""):
+    # 一键安装 dsh: 环境预检 -> git clone -> (指定版本时 checkout) -> pnpm install -> pnpm build
+    # -> 写 config.dash_repo(指定版本时同时写 dsh_version_pin)。
+    # 契约: {"msg", "err", "target", "version"}; 任一步失败立即返回(已执行的步骤不回滚)。
+    # version 留空=跟随默认分支。
     url = (url or "").strip()
     target = (target or "").strip() or os.path.join(os.path.expanduser("~"), "dsh")
+    version = (version or "").strip()
 
     def step(n, text):
         if events:
@@ -131,6 +133,14 @@ def install_dsh(events=None, url=None, target=None):
         step(1, "步骤 1/3: git clone ...")
         if not ctl.stream_cmd(["git", "clone", url, target], events=bridge):
             return {"msg": "", "err": "git clone 失败(详见安装日志)", "target": target}
+    # 1.5) 指定版本: 拉 tags 并切换到目标 tag(留空则跟随默认分支)
+    if version:
+        line("[安装] 切换到指定版本: " + version)
+        if not ctl.stream_cmd(["git", "fetch", "--tags", "--prune"], cwd=target, events=bridge):
+            return {"msg": "", "err": "获取 tags 失败(详见安装日志)", "target": target}
+        if not ctl.stream_cmd(["git", "checkout", version], cwd=target, events=bridge):
+            return {"msg": "", "err": "切换到版本 %s 失败(详见安装日志)" % version,
+                    "target": target}
     # 2) install
     step(2, "步骤 2/3: pnpm install")
     if not ctl.stream_cmd(["pnpm.cmd", "install"], cwd=target, events=bridge):
@@ -144,13 +154,20 @@ def install_dsh(events=None, url=None, target=None):
     try:
         cfg = dsh_config.load_config()
         cfg["dash_repo"] = target
+        if version:
+            cfg["dsh_version_pin"] = version
+        else:
+            cfg.pop("dsh_version_pin", None)
         if dsh_config.save_config(cfg):
             line("[安装] 已把 dash_repo 写入 config.json, 重启后生效。")
         else:
             line("[安装] 无法写 config.json(权限?), 请在配置向导里手动设置 dash_repo。")
     except Exception as e:
         line("[安装] 写 config 失败: " + str(e))
-    return {"msg": "dsh 安装完成 目标目录: " + target, "err": "", "target": target}
+    msg = "dsh 安装完成 目标目录: " + target
+    if version:
+        msg += "(版本 " + version + ")"
+    return {"msg": msg, "err": "", "target": target, "version": version}
 
 
 def uninstall_dsh(events=None, keep_data=True):

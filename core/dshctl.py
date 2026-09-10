@@ -164,6 +164,55 @@ def html_headings_to_md(text):
 
 
 
+def _git_run(cmd, cwd, timeout=120):
+    # 捕获式 git 调用(与 stream_cmd 的流式不同): 返回 (rc, stdout, stderr)。
+    try:
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
+                           errors="replace", timeout=timeout,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        return r.returncode, (r.stdout or "").strip(), (r.stderr or "").strip()
+    except FileNotFoundError:
+        return 127, "", "找不到命令: " + str(cmd[0] if cmd else "?")
+    except subprocess.TimeoutExpired:
+        return 124, "", "命令超时"
+    except Exception as e:
+        return 1, "", str(e)
+
+
+def dsh_repo_state(cfg=None):
+    # 本机 dsh 仓库 git 状态(纯读): {"exists","ref","detached","dirty","head","pin","err"}
+    if cfg is None:
+        from core import config as _cfg
+        cfg = _cfg.load_config()
+    repo = (cfg or {}).get("dash_repo") or ""
+    state = {"exists": False, "ref": "", "detached": False, "dirty": False,
+             "head": "", "pin": str((cfg or {}).get("dsh_version_pin") or ""),
+             "err": ""}
+    if not repo or not os.path.isdir(repo):
+        return state
+    rc, out, err = _git_run(["git", "rev-parse", "--abbrev-ref", "HEAD"], repo)
+    if rc != 0:
+        state["err"] = err or "读取 git 状态失败"
+        return state
+    state["exists"] = True
+    state["ref"] = out
+    state["detached"] = (out == "HEAD")
+    rc, out, _ = _git_run(["git", "rev-parse", "--short", "HEAD"], repo)
+    state["head"] = out if rc == 0 else ""
+    rc, out, _ = _git_run(["git", "status", "--porcelain"], repo)
+    state["dirty"] = bool(rc == 0 and out)
+    return state
+
+
+def _default_branch(repo):
+    # 远程默认分支名(origin/HEAD 未设置时回退 main)
+    rc, out, _ = _git_run(["git", "symbolic-ref", "--short",
+                           "refs/remotes/origin/HEAD"], repo)
+    if rc == 0 and out.startswith("origin/"):
+        return out[len("origin/"):]
+    return "main"
+
+
 class DshCtl:
     """本机 dsh 启停 + 健康监控探测。d 为 config.derived() 的结果(无 globals 依赖)。"""
 
@@ -370,35 +419,51 @@ class DshCtl:
             return False
 
     # ---------- dsh 完整更新(原 tkinter 主程序 _run_update, PySide6 迁移时丢失, 现恢复) ----------
-    def update_dsh(self, events=None):
-        # 步骤: 停 web -> git 拉取 -> 清理旧构建 -> 依赖 -> 构建 -> 重启; 任一命令失败即中止。
-        # 清理一步不可省: dsh 仓库的 lib/ 构建产物被 gitignore, git pull 不会动它; 上游
-        # 改名/删导出后, 过期生成物会让 tsdown 报 MISSING_EXPORT(CI 干净 checkout 无此问题,
-        # 本地增量构建必踩)。clean 用 dsh 仓库自带脚本(只删构建产物, 保留 node_modules)。
+    def update_dsh(self, events=None, to_main=False):
+        # 步骤: 停 web -> (固定版本时先切回默认分支) -> git 拉取 -> 清理 -> 依赖 -> 构建 -> 重启;
+        # 任一命令失败即中止。to_main=True 由 UI 在"已固定版本"确认后传入; 每步发 step 事件供
+        # 页面进度条。清理一步不可省: dsh 的 lib/ 构建产物被 gitignore, git pull 不动它, 上游
+        # 改名/删导出后过期生成物会让 tsdown 报 MISSING_EXPORT。
         dash_repo = self.d.get("dash_repo") or ""
         if not os.path.isdir(dash_repo):
             self._log(events, "  仓库不存在: %s" % dash_repo, "err")
             self._status(events, "更新失败: 仓库目录不存在")
             return False
+
+        def step(n, text):
+            if events:
+                events("step", (n, text))
+
+        step(1, "步骤1/7: 停止当前 dsh web")
         self._log(events, "[更新] 步骤1/7: 停止当前 dsh web", "warn")
         self.stop_dsh(events)
         import time as _t
         _t.sleep(2)
+        if to_main:
+            branch = _default_branch(dash_repo)
+            self._log(events, "[更新] 切回默认分支: %s" % branch, "warn")
+            if not self.stream_cmd(["git", "checkout", branch], cwd=dash_repo, events=events):
+                self._status(events, "更新失败: 切回默认分支")
+                return False
         steps = [
-            ("步骤2/7: git fetch", ["git", "fetch", "origin", "--prune"]),
-            ("步骤3/7: git pull --ff-only", ["git", "pull", "--ff-only"]),
-            ("步骤4/7: 清理旧构建产物", ["pnpm.cmd", "run", "clean"]),
-            ("步骤5/7: pnpm install", ["pnpm.cmd", "install"]),
-            ("步骤6/7: pnpm run build", ["pnpm.cmd", "run", "build"]),
+            (2, "步骤2/7: git fetch", ["git", "fetch", "origin", "--prune"]),
+            (3, "步骤3/7: git pull --ff-only", ["git", "pull", "--ff-only"]),
+            (4, "步骤4/7: 清理旧构建产物", ["pnpm.cmd", "run", "clean"]),
+            (5, "步骤5/7: pnpm install", ["pnpm.cmd", "install"]),
+            (6, "步骤6/7: pnpm run build", ["pnpm.cmd", "run", "build"]),
         ]
-        for label, cmd in steps:
+        for n, label, cmd in steps:
+            step(n, label)
             self._log(events, "[更新] " + label, "warn")
             # 旧版 tkinter 的 git fetch cwd 传了 None(会在控制台目录而非 dsh 仓库执行,
             # 是隐患), 此处统一在 dsh 仓库内执行。
             if not self.stream_cmd(cmd, cwd=dash_repo, events=events):
                 self._status(events, "更新失败: " + label)
                 return False
+        step(7, "步骤7/7: 重启 dsh web")
         self._log(events, "[更新] 步骤7/7: 重启 dsh web", "warn")
+        if to_main:
+            self._clear_pin(events)
         if not self.start_dsh(events):
             self._log(events, "  [更新] 构建完成，但 dsh web 启动失败，请查看上方控制台报错", "err")
             self._status(events, "更新完成但启动失败")
@@ -406,6 +471,99 @@ class DshCtl:
         self._log(events, "  [更新] 完成, 访问 http://127.0.0.1:%d" % self.d["dash_port"], "ok")
         self._status(events, "更新完成")
         return True
+
+    # ---------- 版本固定状态(config.dsh_version_pin) ----------
+    def _set_pin(self, tag, events=None):
+        try:
+            from core import config as _cfg
+            cfg = _cfg.load_config()
+            cfg["dsh_version_pin"] = tag or ""
+            if not _cfg.save_config(cfg):
+                self._log(events, "  [警告] 版本固定状态写入 config.json 失败", "warn")
+            elif tag:
+                self._log(events, "  已记录版本固定: %s (config.json)" % tag)
+        except Exception as e:
+            self._log(events, "  [警告] 写入版本固定状态失败: %s" % e, "warn")
+
+    def _clear_pin(self, events=None):
+        self._set_pin("", events)
+
+    # ---------- 部署指定版本(切换/回退到某个 Release tag) ----------
+    def deploy_dsh_version(self, events=None, tag="", allow_dirty=False):
+        # 停 web -> fetch tags -> 校验 -> 工作区脏检查 -> checkout tag -> install -> clean -> build
+        # -> 重启, 并写 config.dsh_version_pin。工作区有本地改动且未 allow_dirty 时, 不改动任何
+        # 东西, 只返回哨兵 {"dirty": True}(UI 二次确认后再以 allow_dirty=True 调用)。
+        # 契约: {"err","dirty","msg","tag"}; events 为首参(配合 services._run_result_op)。
+        dash_repo = self.d.get("dash_repo") or ""
+        tag = str(tag or "").strip()
+        if not os.path.isdir(dash_repo):
+            self._log(events, "  仓库不存在: %s" % dash_repo, "err")
+            self._status(events, "部署失败: 仓库目录不存在")
+            return {"err": "仓库目录不存在", "dirty": False, "msg": "", "tag": tag}
+        if not tag:
+            return {"err": "版本 tag 为空", "dirty": False, "msg": "", "tag": tag}
+        if not allow_dirty:
+            rc, out, _ = _git_run(["git", "status", "--porcelain"], dash_repo)
+            if rc == 0 and out:
+                self._log(events, "  [部署] 检测到工作区有未提交改动, 等待确认", "warn")
+                return {"err": "", "dirty": True, "msg": "", "tag": tag}
+
+        def step(n, text):
+            if events:
+                events("step", (n, text))
+
+        def fail(reason):
+            self._status(events, "部署失败: " + reason)
+            return {"err": reason, "dirty": False, "msg": "", "tag": tag}
+
+        step(1, "步骤1/7: 停止当前 dsh web")
+        self._log(events, "[部署] 步骤1/7: 停止当前 dsh web", "warn")
+        self.stop_dsh(events)
+        import time as _t
+        _t.sleep(1)
+
+        step(2, "步骤2/7: git fetch --tags")
+        self._log(events, "[部署] 步骤2/7: git fetch --tags --prune", "warn")
+        if not self.stream_cmd(["git", "fetch", "--tags", "--prune"],
+                               cwd=dash_repo, events=events):
+            return fail("git fetch 失败")
+
+        step(3, "步骤3/7: 校验版本 " + tag)
+        self._log(events, "[部署] 步骤3/7: 校验版本 " + tag, "warn")
+        rc, _out, err = _git_run(["git", "rev-parse", "--verify", tag + "^{commit}"],
+                                 dash_repo)
+        if rc != 0:
+            self._log(events, "  版本不存在: %s (%s)" % (tag, err or "rev-parse 失败"), "err")
+            return fail("版本不存在: " + tag)
+
+        step(4, "步骤4/7: git checkout " + tag)
+        self._log(events, "[部署] 步骤4/7: git checkout " + tag, "warn")
+        if not self.stream_cmd(["git", "checkout", tag], cwd=dash_repo, events=events):
+            return fail("git checkout 失败")
+        self._set_pin(tag, events)
+
+        step(5, "步骤5/7: pnpm install")
+        self._log(events, "[部署] 步骤5/7: pnpm install", "warn")
+        if not self.stream_cmd(["pnpm.cmd", "install"], cwd=dash_repo, events=events):
+            return fail("pnpm install 失败")
+
+        step(6, "步骤6/7: 清理并构建")
+        self._log(events, "[部署] 步骤6/7: 清理旧构建产物", "warn")
+        if not self.stream_cmd(["pnpm.cmd", "run", "clean"], cwd=dash_repo, events=events):
+            return fail("清理构建产物失败")
+        self._log(events, "[部署] 步骤6/7: pnpm run build", "warn")
+        if not self.stream_cmd(["pnpm.cmd", "run", "build"], cwd=dash_repo, events=events):
+            return fail("pnpm run build 失败")
+
+        step(7, "步骤7/7: 重启 dsh web")
+        self._log(events, "[部署] 步骤7/7: 重启 dsh web", "warn")
+        if not self.start_dsh(events):
+            self._log(events, "  [部署] 构建完成，但 dsh web 启动失败，请查看上方控制台报错", "err")
+            self._status(events, "部署完成但启动失败")
+            return {"err": "部署完成但启动失败", "dirty": False, "msg": "", "tag": tag}
+        self._log(events, "  [部署] 完成, 已切换到 %s" % tag, "ok")
+        self._status(events, "已部署版本 " + tag)
+        return {"err": "", "dirty": False, "msg": "已部署 " + tag, "tag": tag}
 
     # ---------- 通用命令流(流式打日志) ----------
     def stream_cmd(self, cmd, cwd=None, env=None, events=None, timeout_override=None):
