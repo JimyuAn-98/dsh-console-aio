@@ -176,6 +176,7 @@ class DshService(QObject):
 
 ## 7. 历史归档索引
 
+* 路线图历史归档：`docs/archive/ROADMAP_HISTORY.md`
 * 阶段性 PySide6 页面迁移历史：`docs/archive/PYSIDE_MIGRATION.md`
 * 早期设计方案（ABC 方案与 v0.3 调研）：`docs/archive/PLANS.md`
 * 初始 UI 分层重构设计稿：`docs/archive/UI_LAYERING.md`

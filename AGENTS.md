@@ -30,13 +30,13 @@ dsh-console-aio — PySide6（Qt）Windows GUI，面向 dsh 用户的"控制台"
 dsh-console-aio.py  主程序（控制台布局: 顶部部署栏 + 左导航 + 中栏页面容器 + 右状态 + 底部日志）
 core/               后端业务层（纯 Python 零 Qt）: data.py 数据层 / tunnel_mgr.py 隧道 /
                     dshctl.py 启停更新 / config.py / 各数据域(keys/env/ops/profiles/sessions/plugins/deployments/version)
-ui/                 前端页面包（pages_*.py: 各功能页含 设置/主题/日志 等 16 页;
-                    dialogs.py 对话框; base.py 页面基类; theme.py 主题引擎(token/实时换肤) + theme.qss 生成产物）
+ui/                 前端页面包（pages_*.py 全 17 个功能页; base.py 页面基类;
+                    theme.py 主题引擎(token/实时换肤) + theme.qss 生成产物; 旧 dialogs.py 已退役）
 app/                信号桥层（services.py: DshService, 唯一起后台线程并转 Qt 信号）
 tools/              工具（dump_ui.py 离屏渲染 dump; preview_theme.py 主题配色预览截图）
 tests/              pytest 测试（纯单元默认跑; 构造 MainWindow 的测试须 -m gui 人工）
-docs/               文档（ARCHITECTURE.md 架构唯一权威 + ROADMAP.md 路线 +
-                    TESTING.md 测试 + BUGS.md 问题清单 + plans/ 计划沉淀 + archive/ 历史归档 + VISION 愿景探索）
+docs/               文档（ARCHITECTURE.md 架构唯一权威 + ROADMAP.md 路线 + FEATURE_AUDIT.md 功能校验矩阵 +
+                    TESTING.md 测试 + BUGS.md 问题清单 + plans/(+README 索引) + archive/(含 ROADMAP_HISTORY) + VISION 愿景探索）
 installer/          Inno Setup 安装脚本(installer.iss) + 语言文件
 legacy/             旧 .ps1 / 旧 tkinter 主程序（只读历史参考，不再调用）
 .agents/notes/      Agent Note 决策记录（见 .agents/notes/README.md）
@@ -94,7 +94,7 @@ build_win.bat
 - Qt 线程安全：只有主线程可操作 QWidget；后台线程 emit 类级 Signal，槽函数在 Qt 事件循环中运行。
 - 三引号 docstring 禁令（本项目血泪教训）：经 JSON/补丁链路插入的多行字符串，三引号可能损坏成双引号导致 SyntaxError（invalid character '。'）。新代码一律用 # 注释代替 docstring；若必须用三引号，只写英文纯 ASCII 内容。
 - 错误处理：空 except 必须注释说明吞了什么、为何其他异常到不了这里；不静默失败，失败要有中文日志（self.log(..., "err")）与状态提示。
-- 危险操作：安装/更新/卸载/写配置一律先 QMessageBox.question 确认"将执行什么"，用户点是才执行；命令流式输出到主日志区（经 service.run_cmd）。
+- 危险操作：安装/更新/卸载/写配置一律先内联确认条 `ConfirmBanner` 确认"将执行什么"，用户点是才执行（历史 `QMessageBox.question` 逐步退役，余 4 处见 docs/FEATURE_AUDIT.md）；命令流式输出到主日志区（经 service.run_cmd）。
 - 注释与文档：中文注释写契约与上下文，不叙述控制流，不注释代码中显而易见的事实；用直接具体的词，不用隐喻。
 - 命令输出：长耗时命令用 DshCtl.stream_cmd（Popen 流式读行 + 超时 deadline + kill 兜底），不 capture 完再弹窗。
 - 文件结尾：恰好一个换行；git diff --cached --check 门禁。
@@ -112,7 +112,7 @@ build_win.bat
 
 - 功能/方案变更：同步更新 docs/ROADMAP.md（路线与状态）与 RELEASE_NOTES.md；README 中英文同步。
   历史方案归档进 docs/archive/，已知问题进 docs/BUGS.md。
-- 实施方案与计划：每次计划文件统一保存至 `docs/plans/YYYYMMDD-主题-vX.md` 沉淀归档。
+- 实施方案与计划：每次计划文件统一保存至 `docs/plans/YYYYMMDD-主题-vX.md` 沉淀归档；同一批次的重复计划应合并，状态维护在 `docs/plans/README.md` 索引。
 - 关键决策（为什么 + 放弃了什么）：写 .agents/notes/{lifecycle}/{class}/yyyy-mm-dd-topic.md，格式见 .agents/notes/README.md。
 - 已归档的 note 视为冻结：不编辑、不作为当前权威。
 
