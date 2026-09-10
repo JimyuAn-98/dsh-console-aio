@@ -103,13 +103,17 @@ class DshCtl:
 
     # ---------- 本机 dsh 启停 ----------
     def run_dsh(self, mode, events=None):
-        if mode in ("start", "restart"):
-            self.start_dsh(events)
-        if mode in ("stop", "restart"):
+        if mode == "stop":
+            return self.stop_dsh(events)
+        elif mode == "start":
+            return self.start_dsh(events)
+        elif mode == "restart":
             self.stop_dsh(events)
-            if mode == "restart":
-                self._log(events, "  停止完成, 重新启动...", "warn")
-                self.start_dsh(events)
+            self._log(events, "  停止完成, 重新启动...", "warn")
+            import time as _t
+            _t.sleep(1)
+            return self.start_dsh(events)
+        return False
 
     def start_dsh(self, events=None):
         dash_repo = self.d.get("dash_repo") or ""
@@ -119,28 +123,117 @@ class DshCtl:
             self._log(events, "  仓库不存在: %s" % dash_repo, "err")
             self._status(events, "启动失败: 仓库目录不存在")
             return False
+
+        # 启动前端口占用检测与旧实例清理
+        is_busy, _ = self.probe("127.0.0.1", dash_port)
+        if is_busy:
+            self._log(events, "  [提示] 检测到端口 %d 已被占用，尝试停止旧实例..." % dash_port, "warn")
+            self.stop_dsh(events)
+            import time as _t
+            for _ in range(4):
+                _t.sleep(0.5)
+                if not self.probe("127.0.0.1", dash_port)[0]:
+                    break
+            if self.probe("127.0.0.1", dash_port)[0]:
+                self._log(events, "  [警告] 端口 %d 仍被占用，启动可能遇到冲突" % dash_port, "warn")
+
         self._log(events, "  $ cd %s && %s" % (dash_repo, " ".join(dash_cmd)))
         try:
             logdir = os.path.join(os.environ.get("TEMP", "."), "dsh-dash")
             os.makedirs(logdir, exist_ok=True)
-            out = open(os.path.join(logdir, "dsh-web.out.log"), "ab")
-            err = open(os.path.join(logdir, "dsh-web.err.log"), "ab")
-            subprocess.Popen(dash_cmd, cwd=dash_repo, stdout=out, stderr=err,
-                             creationflags=subprocess.CREATE_NO_WINDOW)
-            self._log(events, "  已在后台启动, 等待 %d 端口就绪..." % dash_port, "ok")
-            self._status(events, "已触发本机 dsh 启动 -> http://127.0.0.1:%d" % dash_port)
-            if events:
-                events("card", ("dsh-web", True))
+            out_file = os.path.join(logdir, "dsh-web.out.log")
+            err_file = os.path.join(logdir, "dsh-web.err.log")
 
-            def _poll_token():
-                import time
-                for _ in range(10):
-                    time.sleep(0.5)
-                    tok = scan_log_for_token()
+            from core.logs import Tailer, classify_line
+            out_tailer = Tailer(out_file)
+            out_tailer.offset = os.path.getsize(out_file) if os.path.isfile(out_file) else 0
+            err_tailer = Tailer(err_file)
+            err_tailer.offset = os.path.getsize(err_file) if os.path.isfile(err_file) else 0
+
+            out = open(out_file, "ab")
+            err = open(err_file, "ab")
+            proc = subprocess.Popen(dash_cmd, cwd=dash_repo, stdout=out, stderr=err,
+                                    creationflags=subprocess.CREATE_NO_WINDOW)
+            self._log(events, "  进程已启动 (PID %d), 正在检测运行状态..." % proc.pid, "ok")
+            self._status(events, "正在启动本机 dsh (PID %d)..." % proc.pid)
+
+            # 初始观测 (最多等待 15 秒，以 500ms 间隔轮询，由工作线程执行，不卡 GUI 主线程)
+            import time as _t
+            started_ok = False
+            for _ in range(30):
+                _t.sleep(0.5)
+                err_lines, _ = err_tailer.read_new()
+                for ln in err_lines:
+                    self._log(events, "    " + ln, "err")
+                out_lines, _ = out_tailer.read_new()
+                for ln in out_lines:
+                    self._log(events, "    " + ln, classify_line(ln))
+                    tok, _ = extract_auth_token(ln)
                     if tok:
                         set_runtime_token("local", tok)
+
+                # 检查进程是否已提前退出 (如崩溃/语法错误/缺少导出/端口冲突)
+                rc = proc.poll()
+                if rc is not None:
+                    _t.sleep(0.2)
+                    rem_err, _ = err_tailer.read_new()
+                    for ln in rem_err:
+                        self._log(events, "    " + ln, "err")
+                    rem_out, _ = out_tailer.read_new()
+                    for ln in rem_out:
+                        self._log(events, "    " + ln, classify_line(ln))
+                    self._log(events, "  [dsh-web] 启动失败: 进程已异常退出 (退出码 %s)" % rc, "err")
+                    self._status(events, "启动失败: 进程已退出 (code %s)" % rc)
+                    if events:
+                        events("card", ("dsh-web", False))
+                    clear_runtime_token("local")
+                    return False
+
+                # 检查端口是否已就绪
+                ok, lat = self.probe("127.0.0.1", dash_port)
+                if ok:
+                    self._log(events, "  dsh web 已就绪 -> http://127.0.0.1:%d (%dms)" % (dash_port, lat), "ok")
+                    self._status(events, "dsh web 已就绪 -> http://127.0.0.1:%d" % dash_port)
+                    if events:
+                        events("card", ("dsh-web", True))
+                    started_ok = True
+                    break
+
+            if not started_ok:
+                self._log(events, "  进程仍在后台运行, 15s 内尚未检测到端口监听, 等待 %d 端口就绪..." % dash_port, "warn")
+                self._status(events, "已触发本机 dsh 启动 -> http://127.0.0.1:%d" % dash_port)
+                if events:
+                    events("card", ("dsh-web", True))
+
+            # 启动持续 15 秒的后台监视器，捕捉启动后插件加载阶段的输出或崩溃
+            def _watch_proc():
+                for _ in range(30):
+                    _t.sleep(0.5)
+                    el, _ = err_tailer.read_new()
+                    for ln in el:
+                        self._log(events, "    " + ln, "err")
+                    ol, _ = out_tailer.read_new()
+                    for ln in ol:
+                        self._log(events, "    " + ln, classify_line(ln))
+                        tok, _ = extract_auth_token(ln)
+                        if tok:
+                            set_runtime_token("local", tok)
+                    rc = proc.poll()
+                    if rc is not None:
+                        _t.sleep(0.2)
+                        rem_err, _ = err_tailer.read_new()
+                        for ln in rem_err:
+                            self._log(events, "    " + ln, "err")
+                        rem_out, _ = out_tailer.read_new()
+                        for ln in rem_out:
+                            self._log(events, "    " + ln, classify_line(ln))
+                        self._log(events, "  [dsh-web] 进程后续退出 (退出码 %s)" % rc, "err")
+                        self._status(events, "dsh 进程已退出 (code %s)" % rc)
+                        if events:
+                            events("card", ("dsh-web", False))
+                        clear_runtime_token("local")
                         break
-            threading.Thread(target=_poll_token, daemon=True).start()
+            threading.Thread(target=_watch_proc, daemon=True).start()
             return True
         except FileNotFoundError:
             self._log(events, "  找不到 %s, 请确认 pnpm 在 PATH 或修改配置" % dash_cmd[0], "err")
@@ -152,12 +245,29 @@ class DshCtl:
             return False
 
     def stop_dsh(self, events=None):
-        ps = ("$n=0\n"
-              "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" -ErrorAction SilentlyContinue |\n"
-              "  Where-Object { $_.CommandLine -match 'dsh' -and $_.CommandLine -match 'web' } |\n"
-              "  ForEach-Object { Write-Output ('stop node ' + $_.ProcessId); taskkill /PID $_.ProcessId /T /F | Out-Null; $n++ }\n"
-              "if($n -eq 0){ Write-Output 'no dsh web process' }\n")
-        self._log(events, "  $ stopping dsh web (node, 匹配 dsh+web)...")
+        dash_port = self.d.get("dash_port") or 3080
+        ps = (
+            "$n=0\n"
+            "$port=%d\n"
+            "# 1. 查找并停止占用 dash_port 的进程\n"
+            "$conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue\n"
+            "if ($conns) {\n"
+            "  foreach ($c in $conns) {\n"
+            "    $p = $c.OwningProcess\n"
+            "    if ($p -gt 4) {\n"
+            "      Write-Output ('stop port ' + $port + ' listener PID ' + $p)\n"
+            "      taskkill /PID $p /T /F | Out-Null\n"
+            "      $n++\n"
+            "    }\n"
+            "  }\n"
+            "}\n"
+            "# 2. 匹配并停止 dsh web 相关的 node.exe 进程\n"
+            "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" -ErrorAction SilentlyContinue |\n"
+            "  Where-Object { ($_.CommandLine -match 'dsh' -or $_.CommandLine -match 'apps[\\\\/]cli' -or $_.CommandLine -match 'bin\\.(ts|js)' -or $_.CommandLine -match 'deepseek-harness') -and ($_.CommandLine -match 'web' -or $_.CommandLine -match 'apps[\\\\/]cli') } |\n"
+            "  ForEach-Object { Write-Output ('stop node ' + $_.ProcessId); taskkill /PID $_.ProcessId /T /F | Out-Null; $n++ }\n"
+            "if($n -eq 0){ Write-Output 'no dsh web process' }\n" % dash_port
+        )
+        self._log(events, "  $ stopping dsh web (端口 %d & node 进程)..." % dash_port)
         try:
             r = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy",
                                 "Bypass", "-Command", ps],
@@ -211,7 +321,10 @@ class DshCtl:
                 self._status(events, "更新失败: " + label)
                 return False
         self._log(events, "[更新] 步骤7/7: 重启 dsh web", "warn")
-        self.start_dsh(events)
+        if not self.start_dsh(events):
+            self._log(events, "  [更新] 构建完成，但 dsh web 启动失败，请查看上方控制台报错", "err")
+            self._status(events, "更新完成但启动失败")
+            return False
         self._log(events, "  [更新] 完成, 访问 http://127.0.0.1:%d" % self.d["dash_port"], "ok")
         self._status(events, "更新完成")
         return True

@@ -317,6 +317,16 @@ class TestDshCtlUpdate:
                             lambda *a, **k: pytest.fail("仓库不存在时不应执行任何命令"))
         assert ctl.update_dsh() is False
 
+    def test_update_dsh_aborts_if_start_fails(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        ctl = self._ctl(tmp_path)
+        monkeypatch.setattr(ctl, "stop_dsh", lambda ev=None: True)
+        monkeypatch.setattr(ctl, "start_dsh", lambda ev=None: False)
+        monkeypatch.setattr(ctl, "stream_cmd", lambda *a, **k: True)
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+        assert ctl.update_dsh() is False
+
     def test_service_update_dsh_emits_finished(self, tmp_path, monkeypatch, qapp):
         # service.update_dsh 后台线程跑 ctl 并以 finished(op, ok) 收场(信号-槽契约)。
         # 工作线程 emit 是队列投递, 需以 processEvents 驱动事件循环才能到达槽。
@@ -337,3 +347,198 @@ class TestDshCtlUpdate:
             qapp.processEvents()
             time.sleep(0.05)
         assert got == [("update-dsh", True)]
+
+
+class TestDshCtlRunAndStart:
+    # 验证 run_dsh 状态时序与 start_dsh 观测及报错捕获
+
+    def _ctl(self, tmp_path):
+        from core.dshctl import DshCtl
+        return DshCtl(derived({"dash_repo": str(tmp_path / "repo"), "dash_port": 3080}))
+
+    def test_run_dsh_modes(self, tmp_path, monkeypatch):
+        ctl = self._ctl(tmp_path)
+        calls = []
+        monkeypatch.setattr(ctl, "start_dsh", lambda ev=None: calls.append("start") or True)
+        monkeypatch.setattr(ctl, "stop_dsh", lambda ev=None: calls.append("stop") or True)
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+
+        assert ctl.run_dsh("start") is True
+        assert calls == ["start"]
+
+        calls.clear()
+        assert ctl.run_dsh("stop") is True
+        assert calls == ["stop"]
+
+        calls.clear()
+        assert ctl.run_dsh("restart") is True
+        # restart 必须严格先 stop 再 start
+        assert calls == ["stop", "start"]
+
+    def test_start_dsh_captures_err_on_early_exit(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setenv("TEMP", str(tmp_path))
+        ctl = self._ctl(tmp_path)
+
+        events_got = []
+        def on_event(kind, payload):
+            events_got.append((kind, payload))
+
+        class FakeProc:
+            pid = 9999
+            def __init__(self, err_file):
+                self.err_file = err_file
+            def poll(self):
+                # 写入假报错模拟 node 崩溃
+                with open(self.err_file, "a", encoding="utf-8") as f:
+                    f.write("Error: failed to import plugin dsh-market\n")
+                return 1
+
+        err_file = os.path.join(str(tmp_path), "dsh-dash", "dsh-web.err.log")
+        import subprocess as _sp
+        monkeypatch.setattr(_sp, "Popen", lambda *a, **k: FakeProc(err_file))
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+
+        ok = ctl.start_dsh(events=on_event)
+        assert ok is False
+        # 验证 stderr 错误被捕获并打进 events log(tag="err")
+        err_logs = [p for k, p in events_got if k == "log" and isinstance(p, tuple) and p[1] == "err"]
+        assert any("Error: failed to import plugin dsh-market" in p[0] for p in err_logs)
+        assert any("异常退出" in p[0] for p in err_logs)
+        # 验证 card 事件被置为 False
+        assert ("card", ("dsh-web", False)) in events_got
+
+    def test_start_dsh_probe_success(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setenv("TEMP", str(tmp_path))
+        ctl = self._ctl(tmp_path)
+
+        events_got = []
+        def on_event(kind, payload):
+            events_got.append((kind, payload))
+
+        class FakeProc:
+            pid = 8888
+            def poll(self):
+                return None
+
+        import subprocess as _sp
+        monkeypatch.setattr(_sp, "Popen", lambda *a, **k: FakeProc())
+        monkeypatch.setattr(ctl, "probe", lambda host, port: (True, 5))
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+
+        ok = ctl.start_dsh(events=on_event)
+        assert ok is True
+        ok_logs = [p for k, p in events_got if k == "log" and isinstance(p, tuple) and p[1] == "ok"]
+        assert any("已就绪" in p[0] for p in ok_logs)
+        assert ("card", ("dsh-web", True)) in events_got
+
+    def test_start_dsh_precheck_cleans_occupied_port(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setenv("TEMP", str(tmp_path))
+        ctl = self._ctl(tmp_path)
+
+        events_got = []
+        def on_event(kind, payload):
+            events_got.append((kind, payload))
+
+        stop_called = []
+        monkeypatch.setattr(ctl, "stop_dsh", lambda ev=None: stop_called.append(True) or True)
+
+        # 首次 probe 返回 True(模拟端口已被占用)，清理后返回 False，启动后返回 True
+        probes = [(True, 5), (False, -1), (True, 12)]
+        def fake_probe(h, p):
+            return probes.pop(0) if probes else (True, 12)
+        monkeypatch.setattr(ctl, "probe", fake_probe)
+
+        class FakeProc:
+            pid = 7777
+            def poll(self):
+                return None
+
+        import subprocess as _sp
+        monkeypatch.setattr(_sp, "Popen", lambda *a, **k: FakeProc())
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+
+        ok = ctl.start_dsh(events=on_event)
+        assert ok is True
+        assert len(stop_called) == 1
+        warn_logs = [p for k, p in events_got if k == "log" and isinstance(p, tuple) and p[1] == "warn"]
+        assert any("已被占用" in p[0] for p in warn_logs)
+
+    def test_start_dsh_watch_proc_captures_late_exit(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setenv("TEMP", str(tmp_path))
+        ctl = self._ctl(tmp_path)
+
+        events_got = []
+        def on_event(kind, payload):
+            events_got.append((kind, payload))
+
+        # 拦截 threading.Thread，使 _watch_proc 可以在主线程直接同步触发验证
+        threads_created = []
+        import threading as _th
+        orig_thread = _th.Thread
+        def mock_thread(*args, **kwargs):
+            t = orig_thread(*args, **kwargs)
+            threads_created.append(kwargs.get("target") or (args[0] if args else None))
+            return t
+        monkeypatch.setattr(_th, "Thread", mock_thread)
+
+        err_file = os.path.join(str(tmp_path), "dsh-dash", "dsh-web.err.log")
+
+        class FakeProc:
+            pid = 6666
+            def __init__(self):
+                self.calls = 0
+            def poll(self):
+                self.calls += 1
+                # 初始检测时进程正常(None), 后续 watcher 检查时崩溃(退出码 1)
+                if self.calls <= 2:
+                    return None
+                # 模拟 node 异步抛出 SyntaxError
+                with open(err_file, "a", encoding="utf-8") as f:
+                    f.write("SyntaxError: The requested module does not provide an export named 'settingsNamespace'\n")
+                return 1
+
+        import subprocess as _sp
+        monkeypatch.setattr(_sp, "Popen", lambda *a, **k: FakeProc())
+        monkeypatch.setattr(ctl, "probe", lambda host, port: (True, 8))
+        monkeypatch.setattr(time, "sleep", lambda s: None)
+
+        ok = ctl.start_dsh(events=on_event)
+        assert ok is True
+        # 验证后台监视器被正确创建并执行一次
+        assert len(threads_created) >= 1
+        watcher_fn = threads_created[-1]
+        watcher_fn()
+
+        err_logs = [p for k, p in events_got if k == "log" and isinstance(p, tuple) and p[1] == "err"]
+        assert any("settingsNamespace" in p[0] for p in err_logs)
+        assert any("后续退出" in p[0] for p in err_logs)
+        assert ("card", ("dsh-web", False)) in events_got
+
+    def test_stop_dsh_script_includes_port_and_patterns(self, tmp_path, monkeypatch):
+        ctl = self._ctl(tmp_path)
+        captured_cmd = []
+        import subprocess as _sp
+        def mock_run(cmd, **kwargs):
+            captured_cmd.append(cmd)
+            class Result:
+                returncode = 0
+                stdout = "stop node 1234\n"
+            return Result()
+        monkeypatch.setattr(_sp, "run", mock_run)
+
+        ok = ctl.stop_dsh()
+        assert ok is True
+        assert len(captured_cmd) == 1
+        ps_script = captured_cmd[0][-1]
+        assert "Get-NetTCPConnection" in ps_script
+        assert "3080" in ps_script
+        assert "apps[\\\\/]cli" in ps_script
+        assert "bin\\.(ts|js)" in ps_script

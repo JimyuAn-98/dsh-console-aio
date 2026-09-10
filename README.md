@@ -9,7 +9,7 @@
 
 > 中文 | [English](#english)
 
-**dsh All-In-One 控制台**（Windows GUI，PySide6 亚克力界面，支持深/浅主题）：SSH 隧道管理、本机 dsh 启停/安装/更新、健康监控，以及 15 个页面的 dsh 数据域管理（会话/Agent/Profile/插件/任务/用量/LLM/部署/日志/设置…）。
+**dsh All-In-One 控制台**（Windows GUI，PySide6 亚克力界面，支持深/浅主题）：SSH 隧道管理、本机 dsh 启停/安装/更新、健康监控，以及 17 个页面的 dsh 数据域管理（会话/Agent/Profile/插件/任务/用量/LLM/部署/日志/设置…）。
 
 - 🚀 一键操作：本机 dsh 启停、SSH 隧道（启动/常驻/停止）、dsh 一键更新、全新环境一键安装
 - 🖥️ 环境检查：git/node/npm/pnpm 版本与推荐基准，更新/安装/卸载引导
@@ -18,6 +18,7 @@
 - ⚡ 全局通用缓存：所有数据页面接入本地快照缓存与状态指示灯（绿/黄/红），进页秒开呈现，数据源变动按需刷新
 - 🪟 系统托盘常驻：支持最小化至 Windows 系统托盘后台运行，鼠标悬停 Tooltip 实时状态监控，右键菜单一键启停 DSH 与隧道
 - 🛡️ 全页内联确认：退役全部阻塞式弹窗，采用沉浸式内联确认条（ConfirmBanner），支持快捷键与操作说明
+- 🔄 插件管理：官方 `dsh plugin` 安装/卸载、单个更新与「更新全部插件」批量升级（内联确认 + 流式日志）
 - 🪵 日志管理：dsh web 输出实时 tail + 过滤 + 着色
 - ⚙️ 设置页：全部配置标签页化，保存即热重载（弹窗收敛：极少模态框）
 - 现代界面：PySide6 深色亚克力 + 现代列表/卡片组件 + 线程安全 + 一键打包分发
@@ -29,7 +30,7 @@
 ## 快速开始
 
 ### 方式一：安装包（推荐）
-下载 **dsh-console-aio-setup-0.6.0.exe**（[GitHub Releases](https://github.com/JimyuAn-98/dsh-console-aio/releases)），双击安装即可使用（无需 Python 环境）。
+下载 **dsh-console-aio-setup-0.7.0.exe**（[GitHub Releases](https://github.com/JimyuAn-98/dsh-console-aio/releases)），双击安装即可使用（无需 Python 环境）。
 安装后可创建桌面快捷方式；卸载走系统控制面板。
 
 ### 方式二：双击（源码）
@@ -45,7 +46,7 @@
 
 ## 界面布局
 
-    顶部:  [🐳 DSH Console v0.6 ]   部署:[本机 ▾]        [搜索][立即刷新]
+    顶部:  [🐳 DSH Console v0.7 ]   部署:[本机 ▾]        [搜索][立即刷新]
     左导航            │ 中栏: 页面容器(17 页)                │ 右栏: 监控(可收起)
     总览               │ 总览: 运行状态+数据速览+部署+隧道      │ 本机端口 ●●●●●
     隧道               │ 插件: 列表|详情|配置 (三栏可拖拽)      │ 公网中转 反向隧道 ●●●
@@ -167,7 +168,7 @@
 | 会话与工作区 | 分组/会话/详情三栏，归档/恢复/删除（二次确认） |
 | Agent 模式 | 窄列表按名字选 + preset.yml 只读详情 |
 | Profile 管理 | 列出 / 复制 / 删除 profile |
-| 插件管理 | 列表/详情/cordis 合成配置三栏；官方 `dsh plugin` 命令安装/卸载；patch 层停用/启用（配置态与生效态徽章） |
+| 插件管理 | 列表/详情/cordis 合成配置三栏；官方 `dsh plugin` 命令安装/卸载/单个更新/批量更新全部；patch 层停用/启用（配置态与生效态徽章） |
 | 任务看板 | ledger + scheduler 只读展示 |
 | 模型用量 | 解压 session 聚合 token（按模型/天）+ 价格估算 + 明细卡 |
 | LLM 配置 | 默认模型切换、自定义 provider 浏览（密钥只提示环境变量名） |
@@ -216,7 +217,7 @@
 - [x] **会话与工作区管理**：分组浏览 / 归档 / 恢复 / 删除（二次确认）
 - [x] **Agent 模式管理**：窄列表 + preset.yml 详情
 - [x] **Profile 管理**：列出 / 复制 / 删除
-- [x] **dsh 插件管理**：列表 / 安装 / 卸载 / patch 层启停（配置态+生效态徽章）
+- [x] **dsh 插件管理**：列表 / 安装 / 卸载 / 单个与批量更新 / patch 层启停（配置态+生效态徽章）
 - [x] **任务看板**：ledger + scheduler 只读展示
 - [x] **模型用量统计**：token 聚合（按模型/天）+ 价格估算 + 明细
 - [x] **LLM 配置**：默认模型切换 + provider 浏览
@@ -252,12 +253,13 @@ MIT © 2025 JimyuAn
 - **Environment check**: git/node/npm/pnpm versions vs. recommended baseline, with update / install / uninstall actions
 - Two-layer health monitor: local ports + reverse tunnels queried via SSH (collapsible right panel)
 - Data-domain console: sessions, agents, profiles, plugins, task board, model usage, LLM config, deployments
+- **Plugin manager**: official `dsh plugin` install/uninstall, single or "update all" batch upgrades, patch-layer toggles
 - **Log viewer**: live tail of dsh web output with filtering, coloring and token masking
 - **Settings page**: all config as tabs, hot-reload on save (dialog-free by design)
 - Modern PySide6 UI: dark acrylic, modern list/card components, thread-safe
 
 ## Quick Start
-- Download **dsh-console-aio-setup-0.6.0.exe** from [Releases](https://github.com/JimyuAn-98/dsh-console-aio/releases) (no Python needed), or run from source:
+- Download **dsh-console-aio-setup-0.7.0.exe** from [Releases](https://github.com/JimyuAn-98/dsh-console-aio/releases) (no Python needed), or run from source:
       python dsh-console-aio.py   (requires Python 3 + `pip install PySide6`)
 
 ## One-click dsh install
@@ -292,7 +294,7 @@ See the Chinese section above for the full field table.
 | Sessions & workspace | group/session/detail columns, archive/restore/delete (double confirm) |
 | Agent presets | narrow name list + read-only preset.yml detail |
 | Profiles | list / copy / delete profiles |
-| Plugins | list/detail/composed-config columns; official `dsh plugin` install/uninstall; patch-layer enable/disable (config vs. effective badges) |
+| Plugins | list/detail/composed-config columns; official `dsh plugin` install/uninstall/single-update/update-all; patch-layer enable/disable (config vs. effective badges) |
 | Task board | ledger + scheduler read-only |
 | Model usage | decompress sessions, aggregate tokens (by model/day) + cost estimate + daily trend chart |
 | LLM config | switch default model, browse custom providers (API keys only hinted by env-var name) |
@@ -329,13 +331,14 @@ Pushing a `v*` tag triggers the CI workflow: PyInstaller onefile → Inno Setup 
 - [x] PySide6 modern UI (dark acrylic + modern list/card components + 17-page navigation)
 - [x] One-click dsh install + environment check
 - [x] Packaged distribution (PyInstaller + Inno Setup, GitHub Actions auto-release)
-- [x] Plugin manager (list / install / uninstall / patch-layer toggles with config & effective badges)
+- [x] Plugin manager (list / install / uninstall / single & batch update / patch-layer toggles with config & effective badges)
 - [x] Log viewer (tail / filter / colorize)
 - [x] Settings page (config as tabs + hot-reload)
 - [x] Overview redesign (run status + data quick-look + deployments + tunnels)
-- [ ] Multiple topology profiles
-- [ ] Theme switching (Mica/solid/light) + layout memory
-- [ ] Command palette (Ctrl+K) / config export-import / diagnostics report / usage charts
+- [x] Multiple topology profiles (tunnel plan snapshots + switch)
+- [x] Dark/light theme variant + live color editing + theme files
+- [ ] Layout memory / runtime Mica-vs-solid switch (deliberately not done)
+- [x] Command palette (Ctrl+K) / config export-import / diagnostics report / usage charts
 - [ ] Beginner onboarding (first-run wizard / diagnostics / FAQ)
 
 ## License

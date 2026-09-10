@@ -3,6 +3,30 @@
 
 ## v0.8.0 (未发布)
 
+### dsh 启动控制台报错捕获与插件管理 Profile 加载修复（2026-09-10）
+
+- **dsh 启动进程观测与标准错误实时流式捕获（`core/dshctl.py`）**：
+  - 复用 `core.logs.Tailer` 机制，在 `start_dsh` 启动前记录 `dsh-web.out.log` 与 `dsh-web.err.log` 的初始偏移；
+  - 启动前端口预检与旧实例清理：在拉起新进程前主动探测 `dash_port`，若已被占用则自动调用 `stop_dsh` 清理历史残留进程并等待端口释放，消除“旧进程占端口导致秒报就绪、新进程在后台报错无声退出”的假就绪问题；
+  - 强化 `stop_dsh` 进程终止逻辑：通过 `Get-NetTCPConnection` 定位占用目标端口的监听 PID 进行精准终止，扩宽 Node 进程匹配规则（覆盖 `apps/cli`、`bin.ts`、`deepseek-harness`），彻底释放 3080 端口与相关进程；
+  - 启动后进行 15 秒（30 次轮询，间隔 500ms，工作线程执行，不卡 GUI）初始观测：实时消费并转发 `err.log`（以 `"err"` 红色标记）与 `out.log`，将 Node 报错堆栈、SyntaxError、缺失导出等异常直接打印到主界面控制台日志区；
+  - 持续 15 秒后台日志监视与后期崩溃追踪：后台监视线程移除遇到 Token 提前退出的逻辑，在服务端口就绪后持续保持 15 秒监视，完整捕捉第三方插件（如 `dsh-better-sidebar` 等）在服务初始化后异步加载阶段抛出的报错堆栈与退出事件；
+  - 探测子进程提前退出或后续崩溃（`proc.poll() is not None`）：立即排空残留 stderr 报错行，输出明确中文失败原因及退出码，状态栏更新为启动失败/进程已退出，卡片标记为离线；
+  - 修复 `update_dsh`：校验步骤 7/7 重启 dsh 的真实返回值，启动失败时中止并输出警告，状态栏更新为 `更新完成但启动失败`，不再误报成功；
+  - 修复 `run_dsh("restart")` 时序：修正历史笔误（先 stop 后 start，不再在 stop 前重复拉起）；
+  - 修复系统托盘菜单接线与 `DshService` 便捷方法：`start_dsh` 支持默认参数与类型回退，补齐 `stop_dsh` 与 `restart_dsh`。
+- **插件管理 Profile 加载死锁修复与插件更新能力接入（`ui/pages_plugins.py`）**：
+  - 修复 `_apply_profiles` 回调：成功获取可用 Profile 后第一时间调用 `self._set_busy(False)` 与 `self._pending = None`，解除页面 busy 死锁，恢复插件列表和详情正常加载渲染；
+  - 新增【更新】按钮：选中某个已安装插件时点击触发内联确认（`ConfirmBanner`），流式执行 `pnpm.cmd dsh plugin --profile <name> update <pkg>` 将插件更新至最新版本；
+  - 新增【更新全部插件】按钮：位于顶栏 Profile 下拉框旁，一键将当前 Profile 下的所有第三方插件批量升级至最新兼容版本（`pnpm.cmd dsh plugin --profile <name> update`）；
+  - 优化【安装】按钮：支持未选中条目时弹出输入框（`QInputDialog`）输入 npm 包名、本地目录或 Git 链接安装全新插件；
+  - 规范 Profile 下拉框事件绑定：清理重复的布局添加代码与冗余的 `activated` 信号连接。
+- **测试保障**：
+  - 新增 `TestDshCtlRunAndStart` 覆盖 `start_dsh` 启动前占用端口自动清理、端口连通就绪判断、后台 15 秒监视器捕获后续异步崩溃、`stop_dsh` 命令行生成与 `run_dsh` 重启时序；
+  - 新增 `test_update_dsh_aborts_if_start_fails` 验证启动失败时更新流程的中止契约；
+  - 新增 `test_service_start_stop_restart_dsh`、`test_plugin_page_apply_profiles_unsets_busy` 与 `test_plugin_page_update_and_update_all` 覆盖服务调用与插件页单个/批量更新及安装命令装配；
+  - 全量 435 个单元测试与 86 个 GUI 冒烟测试全部 100% 通过。
+
 ### SSH 隧道生命周期治理、动态监控修复与自检重构（2026-09-03）
 
 - **单一事实源治理与动态监控自动派生（`core/config.py`）**：

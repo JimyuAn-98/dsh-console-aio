@@ -26,7 +26,7 @@
 │    ops.py            备份 ~/.dsh (排除凭据) / 日志路径 / 凭据存在性          │
 │    profiles.py       Profile 复制与删除 (远程只读红线)                       │
 │    sessions.py       会话归档/恢复/删除 (远程只读红线)                       │
-│    plugins.py        插件列表/cordis patch 启停/官方 CLI 安装卸载            │
+│    plugins.py        插件列表/cordis patch 启停/官方 CLI 安装/更新/卸载      │
 │    deployments.py    多部署快照与配置持久化                                  │
 │    logs.py           dsh web 日志读取与过滤                                 │
 └──────────────────────────────────────┬──────────────────────────────────────┘
@@ -91,11 +91,11 @@ class DshService(QObject):
 |---|---|---|---|
 | **隧道管理与向导** | `tunnel_mgr.py` + `tunnels.py` | `pages_tunnels.py` + `dialog_tunnel_wizard.py` | 声明式通用 TunnelItem 模型，场景向导 + 端口冲突检测，批量启停，PID 存盘 |
 | **隧道方案规划** | `tunnel_planner.py` | `pages_tunnels.py` (规划器卡片) | 整套动态拓扑快照保存/切换，本地/远端端口冲突检测 |
-| **本机 dsh 操控** | `dshctl.py` | `pages_dsh.py` (DSH 管理) | 启停进程、一键更新 (git pull + clean + build)、版本比对 |
+| **本机 dsh 操控** | `dshctl.py` | `pages_dsh.py` (DSH 管理) | 启停进程、启动日志流式观测与报错捕获、一键更新 (git pull + clean + build)、版本比对 |
 | **环境与安装** | `env.py` | `pages_dsh.py` (页面内分步) | 工具链检查 (git/node/npm/pnpm)、一键全新安装、彻底卸载守卫 |
 | **总览概览** | `data.py` + `diagnostics.py` | `pages_overview.py` | 运行状态卡 + 数据域指标速览 + 部署列表 |
 | **会话与工作区** | `sessions.py` | `pages_sessions.py` | 会话分组、归档、恢复、彻底删除；**远程部署只读** |
-| **插件管理** | `plugins.py` | `pages_plugins.py` | cordis.yml 语法解析、patch 层启停、官方 CLI 安装；**远程只读** |
+| **插件管理** | `plugins.py` | `pages_plugins.py` | cordis.yml 语法解析、patch 层启停、官方 CLI 安装/卸载/单个与批量更新；**远程只读** |
 | **Profile 管理** | `profiles.py` | `pages_profiles.py` | profile 列出、复制、删除 (web 主配置保护)；**远程只读** |
 | **模型用量与价格**| `data.py` + `cache.py` | `pages_usage.py` | session zstd 批量解压聚合、按天/模型趋势图、价格表持久化 |
 | **LLM 配置** | `data.py` | `pages_llm.py` | 默认模型切换、provider 浏览；**apiKeyEnv 仅读环境变量名** |

@@ -69,17 +69,25 @@ class DshService(QObject):
         return cb
 
     # ---- UI 触发方法(每个都起后台线程, 不阻塞 UI) ----
-    def start_dsh(self, mode, op="dsh"):
+    def start_dsh(self, mode="start", op="dsh"):
+        if not isinstance(mode, str):
+            mode = "start"
         ev = self._events()
 
         def run():
             try:
-                self.ctl.run_dsh(mode, ev)
-                self.finished.emit(op, True)
+                ok = self.ctl.run_dsh(mode, ev)
+                self.finished.emit(op, bool(ok))
             except Exception as e:
                 ev("log", ("[dsh] 异常: %s" % e, "err"))
                 self.finished.emit(op, False)
         threading.Thread(target=run, daemon=True).start()
+
+    def stop_dsh(self, op="dsh-stop"):
+        self.start_dsh("stop", op=op)
+
+    def restart_dsh(self, op="dsh-restart"):
+        self.start_dsh("restart", op=op)
 
     def update_dsh(self, op="update-dsh"):
         # dsh 完整更新(停 web -> git 拉取 -> 依赖 -> 构建 -> 重启), 业务在 dshctl.update_dsh。

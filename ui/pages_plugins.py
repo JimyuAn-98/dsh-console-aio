@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit, QScrollArea,
-    QPushButton, QMessageBox, QComboBox, QTextEdit, QWidget)
+    QPushButton, QMessageBox, QComboBox, QTextEdit, QWidget, QInputDialog)
 
 from ui.base import BasePage
 from ui.widgets import ModernList, RefreshIndicator, ConfirmBanner, card_wrap, three_split
@@ -103,12 +103,12 @@ class PluginPage(BasePage):
         self._btn_refresh = QPushButton("刷新")
         self._btn_refresh.clicked.connect(lambda: self._refresh(force=True))
         top.addWidget(self._btn_refresh)
-        top.addStretch(1)
-        root.addLayout(top)
-        top.addWidget(self._btn_refresh)
         self._btn_open_patch = QPushButton("打开 patch 文件")
         self._btn_open_patch.clicked.connect(self._open_patch)
         top.addWidget(self._btn_open_patch)
+        self._btn_update_all = QPushButton("更新全部插件")
+        self._btn_update_all.clicked.connect(self._update_all)
+        top.addWidget(self._btn_update_all)
         top.addStretch(1)
         _top_hint = QLabel("已装插件来自 package.json bundles · 改动写入 cordis.patch.yml · cordis 列=dump-config 生效状态",
                            objectName="cardHint")
@@ -125,6 +125,8 @@ class PluginPage(BasePage):
         btns.setSpacing(6)
         self._btn_install = QPushButton("安装")
         self._btn_install.clicked.connect(self._install)
+        self._btn_update = QPushButton("更新")
+        self._btn_update.clicked.connect(self._update)
         self._disable_btn = QPushButton("禁用")
         self._disable_btn.clicked.connect(self._disable)
         self._enable_btn = QPushButton("启用")
@@ -132,6 +134,7 @@ class PluginPage(BasePage):
         self._remove_btn = QPushButton("卸载")
         self._remove_btn.clicked.connect(self._remove)
         btns.addWidget(self._btn_install)
+        btns.addWidget(self._btn_update)
         btns.addWidget(self._disable_btn)
         btns.addWidget(self._enable_btn)
         btns.addWidget(self._remove_btn)
@@ -157,7 +160,6 @@ class PluginPage(BasePage):
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
 
-        self._profile_cb.activated.connect(lambda _i: self._refresh())
         self._refresh_btns()
 
     # ── 三栏构建(列表|详情|配置) ──
@@ -215,12 +217,14 @@ class PluginPage(BasePage):
     # ── Profile 列表(经 service 信号桥) ──
     def _load_profiles(self):
         self._set_busy(True)
+        self._pending = "plugins-profiles-list"
         self._set_status("正在读取 Profile 列表...")
         self.app.service.list_profiles(self._remote, op="plugins-profiles-list")
 
     def _apply_profiles(self, profiles, err):
+        self._set_busy(False)
+        self._pending = None
         if err:
-            self._set_busy(False)
             self._list.set_rows([])
             self._entries = []
             self._set_status("Profile 列表读取失败: " + err)
@@ -231,12 +235,12 @@ class PluginPage(BasePage):
         self._profile_cb.blockSignals(True)
         self._profile_cb.clear()
         self._profile_cb.addItems(names)
-        self._profile_cb.blockSignals(False)
         if names:
             self._profile_cb.setCurrentIndex(0)
+        self._profile_cb.blockSignals(False)
+        if names:
             self._refresh(force=False)
         else:
-            self._set_busy(False)
             self._list.set_rows([])
             self._entries = []
             self._set_status("未找到可用 profile(~/.dsh/profiles 下没有 cordis.yml / cordis.patch.yml)")
@@ -344,19 +348,30 @@ class PluginPage(BasePage):
             self._pending = None
             self._set_busy(False)
 
-    # ── 安装 / 卸载(官方命令, 经 service.run_cmd 流式执行) ──
+    # ── 安装 / 更新 / 卸载(官方命令, 经 service.run_cmd 流式执行) ──
     def _install(self):
-        e = self._selected_entry()
-        if e is None:
-            self._set_status("请先在列表中选择要安装的插件")
-            return
         profile = self._profile_cb.currentText().strip()
-        eid = e.get("id")
-        pkg = e.get("name") or eid
-        if not profile or not pkg:
+        if not profile:
+            self._set_status("请先选择 Profile")
             return
         if self._remote is not None:
             QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
+            return
+        e = self._selected_entry()
+        if e is not None:
+            eid = e.get("id")
+            pkg = e.get("name") or eid
+        else:
+            pkg, ok = QInputDialog.getText(
+                self, "安装新插件",
+                "请输入要安装的 npm 包名、本地路径或 Git 链接：\n例如: dsh-market 或 ./my-plugin",
+            )
+            if not ok or not pkg.strip():
+                return
+            pkg = pkg.strip()
+            eid = pkg
+
+        if not pkg:
             return
         if core_plugins.protected(eid):
             QMessageBox.warning(self, "受保护", "这是 dsh 宿主基础插件，不允许安装。")
@@ -372,6 +387,56 @@ class PluginPage(BasePage):
             do_install,
             level="warn",
             confirm_text="确认安装"
+        )
+
+    def _update(self):
+        e = self._selected_entry()
+        if e is None:
+            self._set_status("请先在列表中选择要更新的插件")
+            return
+        profile = self._profile_cb.currentText().strip()
+        eid = e.get("id")
+        pkg = e.get("name") or eid
+        if not profile or not pkg:
+            return
+        if self._remote is not None:
+            QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
+            return
+        if core_plugins.protected(eid):
+            QMessageBox.warning(self, "受保护", "这是 dsh 宿主基础插件，请通过系统「更新 dsh 本体」升级。")
+            return
+        cmd = dsh_data.plugin_cmd(profile, "update", pkg)
+
+        def do_update():
+            self._run_stream(cmd, "更新插件 " + pkg)
+
+        self._confirm.ask(
+            "更新插件「%s」" % pkg,
+            "将执行命令：\n<code>%s</code>\n更新将把该插件升级至最新版本。" % " ".join(cmd),
+            do_update,
+            level="warn",
+            confirm_text="确认更新"
+        )
+
+    def _update_all(self):
+        profile = self._profile_cb.currentText().strip()
+        if not profile:
+            self._set_status("请先选择 Profile")
+            return
+        if self._remote is not None:
+            QMessageBox.warning(self, "远程只读", _REMOTE_READONLY_MSG)
+            return
+        cmd = dsh_data.plugin_cmd(profile, "update")
+
+        def do_update_all():
+            self._run_stream(cmd, "更新 Profile「%s」全部插件" % profile)
+
+        self._confirm.ask(
+            "更新 Profile「%s」全部插件" % profile,
+            "将执行命令：\n<code>%s</code>\n将当前 Profile 下所有第三方插件批量升级至最新版本。" % " ".join(cmd),
+            do_update_all,
+            level="warn",
+            confirm_text="确认全部更新"
         )
 
     def _remove(self):
@@ -570,9 +635,12 @@ class PluginPage(BasePage):
     # ── 状态 / 按钮 ──
     def _refresh_btns(self):
         sel = self._selected_entry() is not None
+        has_profile = bool(self._profile_cb.currentText().strip())
         self._btn_refresh.setEnabled(not self._busy)
         self._btn_open_patch.setEnabled(not self._busy)
-        self._btn_install.setEnabled(not self._busy and sel)
+        self._btn_update_all.setEnabled(not self._busy and has_profile)
+        self._btn_install.setEnabled(not self._busy and has_profile)
+        self._btn_update.setEnabled(not self._busy and sel)
         self._disable_btn.setEnabled(not self._busy and sel)
         self._enable_btn.setEnabled(not self._busy and sel)
         self._remove_btn.setEnabled(not self._busy and sel)

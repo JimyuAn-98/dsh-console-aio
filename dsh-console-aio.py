@@ -664,11 +664,11 @@ class MainWindow(QMainWindow):
 
         menu.addSeparator()
         act_start_dsh = menu.addAction("🚀 启动本机 dsh")
-        act_start_dsh.triggered.connect(lambda: self.service.start_dsh(CONFIG))
+        act_start_dsh.triggered.connect(lambda: self.service.start_dsh("start"))
         act_stop_dsh = menu.addAction("⏹️ 停止本机 dsh")
         act_stop_dsh.triggered.connect(lambda: self.service.stop_dsh())
         act_restart_dsh = menu.addAction("🔄 重启本机 dsh")
-        act_restart_dsh.triggered.connect(lambda: self.service.restart_dsh(CONFIG))
+        act_restart_dsh.triggered.connect(lambda: self.service.restart_dsh())
 
         menu.addSeparator()
         act_start_tun = menu.addAction("🚇 启动全部隧道")
