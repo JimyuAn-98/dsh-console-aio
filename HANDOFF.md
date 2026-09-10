@@ -60,7 +60,7 @@ installer/           Inno Setup 脚本
   提交 → `git tag vX.Y.Z && git push origin vX.Y.Z` → Action 自动构建并挂 Release。
 - CI 打包清单（新增懒加载页面必加）：`release.yml --hidden-import ui.pages_X` +
   `--add-data ui/theme.qss` + `pip install -r requirements.txt`。
-- 当前版本：`version.json = 0.7.0`（v0.7.0 已发布）；`RELEASE_NOTES.md` 的 **v0.8.0(未发布)** 已累积 09-03 与 09-10 两批。
+- 当前版本：`version.json = 0.8.0`（v0.8.0 已发布 2026-09-10，累积 09-03 隧道治理与 09-10 启动/插件两批）。
 - 诊断：运行中 F12 控件指认；`--diag-config` 打配置链路（出键名不出值）。
 
 ## 五、下一步：P5 逐功能校验与完善优化
