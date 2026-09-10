@@ -155,3 +155,20 @@ class TestMtimeAndDataAggregators:
         assert isinstance(ov["deploys"], list)
         assert len(ov["deploys"]) >= 1
         assert d.overview_source_mtime(cfg) > 0
+
+    def test_overview_source_mtime_tracks_config(self, tmp_path, monkeypatch):
+        # config.json 变更必须让总览数据源时间戳前进, 否则缓存永不失效(端口/命名改动不生效)
+        import core.data as d
+        monkeypatch.setattr(d, "dsh_home", lambda: str(tmp_path))
+        for name in ("sessions_source_mtime", "taskboard_source_mtime",
+                     "profiles_source_mtime", "agent_presets_source_mtime"):
+            monkeypatch.setattr(d, name, lambda *a, **k: 0.0)
+        cfgfile = tmp_path / "config.json"
+        cfgfile.write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("DSH_AIO_CONFIG", str(cfgfile))
+        os.utime(str(cfgfile), (1000, 1000))
+        before = d.overview_source_mtime({"dash_port": 3080})
+        os.utime(str(cfgfile), (2000, 2000))
+        after = d.overview_source_mtime({"dash_port": 3080})
+        assert before >= 1000
+        assert after > before

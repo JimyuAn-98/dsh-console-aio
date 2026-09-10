@@ -10,6 +10,7 @@ from core import cache as core_cache
 from core import data as dsh_data
 from core import config as dsh_config
 from ui.base import BasePage
+from ui.theme import TOKENS
 from ui.widgets import ModernList, RefreshIndicator, card_wrap
 
 
@@ -21,6 +22,12 @@ def _ov_size(n):
             return "%.1f%s" % (n, unit)
         n /= 1024.0
     return "0B"
+
+
+def _c(kind):
+    # 富文本状态色与 QSS/徽章同源(明暗自适应); 口径同 widgets._badge_color
+    return {"ok": TOKENS["ok"], "warn": TOKENS["warn"], "err": TOKENS["err"],
+            "dim": TOKENS["text_dim"]}.get(kind, TOKENS["text_dim"])
 
 
 class OverviewPage(BasePage):
@@ -143,19 +150,19 @@ class OverviewPage(BasePage):
         if is_online:
             if tok:
                 self._dep_auth_lbl.setText(
-                    '<span style="color:#9a9ab0">「%s」免密链接: </span>'
-                    '<span style="color:#7ecb6a; font-family:Consolas,monospace;">%s</span>'
-                    % (name, url))
+                    '<span style="color:%s">「%s」免密链接: </span>'
+                    '<span style="color:%s; font-family:Consolas,monospace;">%s</span>'
+                    % (_c("dim"), name, _c("ok"), url))
             else:
                 self._dep_auth_lbl.setText(
-                    '<span style="color:#9a9ab0">「%s」免密链接: </span>'
-                    '<span style="color:#e0a050; font-family:Consolas,monospace;">%s (信箱未同步Token)</span>'
-                    % (name, url))
+                    '<span style="color:%s">「%s」免密链接: </span>'
+                    '<span style="color:%s; font-family:Consolas,monospace;">%s (信箱未同步Token)</span>'
+                    % (_c("dim"), name, _c("warn"), url))
             self._copy_link_btn.setEnabled(bool(url))
         else:
             self._dep_auth_lbl.setText(
-                '<span style="color:#9a9ab0">「%s」: </span>'
-                '<span style="color:#e07a7a;">离线 / 未配置</span>' % name)
+                '<span style="color:%s">「%s」: </span>'
+                '<span style="color:%s;">离线 / 未配置</span>' % (_c("dim"), name, _c("err")))
             self._copy_link_btn.setEnabled(False)
 
     def _copy_selected_auth_url(self):
@@ -231,30 +238,32 @@ class OverviewPage(BasePage):
         self._last_payload = p
         if p.get("web_ok"):
             self._web_lbl.setText(
-                '<span style="color:#7ecb6a">●</span> dsh web :%s 在线'
-                '<span style="color:#9a9ab0">（%d ms）</span>'
-                % (p.get("dash_port"), p.get("web_ms") or 0)
-                + ('<span style="color:#9a9ab0"> · dsh 本体 v%s</span>' % p["dsh_version"]
+                '<span style="color:%s">●</span> dsh web :%s 在线'
+                '<span style="color:%s">（%d ms）</span>'
+                % (_c("ok"), p.get("dash_port"), _c("dim"), p.get("web_ms") or 0)
+                + ('<span style="color:%s"> · dsh 本体 v%s</span>' % (_c("dim"), p["dsh_version"])
                    if p.get("dsh_version") else ""))
             tok = p.get("local_token")
             auth_url = p.get("local_auth_url") or ("http://127.0.0.1:%s" % p.get("dash_port", 3080))
             if tok:
                 self._local_token_lbl.setText(
-                    '<span style="color:#9a9ab0">鉴权链接: </span>'
-                    '<span style="color:#7ecb6a; font-family:Consolas,monospace;">%s</span>'
-                    % auth_url)
+                    '<span style="color:%s">鉴权链接: </span>'
+                    '<span style="color:%s; font-family:Consolas,monospace;">%s</span>'
+                    % (_c("dim"), _c("ok"), auth_url))
                 self._copy_local_link_btn.setEnabled(True)
             else:
                 self._local_token_lbl.setText(
-                    '<span style="color:#9a9ab0">鉴权链接: </span>'
-                    '<span style="color:#e0a050; font-family:Consolas,monospace;">%s (未捕获到Token)</span>'
-                    % auth_url)
+                    '<span style="color:%s">鉴权链接: </span>'
+                    '<span style="color:%s; font-family:Consolas,monospace;">%s (未捕获到Token)</span>'
+                    % (_c("dim"), _c("warn"), auth_url))
                 self._copy_local_link_btn.setEnabled(True)
         else:
             self._web_lbl.setText(
-                '<span style="color:#e07a7a">●</span> dsh web :%s 离线'
-                '<span style="color:#9a9ab0">（可在控制台启动）</span>' % p.get("dash_port"))
-            self._local_token_lbl.setText('<span style="color:#9a9ab0">鉴权链接: 离线未生成</span>')
+                '<span style="color:%s">●</span> dsh web :%s 离线'
+                '<span style="color:%s">（可在控制台启动）</span>'
+                % (_c("err"), p.get("dash_port"), _c("dim")))
+            self._local_token_lbl.setText(
+                '<span style="color:%s">鉴权链接: 离线未生成</span>' % _c("dim"))
             self._copy_local_link_btn.setEnabled(False)
 
         # 部署列表
@@ -277,7 +286,7 @@ class OverviewPage(BasePage):
             is_local = bool(item.get("local"))
             is_online = (p.get("web_ok") if is_local else snap.get("ok"))
             if is_online:
-                dot = "#7ecb6a"
+                dot = _c("ok")
                 badges = [("在线", "ok")]
                 if tok:
                     badges.append(("Token就绪", "ok"))
@@ -286,9 +295,9 @@ class OverviewPage(BasePage):
             else:
                 err = str(snap.get("error") or "")
                 if "未配置" in err:
-                    badge, dot = ("未配置", "dim"), "#9a9ab0"
+                    badge, dot = ("未配置", "dim"), _c("dim")
                 else:
-                    badge, dot = ("离线", "err"), "#e07a7a"
+                    badge, dot = ("离线", "err"), _c("err")
                 badges = [badge]
             rows.append({"title": name, "meta": " · ".join(meta),
                          "dot": dot, "badges": badges, "data": item})
@@ -326,7 +335,7 @@ class OverviewPage(BasePage):
 
         # 隧道速览(圆点富文本, 与右栏监控同口径)
         def dot(ok):
-            return '<span style="color:%s">●</span>' % ("#7ecb6a" if ok else "#e07a7a")
+            return '<span style="color:%s">●</span>' % (_c("ok") if ok else _c("err"))
 
         segs = []
         for port, label, note in p.get("local_ports") or []:
@@ -334,15 +343,16 @@ class OverviewPage(BasePage):
         ltext = "  ".join(segs) if segs else "（未配置本机监测端口）"
         r = p.get("remote_probe")
         if r is None:
-            rtext = '<span style="color:#9a9ab0">公网侧未探测(未配置或中转不可达)</span>'
+            rtext = '<span style="color:%s">公网侧未探测(未配置或中转不可达)</span>' % _c("dim")
         else:
             rsegs = ["%s:%s %s" % (label, port, dot(bool(r.get(int(port)))))
                      for port, label, note in p.get("remote_tunnels") or []]
             rtext = "  ".join(rsegs) if rsegs else "（未配置反向隧道）"
         self._tunnel_lbl.setText(
-            '<span style="color:#9a9ab0">%s端口</span> %s<br>'
-            '<span style="color:#9a9ab0">%s反向隧道</span> %s'
-            % (p.get("local_name"), ltext, p.get("ssh_name"), rtext))
+            '<span style="color:%s">%s端口</span> %s<br>'
+            '<span style="color:%s">%s反向隧道</span> %s'
+            % (_c("dim"), p.get("local_name"), ltext,
+               _c("dim"), p.get("ssh_name"), rtext))
 
         self._set_status("总览已刷新(数据为只读快照)")
 

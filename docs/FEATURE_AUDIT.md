@@ -20,7 +20,7 @@
 
 | # | 页面 | key | 状态 | 发现/修复 |
 |---|------|-----|------|-----------|
-| 1 | 总览 | overview | ⏳ 进行中 | 见下 |
+| 1 | 总览 | overview | ✅ 已核对 | 修 3 项(主题色/缓存失效/右栏日志色), 留 2 项待决(见下) |
 | 2 | DSH 管理 | dsh | ⬜ 待做 | |
 | 3 | SSH隧道管理 | tunnels | ⬜ 待做 | |
 | 4 | 会话与工作区 | sessions | ⬜ 待做 | |
@@ -38,10 +38,32 @@
 | 16 | 主题 | theme | ⬜ 待做 | |
 | 17 | 关于与更新 | version | ⬜ 待做 | |
 
-## 三、跨页已确认待修点
+## 三、总览页核对结论（2026-09-10）
+
+**已修：**
+
+- D6 富文本状态色硬编码：`ui/pages_overview.py` 的 `#7ecb6a/#e07a7a/#9a9ab0/#e0a050` 全部改为 `ui.theme.TOKENS`
+  （新增 `_c()` 助手，口径同 `widgets._badge_color`），浅色主题下不再低对比。
+- D6 右栏日志色硬编码（顺带全局）：`ui/monitor.py::_append` 的 `#e6e6e6` 等改为 TOKENS，修复浅色主题下右栏日志几乎不可见。
+- D4 缓存失效缺口：`core/data.py::overview_source_mtime` 未纳入 `config.json` / `model_prices.json` 的 mtime，
+  改端口/命名或价格后总览缓存不失效。已补齐，并在 `tests/test_core_cache.py` 增加
+  `test_overview_source_mtime_tracks_config`。
+
+**待决：**
+
+- D1/D4 实时探针被缓存：`collect_overview_data` 的 `web_ok/web_ms/local_token` 是实时值，却被写入总览缓存；
+  服务启停不改变任何源文件 mtime，命中缓存时会长期显示过期的在线/离线状态。
+  建议：命中缓存时仍做一次廉价本机 socket 探活刷新状态卡，或把实时字段排除出缓存。
+- D5 force 绕过 busy：`refresh(force=True)` 在 `_busy` 时仍会发起第二次后台读取，两次结果都会 `_apply_data`。
+  建议 busy 时忽略 force 或做结果合并。
+
+## 四、跨页已确认待修点
 
 - [ ] 4 处遗留 `QMessageBox.question`（`ui/dialog_tunnel_wizard.py`、`ui/pages_tunnels.py`×2、`ui/pages_ops.py`）→ `ConfirmBanner`。
 - [ ] 布局记忆：主分栏 `setSizes([172,700])` 写死，无 `saveState/restoreState`。
 - [ ] `run_dsh("restart")` 忽略 `stop_dsh` 返回值 + 固定 `sleep(1)`。
 - [ ] 启动观测 15s + 监视 15s 对 `update_dsh` 的耗时叠加。
 - [ ] 主题文件跨机导出/导入。
+- [ ] 硬编码状态色清扫（总览页与右栏 `_append` 已修）：`ui/dialog_tunnel_wizard.py`、
+  `ui/pages_deployments.py`、`ui/pages_dsh.py`、`ui/pages_logs.py`、`ui/pages_plugins.py`、
+  `ui/pages_settings.py`；另 `ui/monitor.py` 齿轮 SVG 填充色 `#e6e6e6`（静态、浅色下偏淡）。

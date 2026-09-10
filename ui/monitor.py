@@ -6,6 +6,8 @@ from PySide6.QtGui import QTextCursor, QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QHBoxLayout, QVBoxLayout, QFrame)
 
+from ui.theme import TOKENS
+
 # 白色齿轮 SVG(内嵌, 无需打包资源文件; QSvgRenderer 渲染为 QIcon)
 _GEAR_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#e6e6e6">'
              '<path d="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 '
@@ -70,16 +72,12 @@ class LogBridge(QObject):
     def _append(self, text, tag):
         if self._view is None:
             return
-        color = "#e6e6e6"
-        if tag == "err":
-            color = "#e07a7a"
-        elif tag == "warn":
-            color = "#e5c07b"
-        elif tag == "ok":
-            color = "#7ecb6a"
+        # 状态色与主题 token 同源(明暗自适应); 无 tag 走正文色
+        color = {"err": TOKENS["err"], "warn": TOKENS["warn"],
+                 "ok": TOKENS["ok"]}.get(tag, TOKENS["text"])
         self._view.setTextColor(QColor(color))
         self._view.append(text)
-        self._view.setTextColor(QColor("#e6e6e6"))
+        self._view.setTextColor(QColor(TOKENS["text"]))
         self._view.moveCursor(QTextCursor.End)
 
 

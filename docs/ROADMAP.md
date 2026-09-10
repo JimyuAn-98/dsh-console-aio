@@ -58,6 +58,7 @@
 
 - 架构唯一权威：`docs/ARCHITECTURE.md`
 - 测试分层与安全边界：`docs/TESTING.md`
+- 功能校验矩阵（P5 进度）：`docs/FEATURE_AUDIT.md`
 - 实施计划沉淀与索引：`docs/plans/README.md`
 - 历史路线归档：`docs/archive/ROADMAP_HISTORY.md`
 - 历史方案归档：`docs/archive/`

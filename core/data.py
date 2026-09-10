@@ -1286,4 +1286,11 @@ def overview_source_mtime(cfg=None):
                 times.append(os.path.getmtime(pkg))
         except OSError:
             pass
+    # config.json(端口/命名/隧道配置)与 model_prices.json(用量估算)变更同样使总览快照失效
+    for path in (_config_path(), price_file_path()):
+        try:
+            if os.path.isfile(path):
+                times.append(os.path.getmtime(path))
+        except OSError:
+            pass
     return max(times) if times else 0.0
