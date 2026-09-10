@@ -43,7 +43,7 @@ class _FakeService:
     def check_tool_versions(self, *a, **k):
         pass
 
-    def fetch_dsh_tags(self, *a, **k):
+    def fetch_dsh_releases(self, *a, **k):
         pass
 
     def install_dsh(self, *a, **k):
@@ -171,9 +171,9 @@ class TestDshManagePage:
                     "npm": "11.17.0", "pnpm": "11.7.0"}
         monkeypatch.setattr(_env, "tool_versions", _fake_tools)
         import core.dshctl as _dshctl
-        def _boom():
+        def _boom(*a, **k):
             raise RuntimeError("no network in test")
-        monkeypatch.setattr(_dshctl, "fetch_dsh_tags", _boom)
+        monkeypatch.setattr(_dshctl, "fetch_dsh_releases", _boom)
         app = self._FakeApp()
         page = DshManagePage(app)
         qapp_mod.processEvents()
@@ -192,7 +192,8 @@ class TestDshManagePage:
         import core.env as _env
         monkeypatch.setattr(_env, "tool_versions", lambda tools: {})
         import core.dshctl as _dshctl
-        monkeypatch.setattr(_dshctl, "fetch_dsh_tags", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+        monkeypatch.setattr(_dshctl, "fetch_dsh_releases",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
         app = self._FakeApp()
         page = DshManagePage(app)
         qapp_mod.processEvents()

@@ -321,9 +321,10 @@ class DshService(QObject):
         from core import env as _env
         self._run_core_op(op, _env.tool_versions, tools)
 
-    def fetch_dsh_tags(self, op="dsh-tags"):
-        from core.dshctl import fetch_dsh_tags
-        self._run_core_op(op, fetch_dsh_tags)
+    def fetch_dsh_releases(self, force=False, op="dsh-releases"):
+        # dsh 本体 GitHub Releases(含更新日志正文); force=True 绕过 core 的 TTL 缓存
+        from core.dshctl import fetch_dsh_releases
+        self._run_core_op(op, fetch_dsh_releases, force)
 
     def install_dsh(self, url, target, op="dsh-install"):
         from core import env as _env

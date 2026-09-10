@@ -21,7 +21,7 @@
 | # | 页面 | key | 状态 | 发现/修复 |
 |---|------|-----|------|-----------|
 | 1 | 总览 | overview | ✅ 已核对 | 修 3 项(主题色/缓存失效/右栏日志色), 留 2 项待决(见下) |
-| 2 | DSH 管理 | dsh | ⬜ 待做 | |
+| 2 | DSH 管理 | dsh | 🟡 部分 | 批1 版本发布日志查看已做(含状态色 token 化); 批2 部署指定版本待做 |
 | 3 | SSH隧道管理 | tunnels | ⬜ 待做 | |
 | 4 | 会话与工作区 | sessions | ⬜ 待做 | |
 | 5 | Agent 模式 | agents | ⬜ 待做 | |
@@ -65,5 +65,5 @@
 - [ ] 启动观测 15s + 监视 15s 对 `update_dsh` 的耗时叠加。
 - [ ] 主题文件跨机导出/导入。
 - [ ] 硬编码状态色清扫（总览页与右栏 `_append` 已修）：`ui/dialog_tunnel_wizard.py`、
-  `ui/pages_deployments.py`、`ui/pages_dsh.py`、`ui/pages_logs.py`、`ui/pages_plugins.py`、
+  `ui/pages_deployments.py`、`ui/pages_logs.py`、`ui/pages_plugins.py`、
   `ui/pages_settings.py`；另 `ui/monitor.py` 齿轮 SVG 填充色 `#e6e6e6`（静态、浅色下偏淡）。

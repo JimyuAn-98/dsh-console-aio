@@ -1,6 +1,17 @@
 
 # Release Notes
 
+## v0.9.0 (未发布)
+
+### DSH 管理页：版本发布日志查看（2026-09-10）
+
+- **版本信息卡升级**（`ui/pages_dsh.py`）：由"tag 列表 + 本机版本"改为单栏「版本下拉 + 只读更新日志正文」，下拉标注「已装 / 预发布」并默认选中本机版本；
+- **数据源改用 GitHub Releases**（`core/dshctl.py`）：新增 `fetch_dsh_releases`（tag/版本号/发布日期/预发布标记/正文/链接）与会话内 10 分钟 TTL 缓存（`force` 绕过，省匿名 API 限流），替代原 `/tags` 拉取；
+- **只显示中文段**：新增纯函数 `cn_section`（截到首个英文锚点、剥顶部语言导航行，找不到英文锚点则整段兜底）与 `html_headings_to_md`（HTML `<hN>` 标题转 Markdown，供 `setMarkdown` 渲染）；
+- **本机版本精确匹配**：新增 `dsh_local_version`（`dash_repo/package.json`），退出原先脆弱的子串比较；
+- **信号桥**（`app/services.py`）：`fetch_dsh_tags` → `fetch_dsh_releases(force)`；归属仓库固定官方 `deepseek-ai/deepseek-harness`；
+- 顺带把本页状态圆点硬编码色改为主题 token（浅色主题自适应）。
+
 ## v0.8.0 (2026-09-10)
 
 ### 安装版一键更新：下载安装包并自动退出运行安装程序（2026-09-10）

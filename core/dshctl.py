@@ -74,16 +74,94 @@ def scan_log_for_token():
     return None
 
 
-def fetch_dsh_tags(per_page=8):
-    # 拉取 dsh 本体仓库的 GitHub tags(新→旧), 返回名称列表; 网络失败抛异常由 UI 层
-    # 转成中文文案。走 api.github.com(同一仓库 tags 数据的官方接口), 不爬 HTML。
-    url = ("https://api.github.com/repos/deepseek-ai/deepseek-harness/tags"
-           "?per_page=%d" % int(per_page))
+DSH_REPO = "deepseek-ai/deepseek-harness"   # 固定官方仓库(版本信息来源, 不随 remote 推导)
+_DSH_RELEASES_TTL = 600                       # 秒; 匿名 GitHub API 限流 60/h, 进页复用缓存
+_DSH_RELEASES_CACHE = {"at": 0.0, "data": []}
+_EN_ANCHOR_RE = re.compile(r'<h[1-6][^>]*id="en[^"]*"', re.IGNORECASE)
+_HEAD_TAG_RE = re.compile(r"<h([1-6])[^>]*>(.*?)</h\1>", re.IGNORECASE | re.DOTALL)
+_ANY_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def fetch_dsh_releases(force=False, per_page=30):
+    # 拉取 dsh 本体 GitHub Releases(新->旧): tag/版本号/发布日期/预发布标记/更新日志正文。
+    # 会话内 TTL 缓存(force=True 绕过, 供「刷新」按钮用); 网络失败抛异常, 由 service
+    # 转成中文 err 交页面展示。走 api.github.com 官方接口, 不爬 HTML。
+    import time
+    now = time.time()
+    cache = _DSH_RELEASES_CACHE
+    if (not force and cache["data"]
+            and now - cache["at"] < _DSH_RELEASES_TTL):
+        return cache["data"]
+    url = ("https://api.github.com/repos/%s/releases?per_page=%d"
+           % (DSH_REPO, int(per_page)))
     req = urllib.request.Request(url, headers={"User-Agent": "dsh-console-aio"})
     with urllib.request.urlopen(req, timeout=15) as r:
         data = json.load(r)
-    return [t.get("name") or "" for t in data
-            if isinstance(t, dict) and t.get("name")]
+    out = []
+    for item in data if isinstance(data, list) else []:
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("tag_name") or "")
+        if not tag:
+            continue
+        ver = tag
+        for prefix in ("dsh-v", "v"):
+            if ver.startswith(prefix):
+                ver = ver[len(prefix):]
+                break
+        out.append({
+            "tag": tag,
+            "version": ver,
+            "name": str(item.get("name") or ver),
+            "published_at": str(item.get("published_at") or ""),
+            "prerelease": bool(item.get("prerelease")),
+            "body": str(item.get("body") or ""),
+            "html_url": str(item.get("html_url") or ""),
+        })
+    cache["at"] = now
+    cache["data"] = out
+    return out
+
+
+def dsh_local_version(cfg=None):
+    # 本机 dsh 版本 = dash_repo/package.json 的 version; 未配置/未安装/损坏返回 None。
+    if cfg is None:
+        from core import config as _cfg
+        cfg = _cfg.load_config()
+    repo = (cfg or {}).get("dash_repo") or ""
+    try:
+        with open(os.path.join(repo, "package.json"), encoding="utf-8") as f:
+            return (json.load(f) or {}).get("version")
+    except Exception:
+        return None
+
+
+def cn_section(body):
+    # 取 Release 正文的中文段: 截到首个英文锚点(<h3 id="en-...">)之前; 找不到英文锚点则
+    # 返回全文(兜底)。再剥掉顶部 "[中文](#..) | [English](#..)" 语言导航行。
+    if not body:
+        return ""
+    text = str(body)
+    m = _EN_ANCHOR_RE.search(text)
+    if m:
+        text = text[:m.start()]
+    lines = text.splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if lines and "[中文]" in lines[0] and "[English]" in lines[0]:
+        lines.pop(0)
+    return "\n".join(lines).strip()
+
+
+def html_headings_to_md(text):
+    # Release 正文用 HTML 标题(<h3 id="..">新增功能</h3>); QTextDocument.setMarkdown 不认
+    # 块级 HTML。转成 Markdown 标题, 其余标签剥掉, 保证正文可读。
+    if not text:
+        return ""
+    t = _HEAD_TAG_RE.sub(
+        lambda m: ("#" * int(m.group(1))) + " " + m.group(2).strip(), str(text))
+    return _ANY_TAG_RE.sub("", t)
+
 
 
 class DshCtl:

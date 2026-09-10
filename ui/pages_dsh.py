@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # DSH 管理页: 本机 dsh 操控(启动/重启/停止) + 完整更新 + 环境/安装 + 版本信息
-# (本机 package.json vs GitHub deepseek-ai/deepseek-harness tags)。
+# (本机 package.json vs GitHub Releases: 版本列表 + 中文更新日志)。
 # 由隧道页(dsh-web/update-dsh 两卡)与顶栏(环境/安装按钮)收敛而来 —— dsh 域操作集中
 # 一页, 隧道页回归纯隧道。卡片在线状态经 service.card 信号(接收者=本页, 销毁自动断开)。
 #
@@ -10,23 +10,23 @@
 # 后台线程只调 core 函数, 经类级 Signal + safe_emit 回主线程更新控件(AGENTS 线程约定);
 # tags 拉取走页面线程 + safe_emit(同范式)。无真实远程写。
 
-import json
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QMessageBox,
     QTextEdit, QLineEdit, QProgressBar, QPlainTextEdit, QTableWidget,
-    QTableWidgetItem, QHeaderView, QWidget, QFileDialog, QScrollArea)
+    QTableWidgetItem, QHeaderView, QWidget, QFileDialog, QScrollArea, QComboBox)
 
 from core import config as dsh_config
+from core import dshctl as core_dshctl
 from core import env as core_env
 from ui.base import BasePage
 from ui.theme import TOKENS
 from ui.widgets import ConfirmBanner
 
-_GH_TAGS_URL = "https://github.com/deepseek-ai/deepseek-harness/tags"
+_GH_RELEASES_URL = "https://github.com/%s/releases" % core_dshctl.DSH_REPO
 
 # 环境检查工具定义(版本命令 + 推荐基准 + 操作表; 与退役的 EnvDialog 同源)
 TOOLS = [
@@ -75,6 +75,8 @@ class DshManagePage(BasePage):
     def __init__(self, app, parent=None):
         self._cards = {}               # key -> 状态圆点(仅 dsh-web 有)
         self.env_rows = {}             # 环境检查表: key -> (版本, 状态) item
+        self._releases = []            # GitHub Releases 列表(新->旧)
+        self._local_ver = None         # 本机 dsh 版本(package.json)
         self._inst_running = False
         self._uninst_running = False
         super().__init__(app, parent)
@@ -84,7 +86,7 @@ class DshManagePage(BasePage):
         self.app.service.result.connect(self._on_result)
         for key, on in self.app._card_state.items():
             self._set_card(key, on)
-        self._fetch_tags()
+        self._fetch_releases()
 
     def _on_service_log(self, text, _tag=""):
         if self._inst_running:
@@ -101,8 +103,8 @@ class DshManagePage(BasePage):
     def _on_result(self, op, payload):
         if op == "dsh-tool-versions":
             self._apply_env(payload.get("data") or {})
-        elif op == "dsh-tags":
-            self._on_tags(payload.get("data") or [], payload.get("err", ""))
+        elif op == "dsh-releases":
+            self._on_releases(payload.get("data") or [], payload.get("err", ""))
         elif op == "dsh-install":
             self._on_install_done(not payload.get("err"), payload.get("err") or payload.get("msg", ""))
         elif op == "dsh-uninstall":
@@ -151,7 +153,7 @@ class DshManagePage(BasePage):
         head.addWidget(QLabel("本机 dsh", objectName="cardTitle"))
         head.addStretch(1)
         dot = QLabel("○", objectName="monDot")
-        dot.setStyleSheet("color:#999; font-size:15px;")
+        dot.setStyleSheet("color:%s; font-size:15px;" % TOKENS["text_dim"])
         head.addWidget(dot)
         lv.addLayout(head)
         self._cards["dsh-web"] = dot
@@ -531,7 +533,7 @@ class DshManagePage(BasePage):
             self.app.loge("[卸载] 失败: " + msg, "err")
             QMessageBox.warning(self, "卸载失败", msg)
 
-    # ── 卡: 版本信息(本机 package.json vs GitHub tags) ──
+    # ── 卡: 版本信息(本机 package.json vs GitHub Releases + 更新日志) ──
     def _card_version(self):
         card = QFrame(objectName="card")
         lv = QVBoxLayout(card)
@@ -541,54 +543,90 @@ class DshManagePage(BasePage):
         head.addWidget(QLabel("版本信息(dsh 本体)", objectName="cardTitle"))
         head.addStretch(1)
         refresh = QPushButton("刷新")
-        refresh.clicked.connect(self._fetch_tags)
+        refresh.clicked.connect(lambda: self._fetch_releases(force=True))
         head.addWidget(refresh)
         lv.addLayout(head)
-        self._tags_view = QTextEdit()
-        self._tags_view.setReadOnly(True)
-        self._tags_view.setFont(QFont("Consolas", 9))
-        self._tags_view.setMinimumHeight(150)
-        self._tags_view.setPlainText("正在获取 GitHub tags...")
-        lv.addWidget(self._tags_view, 1)
+        self._local_ver_lbl = QLabel("本机版本: 读取中…", objectName="cardHint")
+        lv.addWidget(self._local_ver_lbl)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("版本:", objectName="cardHint"))
+        self._rel_cb = QComboBox()
+        self._rel_cb.setMinimumWidth(260)
+        self._rel_cb.currentIndexChanged.connect(self._render_release)
+        row.addWidget(self._rel_cb, 1)
+        self._btn_rel_open = QPushButton("在浏览器打开")
+        self._btn_rel_open.setEnabled(False)
+        self._btn_rel_open.clicked.connect(self._open_selected_release)
+        row.addWidget(self._btn_rel_open)
+        lv.addLayout(row)
+        self._rel_body = QTextEdit()
+        self._rel_body.setReadOnly(True)
+        self._rel_body.setMinimumHeight(220)
+        self._rel_body.setPlaceholderText("选择版本查看更新日志…")
+        lv.addWidget(self._rel_body, 1)
         return card
 
-    def _local_version(self):
-        # 本机 dsh 版本 = dash_repo/package.json 的 version(与概览页同源); 读不到为 None
-        try:
-            cfg = dsh_config.load_config()
-            with open(os.path.join(cfg.get("dash_repo") or "", "package.json"),
-                      encoding="utf-8") as f:
-                return (json.load(f) or {}).get("version")
-        except Exception:
-            return None   # 未配置仓库/未安装/文件损坏, 版本显示为未知
+    def _fetch_releases(self, force=False):
+        # 经 service 信号桥拉 GitHub Releases(core 侧 TTL 缓存; force 供「刷新」按钮)
+        local = core_dshctl.dsh_local_version(dsh_config.load_config())
+        self._local_ver = local
+        self._local_ver_lbl.setText(
+            ("本机版本: v%s" % local) if local
+            else "本机版本: 未知(未配置 dash_repo 或未安装)")
+        self._btn_rel_open.setEnabled(False)
+        self._rel_body.setPlainText("正在获取发布信息(GitHub Releases)…")
+        self.app.service.fetch_dsh_releases(force=force, op="dsh-releases")
 
-    def _fetch_tags(self):
-        self._tags_view.setPlainText("正在获取 GitHub tags(api.github.com)...")
-        self.app.service.fetch_dsh_tags(op="dsh-tags")
-
-    def _on_tags(self, tags, err):
+    def _on_releases(self, releases, err):
         if err:
-            self._tags_view.setPlainText(err + "\n检查网络后可点「刷新」重试。")
+            self._rel_cb.blockSignals(True)
+            self._rel_cb.clear()
+            self._rel_cb.blockSignals(False)
+            self._rel_body.setPlainText(
+                "发布信息获取失败: %s\n检查网络后可点「刷新」重试。" % err)
+            self._btn_rel_open.setEnabled(False)
             return
-        lines = []
-        if tags:
-            latest = str(tags[0])
-            lines.append("GitHub 最新 tag: %s" % latest)
-            local = self._local_version()
-            if not local:
-                lines.append("本机版本: 未知(未配置 dash_repo 或未安装)")
-            elif local.lstrip("v") in latest.lstrip("v"):
-                lines.append("本机版本: v%s —— 与最新 tag 一致" % local)
-            else:
-                lines.append("本机版本: v%s —— 可能落后于最新 tag(可点「运行更新」)"
-                             % local)
-            lines.append("")
-            lines.extend("· " + str(t) for t in tags)
-        else:
-            lines.append("仓库还没有任何 tag")
-        lines.append("")
-        lines.append("全部 tags: " + _GH_TAGS_URL)
-        self._tags_view.setPlainText("\n".join(lines))
+        self._releases = list(releases or [])
+        if not self._releases:
+            self._rel_body.setPlainText("上游仓库没有可用的 Release。")
+            return
+        local = self._local_ver
+        self._rel_cb.blockSignals(True)
+        self._rel_cb.clear()
+        sel = 0
+        for i, r in enumerate(self._releases):
+            label = "v%s · %s%s%s" % (
+                r.get("version") or r.get("tag") or "?",
+                (r.get("published_at") or "")[:10] or "日期未知",
+                " · 预发布" if r.get("prerelease") else "",
+                " · 已装" if local and r.get("version") == local else "")
+            self._rel_cb.addItem(label)
+            if local and r.get("version") == local:
+                sel = i
+        self._rel_cb.setCurrentIndex(sel)
+        self._rel_cb.blockSignals(False)
+        self._render_release(sel)
+
+    def _render_release(self, idx):
+        # 单栏: 下拉选中 -> 渲染该版本中文更新日志(HTML 标题转 Markdown 后交给 setMarkdown)
+        if not (0 <= idx < len(self._releases)):
+            self._rel_body.clear()
+            self._btn_rel_open.setEnabled(False)
+            return
+        r = self._releases[idx]
+        body = core_dshctl.html_headings_to_md(
+            core_dshctl.cn_section(r.get("body") or ""))
+        self._rel_body.setMarkdown(body if body.strip() else "(该版本没有更新日志正文)")
+        self._btn_rel_open.setEnabled(bool(r.get("html_url")))
+
+    def _open_selected_release(self):
+        idx = self._rel_cb.currentIndex()
+        url = (self._releases[idx].get("html_url")
+               if 0 <= idx < len(self._releases) else "") or _GH_RELEASES_URL
+        try:
+            os.startfile(url)
+        except Exception as e:
+            QMessageBox.critical(self, "无法打开", str(e))
 
     # ── 卡片状态(service.card 信号槽, 主线程) ──
     def _apply_card(self, key, on):
@@ -599,5 +637,5 @@ class DshManagePage(BasePage):
         if dot is None:
             return
         dot.setText("●" if on else "○")
-        dot.setStyleSheet("color:#7ecb6a; font-size:15px;" if on
-                          else "color:#999; font-size:15px;")
+        dot.setStyleSheet("color:%s; font-size:15px;"
+                          % (TOKENS["ok"] if on else TOKENS["text_dim"]))
