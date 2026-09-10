@@ -42,12 +42,8 @@ def read_cache(kind):
     return d.get("data"), d.get("fetched_at")
 
 
-def write_cache(kind, data, fetched_at=None):
-    # 写某 kind 的缓存(合并保留其他 kind); fetched_at 缺省=当下。返回是否成功。
-    import time
-    fetched_at = fetched_at if fetched_at is not None else time.time()
-    d = _read_all()
-    d[kind] = {"fetched_at": fetched_at, "data": data}
+def _write_all(d):
+    # 整份写回缓存文件; 失败(权限/占用)返回 False。
     p = cache_file_path()
     try:
         with io.open(p, 'w', encoding='utf-8', newline='') as fh:
@@ -55,6 +51,15 @@ def write_cache(kind, data, fetched_at=None):
     except OSError:
         return False
     return True
+
+
+def write_cache(kind, data, fetched_at=None):
+    # 写某 kind 的缓存(合并保留其他 kind); fetched_at 缺省=当下。返回是否成功。
+    import time
+    fetched_at = fetched_at if fetched_at is not None else time.time()
+    d = _read_all()
+    d[kind] = {"fetched_at": fetched_at, "data": data}
+    return _write_all(d)
 
 
 def needs_refresh(kind, src_mtime):
@@ -84,3 +89,61 @@ def data_changed(kind, new_data):
     if data is None:
         return True
     return json_sig(data) != json_sig(new_data)
+
+
+# ── 缓存种类注册表(元数据, 供管理/诊断/校验; 不含数据) ──
+# 固定 kind -> 中文说明; 动态 kind(按 profile 等拼接)用前缀登记。
+KINDS = {
+    "overview": "总览快照",
+    "sessions": "会话与工作区",
+    "profiles": "Profile 列表",
+    "agents": "Agent 模式列表",
+    "taskboard": "任务看板",
+    "usage": "模型用量统计",
+}
+PREFIX_KINDS = {
+    "plugins_": "插件列表(按 profile)",
+}
+
+
+def describe_kind(kind):
+    # 给一个缓存 key 返回中文说明(固定名优先, 否则匹配前缀); 未登记返回"未登记"。
+    if kind in KINDS:
+        return KINDS[kind]
+    for prefix, desc in PREFIX_KINDS.items():
+        if kind.startswith(prefix):
+            return desc
+    return "未登记"
+
+
+def list_cached():
+    # 当前缓存概览(只读): [{kind, description, fetched_at, bytes}], 按 kind 排序。
+    d = _read_all()
+    out = []
+    for kind, item in d.items():
+        if not isinstance(item, dict):
+            continue
+        try:
+            size = len(json.dumps(item.get("data"), ensure_ascii=False,
+                                  default=str).encode("utf-8"))
+        except (TypeError, ValueError):
+            size = 0
+        out.append({"kind": kind, "description": describe_kind(kind),
+                    "fetched_at": item.get("fetched_at") or 0, "bytes": size})
+    out.sort(key=lambda r: r["kind"])
+    return out
+
+
+def clear_cache(kind):
+    # 删除某一 kind 的缓存; 该 kind 不存在返回 False, 否则返回是否写回成功。
+    d = _read_all()
+    if kind not in d:
+        return False
+    d.pop(kind, None)
+    return _write_all(d)
+
+
+def clear_all_cache():
+    # 清空全部缓存; 返回删除的 kind 个数(写回失败返回 0)。
+    n = len(_read_all())
+    return n if _write_all({}) else 0

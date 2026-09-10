@@ -31,7 +31,8 @@ dsh-console-aio.py  主程序（控制台布局: 顶部部署栏 + 左导航 + �
 core/               后端业务层（纯 Python 零 Qt）: data.py 数据层 / tunnel_mgr.py 隧道 /
                     dshctl.py 启停更新 / config.py / 各数据域(keys/env/ops/profiles/sessions/plugins/deployments/version)
 ui/                 前端页面包（pages_*.py 全 17 个功能页; base.py 页面基类;
-                    theme.py 主题引擎(token/实时换肤) + theme.qss 生成产物; 旧 dialogs.py 已退役）
+                    cacheable.py 数据页缓存编排 mixin; theme.py 主题引擎(token/实时换肤) +
+                    theme.qss 生成产物; 旧 dialogs.py 已退役）
 app/                信号桥层（services.py: DshService, 唯一起后台线程并转 Qt 信号）
 tools/              工具（dump_ui.py 离屏渲染 dump; preview_theme.py 主题配色预览截图）
 tests/              pytest 测试（纯单元默认跑; 构造 MainWindow 的测试须 -m gui 人工）

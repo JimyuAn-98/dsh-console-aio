@@ -8,7 +8,6 @@
 
 import os
 
-from core import cache as core_cache
 from core import data as core_data
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -16,6 +15,7 @@ from PySide6.QtWidgets import (
     QPushButton, QMessageBox, QPlainTextEdit)
 
 from ui.base import BasePage
+from ui.cacheable import CacheableMixin
 from ui.widgets import ModernList, RefreshIndicator, card_wrap
 
 
@@ -81,7 +81,7 @@ def _fmt_yaml(data, indent=0):
     return lines
 
 
-class AgentPage(BasePage):
+class AgentPage(CacheableMixin, BasePage):
     # Agent 模式管理: BasePage 范式, app 为 MainWindow。
 
     def __init__(self, app, parent=None):
@@ -156,47 +156,36 @@ class AgentPage(BasePage):
         root.addLayout(btns)
 
 
-    # ── 列表(先读缓存, mtime 变化或强制时后台拉取) ──
-    def _refresh(self, force=False):
-        if self._busy:
-            return
-        src_mtime = core_data.agent_presets_source_mtime(self._remote)
-        cache_data, _ = core_cache.read_cache("agents")
-        if not force and cache_data is not None and not core_cache.needs_refresh("agents", src_mtime):
-            # 缓存已是最新: 直接呈现, 标记"无变化"(绿)
-            self._apply_data(cache_data, "")
-            self._spinner.set_status("ok")
-            self._spinner.setToolTip("无变化(缓存已是最新)")
-            return
+    # ── 缓存编排钩子(见 ui/cacheable.py); _refresh() 由 mixin 提供 ──
+    def _cache_kind(self):
+        return "agents"
 
-        self._busy = True
+    def _cache_src_mtime(self):
+        return core_data.agent_presets_source_mtime(self._remote)
+
+    def _cache_fetch(self):
+        self.app.service.list_agent_presets(self._remote)
+
+    def _cache_apply(self, data, err=""):
+        self._apply_data(data if isinstance(data, list) else [], err)
+
+    def _cache_valid(self, data):
+        return isinstance(data, list)
+
+    def _cache_empty_data(self):
+        return []
+
+    def _cache_begin(self):
         self._pending = "agents-list"
         self._set_status("正在读取 Agent 模式列表...")
         self._set_btns(False)
-        self._spinner.set_loading(True)
-        self.app.service.list_agent_presets(self._remote)
+
+    def _cache_end(self):
+        self._pending = None
 
     def _on_result(self, op, payload):
         if op == "agents-list":
-            self._busy = False
-            self._pending = None
-            self._spinner.set_loading(False)
-            err = payload.get("err") or ""
-            data = payload.get("data")
-            if err or not isinstance(data, list):
-                self._apply_data([], str(err or "读取失败"))
-                self._spinner.set_status("err")
-                self._spinner.setToolTip("数据获取错误: " + str(err))
-                return
-            changed = core_cache.data_changed("agents", data)
-            core_cache.write_cache("agents", data)
-            self._apply_data(data, "")
-            if changed:
-                self._spinner.set_status("warn")
-                self._spinner.setToolTip("数据有变化(已刷新)")
-            else:
-                self._spinner.set_status("ok")
-                self._spinner.setToolTip("无变化(缓存已是最新)")
+            self._cache_result(payload.get("data"), payload.get("err") or "")
 
     def _on_finished(self, op, ok):
         # 兜底: result 槽漏执行导致 busy 悬挂时解除

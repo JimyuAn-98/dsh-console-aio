@@ -11,7 +11,6 @@
 
 from PySide6.QtCore import Qt
 
-from core import cache as core_cache
 from core import data as core_data
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFormLayout, QFrame, QHBoxLayout, QHeaderView,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ui.base import BasePage
+from ui.cacheable import CacheableMixin
 from ui.chart import StackedBarChart, short_model
 from ui.widgets import ModernList, RefreshIndicator, card_wrap, three_split
 
@@ -46,7 +46,7 @@ def _cost_text(model, inp, out, cache=0):
     return "%.2f 元" % cost
 
 
-class UsagePage(BasePage):
+class UsagePage(CacheableMixin, BasePage):
     # 模型用量统计: BasePage 范式, app 为 MainWindow。
 
     def __init__(self, app, parent=None):
@@ -205,56 +205,49 @@ class UsagePage(BasePage):
             val.setWordWrap(True)
             self._d_form.addRow(QLabel(label, objectName="monNote"), val)
 
-    def _refresh(self, force=False):
-        # 进页/手动刷新: 先看缓存 + 数据源时间戳, 决定是否真去重扫。
-        #   - 缓存存在且源时间戳未变(非强制) -> 用缓存直接呈现(绿, 不转圈)。
-        #   - 无缓存 / 源时间戳已变 / 强制  -> 后台拉取(转圈), 结束后对比缓存决定绿/黄/红。
-        if self._busy:
-            return
-        src_mtime = core_data.usage_source_mtime()
-        cache_data, _ = core_cache.read_cache("usage")
-        if not force and cache_data is not None and not core_cache.needs_refresh("usage", src_mtime):
-            # 缓存已是最新: 直接用缓存呈现, 标记"无变化"(绿)。
-            self._apply_data(cache_data, "")
-            self._status_lbl.setText("数据无变化")
-            self._spinner.set_status("ok")
-            self._spinner.setToolTip("无变化(缓存已是最新)")
-            return
-        self._busy = True
+    # ── 缓存编排钩子(见 ui/cacheable.py); _refresh() 由 mixin 提供 ──
+    def _cache_kind(self):
+        return "usage"
+
+    def _cache_src_mtime(self):
+        return core_data.usage_source_mtime()
+
+    def _cache_fetch(self):
+        self.app.service.read_usage_stats(self._remote)
+
+    def _cache_apply(self, data, err=""):
+        if not err and isinstance(data, dict) and data.get("ok"):
+            self._stats = data
+        self._apply_data(data, err)
+
+    def _cache_valid(self, data):
+        return isinstance(data, dict) and bool(data.get("ok"))
+
+    def _cache_empty_data(self):
+        return None
+
+    def _cache_error_text(self, data, err):
+        return str(err or (data or {}).get("error") or "未知错误")
+
+    def _cache_begin(self):
         self._pending = "usage-read"
         self._status_lbl.setText("正在统计…")
         self._set_btns(False)
-        self._spinner.set_loading(True)
-        self.app.service.read_usage_stats(self._remote)
 
-    def _apply_result(self, data, err):
-        # 后台拉取收尾: 错误->红; 否则写缓存, 对比旧缓存: 变则刷新+黄, 不变则绿。
-        self._busy = False
+    def _cache_end(self):
+        self._pending = None
         self._set_btns(True)
-        self._spinner.set_loading(False)
-        if err or not isinstance(data, dict) or not data.get("ok"):
-            msg = err or (data or {}).get("error") or "未知错误"
-            self._apply_data(None, str(msg))
-            self._spinner.set_status("err")
-            self._spinner.setToolTip("数据获取错误")
-            return
-        self._stats = data
-        changed = core_cache.data_changed("usage", data)
-        core_cache.write_cache("usage", data)
-        self._apply_data(data, "")
-        if changed:
-            self._status_lbl.setText("数据有变化(已刷新)")
-            self._spinner.set_status("warn")
-            self._spinner.setToolTip("数据有变化(已刷新)")
-        else:
-            self._status_lbl.setText("数据无变化")
-            self._spinner.set_status("ok")
-            self._spinner.setToolTip("无变化(数据与上次一致)")
+
+    def _cache_hit_extra(self, data):
+        self._status_lbl.setText("数据无变化")
+
+    def _cache_mark_changed(self, changed):
+        self._status_lbl.setText("数据有变化(已刷新)" if changed else "数据无变化")
+        super()._cache_mark_changed(changed)
 
     def _on_result(self, op, payload):
         if op == "usage-read":
-            self._pending = None
-            self._apply_result(payload.get("data"), payload.get("err", ""))
+            self._cache_result(payload.get("data"), payload.get("err", ""))
 
     def _on_finished(self, op, ok):
         # 兜底: result 槽漏执行导致 busy 悬挂时解除(同步收起转圈)

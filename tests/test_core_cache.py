@@ -204,3 +204,40 @@ class TestProbeLocalWeb:
         r = d.probe_local_web({"dash_port": 3081})
         assert r["web_ok"] is False and r["local_token"] is None
         assert r["web_ms"] == -1 and r["dash_port"] == 3081
+
+
+class TestKindRegistry:
+    # 注册表: 固定 kind 说明 / 动态前缀说明 / 未登记回退。
+    def test_describe_fixed(self):
+        from core import cache as c
+        assert c.describe_kind("overview") == "总览快照"
+        assert c.describe_kind("usage") == "模型用量统计"
+
+    def test_describe_prefix_and_unknown(self):
+        from core import cache as c
+        assert "插件" in c.describe_kind("plugins_web")
+        assert c.describe_kind("nope") == "未登记"
+
+
+class TestCacheManagement:
+    # 管理 API: 概览/删除单类/清空全部(隔离到 tmp_path)。
+    def test_list_cached_reports_meta(self, tmp_path, monkeypatch):
+        c = _iso(tmp_path, monkeypatch)
+        c.write_cache("overview", {"a": 1}, fetched_at=100)
+        c.write_cache("plugins_web", {"b": 2}, fetched_at=200)
+        rows = {r["kind"]: r for r in c.list_cached()}
+        assert rows["overview"]["description"] == "总览快照"
+        assert rows["overview"]["fetched_at"] == 100
+        assert rows["plugins_web"]["description"] == "插件列表(按 profile)"
+        assert rows["overview"]["bytes"] > 0
+
+    def test_clear_cache_one_and_all(self, tmp_path, monkeypatch):
+        c = _iso(tmp_path, monkeypatch)
+        c.write_cache("overview", {"a": 1})
+        c.write_cache("usage", {"b": 2})
+        assert c.clear_cache("overview") is True
+        assert c.read_cache("overview") == (None, None)
+        assert c.read_cache("usage")[0] == {"b": 2}
+        assert c.clear_cache("missing") is False
+        assert c.clear_all_cache() == 1
+        assert c.list_cached() == []

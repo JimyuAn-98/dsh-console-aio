@@ -12,7 +12,6 @@
 import json
 import time
 
-from core import cache as core_cache
 from core import data as dsh_data
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget)
 
 from ui.base import BasePage
+from ui.cacheable import CacheableMixin
 from ui.widgets import ModernList, RefreshIndicator, ConfirmBanner, card_wrap, three_split
 
 
@@ -44,7 +44,7 @@ def _fmt_time(ts):
 _REMOTE_READONLY_MSG = "远程部署下暂不支持写操作（远程只读），请切换回本机部署"
 
 
-class SessionPage(BasePage):
+class SessionPage(CacheableMixin, BasePage):
     # 会话与工作区管理: BasePage 范式, app 为 MainWindow; 全部操作经 service 信号桥。
 
     def __init__(self, app, parent=None):
@@ -168,25 +168,7 @@ class SessionPage(BasePage):
     def _on_result(self, op, payload):
         # result(op, payload) 按 op 分派; 其他页面的 op 直接忽略。
         if op == "sessions-read":
-            self._busy = False
-            self._set_btns(True)
-            self._spinner.set_loading(False)
-            err = payload.get("err") or ""
-            data = payload.get("data")
-            if err or not isinstance(data, dict):
-                self._apply_data({}, [], str(err or "读取失败"))
-                self._spinner.set_status("err")
-                self._spinner.setToolTip("数据获取错误: " + str(err))
-                return
-            changed = core_cache.data_changed("sessions", data)
-            core_cache.write_cache("sessions", data)
-            self._apply_data(data.get("ws") or {}, data.get("groups") or [], "")
-            if changed:
-                self._spinner.set_status("warn")
-                self._spinner.setToolTip("数据有变化(已刷新)")
-            else:
-                self._spinner.set_status("ok")
-                self._spinner.setToolTip("无变化(缓存已是最新)")
+            self._cache_result(payload.get("data"), payload.get("err") or "")
         elif op == "sessions-archive":
             self._after_op(payload)
         elif op == "sessions-delete":
@@ -197,27 +179,34 @@ class SessionPage(BasePage):
             self._pending = None
             self._set_btns(True)
 
-    # ---- 刷新(先读缓存, mtime 变化或强制时后台拉取) ----
-    def _refresh(self, force=False):
-        if self._busy:
-            return
-        src_mtime = dsh_data.sessions_source_mtime(self._remote)
-        cache_data, _ = core_cache.read_cache("sessions")
-        if not force and cache_data is not None and not core_cache.needs_refresh("sessions", src_mtime):
-            # 缓存已是最新: 直接呈现, 标记"无变化"(绿)
-            ws = cache_data.get("ws") or {}
-            groups = cache_data.get("groups") or []
-            self._apply_data(ws, groups, "")
-            self._spinner.set_status("ok")
-            self._spinner.setToolTip("无变化(缓存已是最新)")
-            return
+    # ---- 缓存编排钩子(见 ui/cacheable.py); _refresh() 由 mixin 提供 ----
+    def _cache_kind(self):
+        return "sessions"
 
-        self._busy = True
+    def _cache_src_mtime(self):
+        return dsh_data.sessions_source_mtime(self._remote)
+
+    def _cache_fetch(self):
+        self.app.service.read_sessions(self._remote)
+
+    def _cache_apply(self, data, err=""):
+        d = data if isinstance(data, dict) else {}
+        self._apply_data(d.get("ws") or {}, d.get("groups") or [], err)
+
+    def _cache_valid(self, data):
+        return isinstance(data, dict)
+
+    def _cache_empty_data(self):
+        return {}
+
+    def _cache_begin(self):
         self._pending = "sessions-read"
         self._set_status("正在读取会话数据...")
         self._set_btns(False)
-        self._spinner.set_loading(True)
-        self.app.service.read_sessions(self._remote)
+
+    def _cache_end(self):
+        self._pending = None
+        self._set_btns(True)
 
     def _apply_data(self, ws, groups, err):
         self._set_btns(True)

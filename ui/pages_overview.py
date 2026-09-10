@@ -6,10 +6,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton)
 
-from core import cache as core_cache
 from core import data as dsh_data
 from core import config as dsh_config
 from ui.base import BasePage
+from ui.cacheable import CacheableMixin
 from ui.theme import TOKENS
 from ui.widgets import ModernList, RefreshIndicator, card_wrap
 
@@ -30,7 +30,7 @@ def _c(kind):
             "dim": TOKENS["text_dim"]}.get(kind, TOKENS["text_dim"])
 
 
-class OverviewPage(BasePage):
+class OverviewPage(CacheableMixin, BasePage):
     # 部署总览: 运行状态卡 + 数据速览 + 部署列表 + 隧道速览。
     # 数据经 service 信号桥调度回主线程; 接入 core/cache 缓存, 进页秒开+按需刷新。
 
@@ -177,30 +177,38 @@ class OverviewPage(BasePage):
             self._set_status("已复制「%s」免密访问链接" % name)
             self.app.loge("已复制「%s」免密访问链接至剪贴板: %s" % (name, url), "ok")
 
-    # ── 读取(先读缓存, mtime 变化或强制时后台拉取) ──
-    def refresh(self, force=False):
-        if self._busy:
-            # force 只用于"绕过缓存", 不绕过"正在读取中"的防重入(避免重复后台扫描/SSH 快照)
-            return
-        cfg = dsh_config.load_config()
-        src_mtime = dsh_data.overview_source_mtime(cfg)
-        cache_data, _ = core_cache.read_cache("overview")
-        if not force and cache_data is not None and not core_cache.needs_refresh("overview", src_mtime):
-            # 缓存已是最新: 秒开直接呈现, 标绿; 再补一次轻量探活刷新"实时"字段(web_ok/token)
-            self._apply_data(cache_data)
-            self._spinner.set_status("ok")
-            self._spinner.setToolTip("无变化(缓存已是最新)")
-            if not getattr(self.app, "smoke", False):
-                self._probe_live(cfg)
-            return
+    # ── 缓存编排钩子(见 ui/cacheable.py); refresh() 由 mixin 提供 ──
+    def _cache_kind(self):
+        return "overview"
 
-        self._busy = True
-        self._btn_refresh.setEnabled(False)
-        self._set_status("正在读取总览数据...")
-        self._spinner.set_loading(True)
+    def _cache_src_mtime(self):
+        cfg = dsh_config.load_config()
+        self._cfg = cfg
+        return dsh_data.overview_source_mtime(cfg)
+
+    def _cache_fetch(self):
+        cfg = getattr(self, "_cfg", None) or dsh_config.load_config()
         depls = dsh_data.load_deployments()
         smoke = bool(getattr(self.app, "smoke", False))
         self.app.service.read_overview(cfg, depls, smoke=smoke, op="overview-read")
+
+    def _cache_apply(self, data, err=""):
+        if err or not isinstance(data, dict):
+            self._set_status("总览读取失败: " + str(err or "未知错误"))
+            return
+        self._apply_data(data)
+
+    def _cache_begin(self):
+        self._set_status("正在读取总览数据...")
+        self._btn_refresh.setEnabled(False)
+
+    def _cache_end(self):
+        self._btn_refresh.setEnabled(True)
+
+    def _cache_hit_extra(self, data):
+        # 命中缓存后再补一次轻量探活刷新"实时"字段(web_ok/token)
+        if not getattr(self.app, "smoke", False):
+            self._probe_live(getattr(self, "_cfg", None) or dsh_config.load_config())
 
     def _probe_live(self, cfg):
         # 命中缓存时补一次本机 web 探活(纯 socket, 0.8s 超时), 只刷新运行状态卡等实时字段
@@ -208,25 +216,7 @@ class OverviewPage(BasePage):
 
     def _on_result(self, op, payload):
         if op == "overview-read":
-            self._busy = False
-            self._btn_refresh.setEnabled(True)
-            self._spinner.set_loading(False)
-            err = payload.get("err")
-            data = payload.get("data")
-            if err or not isinstance(data, dict):
-                self._set_status("总览读取失败: " + str(err or "未知错误"))
-                self._spinner.set_status("err")
-                self._spinner.setToolTip("数据获取错误: " + str(err or "未知错误"))
-                return
-            changed = core_cache.data_changed("overview", data)
-            core_cache.write_cache("overview", data)
-            self._apply_data(data)
-            if changed:
-                self._spinner.set_status("warn")
-                self._spinner.setToolTip("数据有变化(已刷新)")
-            else:
-                self._spinner.set_status("ok")
-                self._spinner.setToolTip("无变化(缓存已是最新)")
+            self._cache_result(payload.get("data"), payload.get("err") or "")
         elif op == "overview-live":
             live = payload.get("data") or {}
             if live and getattr(self, "_last_payload", None):

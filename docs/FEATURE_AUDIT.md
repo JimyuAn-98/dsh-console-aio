@@ -65,8 +65,8 @@
 
 ## 四、跨页已确认待修点
 
-- [ ] **缓存编排收口（跨页技术债）**：7 个数据页重复同一段缓存样板；建议抽 `ui/` 共享 mixin/控制器统一
-  （kind 注册 + 源 mtime 函数 + 拉取 op + apply 回调 + spinner/busy 状态机），存储层不动。
+- [x] **缓存编排收口**（2026-09-10 完成）：`core/cache.py` 加种类注册表与管理 API（`list_cached/clear_cache/clear_all_cache`）；
+  新增 `ui/cacheable.py::CacheableMixin`，总览/Agent/Profile/任务看板/用量/会话 6 页已迁移；插件页因双 op/profile 维度暂留。
 - [ ] 4 处遗留 `QMessageBox.question`（`ui/dialog_tunnel_wizard.py`、`ui/pages_tunnels.py`×2、`ui/pages_ops.py`）→ `ConfirmBanner`。
 - [ ] 布局记忆：主分栏 `setSizes([172,700])` 写死，无 `saveState/restoreState`。
 - [ ] `run_dsh("restart")` 忽略 `stop_dsh` 返回值 + 固定 `sleep(1)`。

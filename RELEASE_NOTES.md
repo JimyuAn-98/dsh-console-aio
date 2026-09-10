@@ -28,6 +28,13 @@
 - **force 语义收窄**：`refresh(force=True)` 不再绕过"正在读取中"的防重入（force 只用于绕缓存），总览「刷新」按钮读取中置灰；`ui/pages_plugins.py` 同款判断一并加严；
 - 新增 `tests/test_core_cache.py::TestProbeLocalWeb`。
 
+### 缓存编排收口：种类注册表 + CacheableMixin（2026-09-10）
+
+- **缓存种类注册表**（`core/cache.py`）：新增 `KINDS`/`PREFIX_KINDS` 元数据与 `describe_kind`，以及管理 API `list_cached()`（每类大小/抓取时间）、`clear_cache(kind)`、`clear_all_cache()`；存储仍集中在单个 `dsh_aio_cache.json`，注册表只做种类登记与管理。
+- **通用编排 mixin**（`ui/cacheable.py`）：把多个数据页重复的"读缓存 / 比数据源 mtime / 后台拉取 / 写缓存 / 指示灯 / busy 防重入"收口为 `CacheableMixin`；页面只实现 `_cache_kind/_cache_src_mtime/_cache_fetch/_cache_apply` 四个钩子，按需覆盖 `_cache_begin/_cache_end/_cache_valid/_cache_empty_data/_cache_error_text/_cache_hit_extra/_cache_mark_changed`。
+- **迁移页面**：总览、Agent 模式、Profile、任务看板、模型用量、会话与工作区（插件页因"Profile 列表 + 插件列表"双 op 与动态 kind 暂不迁移，保持现状）。
+- 行为不变：命中绿 / 变化黄 / 错误红、进页秒开、`force` 仅绕缓存不绕防重入；新增 `tests/test_cacheable.py` 与注册表单测。
+
 ## v0.8.0 (2026-09-10)
 
 ### 安装版一键更新：下载安装包并自动退出运行安装程序（2026-09-10）

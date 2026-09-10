@@ -11,7 +11,6 @@
 import json
 import os
 
-from core import cache as core_cache
 from core import data as dsh_data
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
     QPushButton, QHeaderView, QMessageBox, QInputDialog)
 
 from ui.base import BasePage
+from ui.cacheable import CacheableMixin
 from ui.widgets import RefreshIndicator, ConfirmBanner
 
 # 仓库根目录(本文件位于 ui/ 下, 上溯一级), config.json 存放于此
@@ -40,7 +40,7 @@ def _load_dash_cmd():
         return []
 
 
-class ProfilePage(BasePage):
+class ProfilePage(CacheableMixin, BasePage):
     # Profile 管理: BasePage 范式, app 为 MainWindow; 全部业务经 service 信号桥。
 
     def __init__(self, app, parent=None):
@@ -122,24 +122,32 @@ class ProfilePage(BasePage):
         return t
 
     # ---- 列表读取(先读缓存, mtime 变化或强制时后台拉取) ----
-    def _refresh(self, force=False):
-        if self._busy:
-            return
-        src_mtime = dsh_data.profiles_source_mtime(self._remote)
-        cache_data, _ = core_cache.read_cache("profiles")
-        if not force and cache_data is not None and not core_cache.needs_refresh("profiles", src_mtime):
-            # 缓存已是最新: 直接用缓存呈现, 标记"无变化"(绿)
-            self._apply_data(cache_data, "")
-            self._spinner.set_status("ok")
-            self._spinner.setToolTip("无变化(缓存已是最新)")
-            return
+    # ── 缓存编排钩子(见 ui/cacheable.py); _refresh() 由 mixin 提供 ──
+    def _cache_kind(self):
+        return "profiles"
 
-        self._busy = True
+    def _cache_src_mtime(self):
+        return dsh_data.profiles_source_mtime(self._remote)
+
+    def _cache_fetch(self):
+        self.app.service.list_profiles(self._remote)
+
+    def _cache_apply(self, data, err=""):
+        self._apply_data(data if isinstance(data, list) else [], err)
+
+    def _cache_valid(self, data):
+        return isinstance(data, list)
+
+    def _cache_empty_data(self):
+        return []
+
+    def _cache_begin(self):
         self._pending = "profiles-list"
         self._set_status("正在读取 Profile 列表...")
         self._set_btns(False)
-        self._spinner.set_loading(True)
-        self.app.service.list_profiles(self._remote)
+
+    def _cache_end(self):
+        self._pending = None
 
     def _apply_data(self, profiles, err):
         self._set_btns(True)
@@ -161,25 +169,7 @@ class ProfilePage(BasePage):
     def _on_result(self, op, payload):
         # result(op, payload) 按 op key 分派; 其他页面的 op 直接忽略。
         if op == "profiles-list":
-            self._busy = False
-            self._set_btns(True)
-            self._spinner.set_loading(False)
-            err = payload.get("err") or ""
-            data = payload.get("data")
-            if err or not isinstance(data, list):
-                self._apply_data([], str(err or "读取失败"))
-                self._spinner.set_status("err")
-                self._spinner.setToolTip("数据获取错误: " + str(err))
-                return
-            changed = core_cache.data_changed("profiles", data)
-            core_cache.write_cache("profiles", data)
-            self._apply_data(data, "")
-            if changed:
-                self._spinner.set_status("warn")
-                self._spinner.setToolTip("数据有变化(已刷新)")
-            else:
-                self._spinner.set_status("ok")
-                self._spinner.setToolTip("无变化(缓存已是最新)")
+            self._cache_result(payload.get("data"), payload.get("err") or "")
         elif op == "profile-copy":
             self._pending = None
             self._after_op("复制 Profile", payload)

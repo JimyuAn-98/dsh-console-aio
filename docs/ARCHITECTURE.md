@@ -18,7 +18,7 @@
 │    tunnel_mgr.py     纯 Python SSH 隧道底层管理器 (forward/reverse/persist)   │
 │    tunnels.py        隧道卡片高层业务封装                                    │
 │    tunnel_planner.py 隧道多方案/拓扑快照/端口冲突校验与自检                  │
-│    cache.py          通用本地数据缓存与时间戳失效校验                        │
+│    cache.py          通用本地数据缓存 + 种类注册表/管理(list/clear)          │
 │    diagnostics.py    环境/端口/配置一键诊断报告生成 (敏感信息脱敏)           │
 │    version.py        控制台自身版本比对与 GitHub 自更新                      │
 │    keys.py           SSH 密钥管理 (私钥安全红线: 绝不读取明文)               │
@@ -47,6 +47,7 @@
 │    ui/pages_*.py      全 17 个管理页面 (overview/tunnels/dsh/sessions/theme…)│
 │    ui/monitor.py      右侧健康监控折叠栏 (StatusPanel) + 线程安全日志桥      │
 │    ui/base.py         BasePage (提供 safe_emit 页面销毁防崩机制)             │
+│    ui/cacheable.py    数据页缓存编排 mixin (读缓存/比 mtime/指示灯/防重入)    │
 │    ui/theme.py        主题引擎 (TOKENS 实时换肤 / 明暗变体 / QSS 生成)       │
 │    ui/widgets.py      现代组件库 (卡片/列表/确认条 ConfirmBanner/刷新指示器) │
 └─────────────────────────────────────────────────────────────────────────────┘

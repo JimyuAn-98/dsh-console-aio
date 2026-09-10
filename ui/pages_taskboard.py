@@ -6,13 +6,13 @@
 
 import datetime
 
-from core import cache as core_cache
 from core import data as core_data
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QMessageBox, QPushButton, QScrollArea,
     QVBoxLayout, QWidget)
 
 from ui.base import BasePage
+from ui.cacheable import CacheableMixin
 from ui.widgets import RefreshIndicator
 
 
@@ -27,7 +27,7 @@ def _fmt_ts(v):
         return "（无数据）"
 
 
-class TaskboardPage(BasePage):
+class TaskboardPage(CacheableMixin, BasePage):
     # 任务看板: 调度器信息 + 按状态分列的任务卡片。app 为 MainWindow。
 
     def __init__(self, app, parent=None):
@@ -97,48 +97,37 @@ class TaskboardPage(BasePage):
         btns.addStretch(1)
         root.addLayout(btns)
 
-    # ── 读取(先读缓存, mtime 变化或强制时后台拉取) ──
-    def _refresh(self, force=False):
-        if self._busy:
-            return
-        src_mtime = core_data.taskboard_source_mtime(self._remote)
-        cache_data, _ = core_cache.read_cache("taskboard")
-        if not force and cache_data is not None and not core_cache.needs_refresh("taskboard", src_mtime):
-            # 缓存已是最新: 直接呈现, 标记"无变化"(绿)
-            self._apply_data(cache_data, "")
-            self._spinner.set_status("ok")
-            self._spinner.setToolTip("无变化(缓存已是最新)")
-            return
+    # ── 缓存编排钩子(见 ui/cacheable.py); _refresh() 由 mixin 提供 ──
+    def _cache_kind(self):
+        return "taskboard"
 
-        self._busy = True
+    def _cache_src_mtime(self):
+        return core_data.taskboard_source_mtime(self._remote)
+
+    def _cache_fetch(self):
+        self.app.service.read_taskboard(self._remote)
+
+    def _cache_apply(self, data, err=""):
+        self._apply_data(data if isinstance(data, dict) else {}, err)
+
+    def _cache_valid(self, data):
+        return isinstance(data, dict)
+
+    def _cache_empty_data(self):
+        return {}
+
+    def _cache_begin(self):
         self._pending = "taskboard-read"
         self._set_status("正在读取任务看板...")
         self._btn_refresh.setEnabled(False)
-        self._spinner.set_loading(True)
-        self.app.service.read_taskboard(self._remote)
+
+    def _cache_end(self):
+        self._pending = None
+        self._btn_refresh.setEnabled(True)
 
     def _on_result(self, op, payload):
         if op == "taskboard-read":
-            self._busy = False
-            self._pending = None
-            self._btn_refresh.setEnabled(True)
-            self._spinner.set_loading(False)
-            err = payload.get("err") or ""
-            data = payload.get("data")
-            if err or not isinstance(data, dict):
-                self._apply_data({}, str(err or "读取失败"))
-                self._spinner.set_status("err")
-                self._spinner.setToolTip("数据获取错误: " + str(err))
-                return
-            changed = core_cache.data_changed("taskboard", data)
-            core_cache.write_cache("taskboard", data)
-            self._apply_data(data, "")
-            if changed:
-                self._spinner.set_status("warn")
-                self._spinner.setToolTip("数据有变化(已刷新)")
-            else:
-                self._spinner.set_status("ok")
-                self._spinner.setToolTip("无变化(缓存已是最新)")
+            self._cache_result(payload.get("data"), payload.get("err") or "")
 
     def _on_finished(self, op, ok):
         if op == self._pending:
