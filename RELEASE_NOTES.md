@@ -3,6 +3,14 @@
 
 ## v0.8.0 (2026-09-10)
 
+### 安装版一键更新：下载安装包并自动退出运行安装程序（2026-09-10）
+
+- **安装版不再只打开下载页**：`ui/pages_version.py` 的「一键更新」在打包(exe)版下改为确认后直接下载最新安装包；
+- **core 纯逻辑**（`core/version.py`）：新增 `installer_url`（按 tag/资产命名拼 Release 下载地址）、`download_installer`（流式下载，每 5% 报进度、MZ 魔数防呆、尽力比对 Release 的 `SHA256SUMS.txt`）、`launch_installer`（`os.startfile` 分离启动安装器）；签名遵守 `_run_result_op` 契约（events 为首参）；
+- **信号桥**（`app/services.py`）：新增 `download_console_installer`；
+- **UI 生命周期**：下载成功后页面启动安装器并调用 `_real_quit()` 退出控制台（避免旧进程占用被替换文件）；启动失败则保留进程，给出中文错误与安装包路径供手动运行；
+- **源码模式不变**：仍为"下载代码替换本地文件 + 重启"；安装器覆盖安装由 Inno Setup 处理（AppId 不变，支持升级安装）。
+
 ### dsh 启动控制台报错捕获与插件管理 Profile 加载修复（2026-09-10）
 
 - **dsh 启动进程观测与标准错误实时流式捕获（`core/dshctl.py`）**：

@@ -16,7 +16,8 @@ import types
 import pytest
 
 import core.version as vmod
-from core.version import check_latest, cmp_ver, download_and_apply, spawn_restart
+from core.version import (check_latest, cmp_ver, download_and_apply, spawn_restart,
+                           download_installer, installer_url, launch_installer)
 
 
 class TestCmpVerEdges:
@@ -328,3 +329,123 @@ def test_core_module_has_no_pyside_import():
     for ln in src.splitlines():
         s = ln.strip()
         assert not s.startswith(("import PySide", "from PySide")), s
+
+class TestInstallerUrl:
+    # installer_url: 与 CI 产出的 Release 资产命名严格一致(tag=v<ver>)。
+    def test_matches_release_asset(self):
+        assert installer_url("0.8.0") == (
+            vmod.RELEASES_BASE + "v0.8.0/dsh-console-aio-setup-0.8.0.exe")
+
+    def test_accepts_v_prefix(self):
+        assert installer_url("v0.8.0") == installer_url("0.8.0")
+
+
+class TestDownloadInstaller:
+    # download_installer: 拦截 _download_file/_verify_installer, 不真联网。
+    # 契约: events 为首个位置参数(配合 services._run_result_op); 成功 {"path","err":""}。
+    def _patch(self, monkeypatch, tmp_path, data=b"MZ" + b"0" * 100, err=None):
+        monkeypatch.setenv("TEMP", str(tmp_path))
+        monkeypatch.setattr(vmod, "_verify_installer", lambda path, v, ev=None: "")
+        calls = {}
+
+        def fake_dl(url, dest, events=None):
+            calls["url"] = url
+            if err:
+                raise err
+            with io.open(dest, "wb") as f:
+                f.write(data)
+            return len(data)
+
+        monkeypatch.setattr(vmod, "_download_file", fake_dl)
+        return calls
+
+    def test_happy_path(self, monkeypatch, tmp_path):
+        calls = self._patch(monkeypatch, tmp_path)
+        r = download_installer(None, "0.8.0")
+        assert r["err"] == ""
+        assert r["path"] == os.path.join(str(tmp_path), "dsh-aio-update",
+                                         "dsh-console-aio-setup-0.8.0.exe")
+        assert os.path.isfile(r["path"])
+        assert calls["url"] == installer_url("0.8.0")
+
+    def test_empty_version_rejected(self):
+        r = download_installer(None, "")
+        assert r["path"] == ""
+        assert "版本号为空" in r["err"]
+
+    def test_download_error_returns_chinese_err(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, tmp_path, err=OSError("http 404"))
+        r = download_installer(None, "0.8.0")
+        assert r["path"] == ""
+        assert "下载安装包失败" in r["err"] and "404" in r["err"]
+
+    def test_non_exe_rejected(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, tmp_path, data=b"<html>404 not found</html>")
+        r = download_installer(None, "0.8.0")
+        assert "不是有效的 Windows 安装程序" in r["err"]
+
+    def test_sha_mismatch_blocks(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TEMP", str(tmp_path))
+        monkeypatch.setattr(vmod, "_verify_installer",
+                            lambda path, v, ev=None: "安装包 SHA256 校验不通过(文件可能损坏或被篡改)")
+
+        def fake_dl(url, dest, events=None):
+            with io.open(dest, "wb") as f:
+                f.write(b"MZ" + b"0" * 10)
+            return 12
+
+        monkeypatch.setattr(vmod, "_download_file", fake_dl)
+        r = download_installer(None, "0.8.0")
+        assert "SHA256" in r["err"]
+
+
+class TestVerifyInstaller:
+    # _verify_installer: 清单命中比对; 缺失/未命中只告警跳过(不阻断)。
+    def _pkg(self, tmp_path, name="dsh-console-aio-setup-0.8.0.exe"):
+        p = tmp_path / name
+        p.write_bytes(b"data")
+        return str(p)
+
+    def test_hash_mismatch_detected(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(vmod, "fetch",
+                            lambda url, timeout=15: "deadbeef  dsh-console-aio-setup-0.8.0.exe")
+        assert "SHA256" in vmod._verify_installer(self._pkg(tmp_path), "0.8.0")
+
+    def test_hash_match_passes(self, monkeypatch, tmp_path):
+        import hashlib
+        digest = hashlib.sha256(b"data").hexdigest()
+        monkeypatch.setattr(vmod, "fetch",
+                            lambda url, timeout=15: digest + "  dsh-console-aio-setup-0.8.0.exe")
+        assert vmod._verify_installer(self._pkg(tmp_path), "0.8.0") == ""
+
+    def test_missing_sums_skips(self, monkeypatch, tmp_path):
+        def boom(url, timeout=15):
+            raise OSError("404")
+        monkeypatch.setattr(vmod, "fetch", boom)
+        assert vmod._verify_installer(self._pkg(tmp_path), "0.8.0") == ""
+
+
+class TestLaunchInstaller:
+    # launch_installer: 缺文件报错; 成功调用 os.startfile(分离启动)。
+    def test_missing_file_reports_err(self):
+        assert "不存在" in launch_installer("").get("err", "")
+
+    def test_startfile_called(self, monkeypatch, tmp_path):
+        p = tmp_path / "setup.exe"
+        p.write_bytes(b"MZ")
+        seen = {}
+        monkeypatch.setattr(vmod.os, "startfile",
+                            lambda path: seen.update(p=path), raising=False)
+        r = launch_installer(str(p))
+        assert r["err"] == ""
+        assert seen["p"] == str(p)
+
+    def test_startfile_error_reports_err(self, monkeypatch, tmp_path):
+        p = tmp_path / "setup.exe"
+        p.write_bytes(b"MZ")
+
+        def boom(path):
+            raise OSError("denied")
+        monkeypatch.setattr(vmod.os, "startfile", boom, raising=False)
+        r = launch_installer(str(p))
+        assert "启动安装程序失败" in r["err"] and "denied" in r["err"]

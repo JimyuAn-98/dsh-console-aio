@@ -196,6 +196,11 @@ class DshService(QObject):
         from core import version as _version
         self._run_result_op(op, _version.download_and_apply, self.base_dir)
 
+    def download_console_installer(self, version, op="version-installer"):
+        # 安装版自更新: 下载最新安装包(不执行), 完成后由页面启动安装器并退出。
+        from core import version as _version
+        self._run_result_op(op, _version.download_installer, version)
+
     def list_ssh_keys(self, op="keys-list"):
         from core import keys as _keys
         self._run_result_op(op, _keys.list_keys)

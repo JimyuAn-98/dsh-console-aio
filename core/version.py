@@ -24,6 +24,11 @@ GITHUB_RAW = "https://raw.githubusercontent.com/JimyuAn-98/dsh-console-aio/main/
 GITHUB_ZIP = "https://codeload.github.com/JimyuAn-98/dsh-console-aio/zip/refs/heads/main"
 VERSION_URL = GITHUB_RAW + "version.json"
 RELEASE_URL = GITHUB_RAW + "RELEASE_NOTES.md"
+# Release 下载源(打包版一键更新: 下载安装包 -> 退出 -> 运行安装器)
+GITHUB_REPO = "https://github.com/JimyuAn-98/dsh-console-aio"
+RELEASES_BASE = GITHUB_REPO + "/releases/download/"
+INSTALLER_NAME = "dsh-console-aio-setup-%s.exe"   # 与 installer.iss OutputBaseFilename 一致
+CHECKSUMS_NAME = "SHA256SUMS.txt"
 
 # 更新时保留的本地文件(用户数据/配置, 不替换)
 KEEP_FILES = {"config.json", "dsh使用指南.txt", "tunnel-pids.json"}
@@ -155,6 +160,123 @@ def download_and_apply(events=None, base_dir=None):
                 "err": "更新失败: %s" % e}
 
 
+def installer_url(version):
+    # 安装包下载地址: Release 资产命名 = dsh-console-aio-setup-<ver>.exe, tag = v<ver>
+    v = str(version or "").strip().lstrip("v")
+    return "%sv%s/%s" % (RELEASES_BASE, v, INSTALLER_NAME % v)
+
+
+def _download_file(url, dest, events=None, timeout=60):
+    # 流式下载并周期上报进度(每 5% 或每 MB); 返回写入字节数。
+    # 失败抛异常, 由 download_installer 统一转中文 err。
+    req = urllib.request.Request(url, headers={"User-Agent": "dsh-console-aio"})
+    got, last_pct, last_mb = 0, -10, -1
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        total = int(r.headers.get("Content-Length") or 0)
+        with open(dest, "wb") as f:
+            while True:
+                chunk = r.read(65536)
+                if not chunk:
+                    break
+                f.write(chunk)
+                got += len(chunk)
+                if total:
+                    pct = min(100, int(got * 100 / total))
+                    if pct - last_pct >= 5 or pct >= 100:
+                        last_pct = pct
+                        _status(events, "正在下载安装包… %d%% (%.1f/%.1f MB)"
+                                % (pct, got / 1048576.0, total / 1048576.0))
+                else:
+                    mb = got // 1048576
+                    if mb != last_mb:
+                        last_mb = mb
+                        _status(events, "正在下载安装包… %.1f MB" % (got / 1048576.0))
+    return got
+
+
+def _verify_installer(path, version, events=None):
+    # 尽力校验 SHA256: 拉同 Release 的 SHA256SUMS.txt 比对。清单缺失/未命中只告警不阻断,
+    # 命中且不符才返回中文错误(避免把损坏/被替换的安装包交给用户执行)。
+    import hashlib
+    v = str(version or "").strip().lstrip("v")
+    try:
+        text = fetch("%sv%s/%s" % (RELEASES_BASE, v, CHECKSUMS_NAME), timeout=15)
+    except Exception:
+        _log(events, "[版本管理] 未取到 %s, 跳过校验" % CHECKSUMS_NAME, "warn")
+        return ""
+    name = os.path.basename(path)
+    want = ""
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[-1].lstrip("*").strip() == name:
+            want = parts[0].strip()
+            break
+    if not want:
+        _log(events, "[版本管理] 校验清单未包含 %s, 跳过校验" % name, "warn")
+        return ""
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+    except OSError as e:
+        return "读取安装包计算校验值失败: %s" % e
+    if h.hexdigest().lower() != want.lower():
+        return "安装包 SHA256 校验不通过(文件可能损坏或被篡改)"
+    _log(events, "[版本管理] SHA256 校验通过", "ok")
+    return ""
+
+
+def download_installer(events=None, version="", dest_dir=None):
+    # 下载最新安装包到本地(不执行)。成功 {"path","err"}, err 成功为空字符串。
+    # 签名遵守 _run_result_op 契约: events 必须为首个位置参数。
+    v = str(version or "").strip().lstrip("v")
+    if not v:
+        return {"path": "", "err": "版本号为空, 无法下载安装包"}
+    dest_dir = dest_dir or os.path.join(os.environ.get("TEMP", "."), "dsh-aio-update")
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+    except OSError as e:
+        return {"path": "", "err": "无法创建下载目录: %s" % e}
+    dest = os.path.join(dest_dir, INSTALLER_NAME % v)
+    url = installer_url(v)
+    _status(events, "正在下载安装包 v%s…" % v)
+    _log(events, "[版本管理] 下载: %s" % url)
+    try:
+        got = _download_file(url, dest, events)
+    except Exception as e:
+        return {"path": "", "err": "下载安装包失败: %s" % e}
+    if got <= 0:
+        return {"path": "", "err": "下载的安装包为空文件"}
+    # 防呆: 校验 exe 魔数(MZ), 避免把 HTML 错误页当成安装程序启动
+    try:
+        with open(dest, "rb") as f:
+            if f.read(2) != b"MZ":
+                return {"path": "", "err": "下载文件不是有效的 Windows 安装程序"}
+    except OSError as e:
+        return {"path": "", "err": "校验下载文件失败: %s" % e}
+    verr = _verify_installer(dest, v, events)
+    if verr:
+        return {"path": "", "err": verr}
+    _status(events, "安装包已就绪: %s" % dest)
+    return {"path": dest, "err": ""}
+
+
+def launch_installer(path):
+    # 启动已下载的安装程序(UI 生命周期动作, 同步返回)。os.startfile 分离启动, 安装器
+    # 自行处理覆盖安装; 调用方随后退出本进程以避免占用被替换的文件。
+    if not path or not os.path.isfile(path):
+        return {"err": "安装包不存在: %s" % path}
+    startfile = getattr(os, "startfile", None)
+    if startfile is None:
+        return {"err": "当前平台不支持自动运行安装包, 请手动运行: %s" % path}
+    try:
+        startfile(path)
+    except Exception as e:
+        return {"err": "启动安装程序失败: %s" % e}
+    return {"err": ""}
+
+
 def spawn_restart(base_dir=None):
     # 重启程序(同步调用, Popen 即返回): frozen 直接重启 exe; 源码模式启动仓库根
     # dsh-console-aio.py(真实入口; 旧页面写死 app_pyside.py, FileNotFoundError 被
@@ -179,5 +301,7 @@ def spawn_restart(base_dir=None):
 
 
 __all__ = ["GITHUB_RAW", "GITHUB_ZIP", "VERSION_URL", "RELEASE_URL", "KEEP_FILES",
+           "GITHUB_REPO", "RELEASES_BASE", "INSTALLER_NAME", "CHECKSUMS_NAME",
            "cmp_ver", "fetch", "program_dir", "resource_dir", "check_latest",
-           "read_local_notes", "download_and_apply", "spawn_restart"]
+           "read_local_notes", "download_and_apply", "spawn_restart",
+           "installer_url", "download_installer", "launch_installer"]

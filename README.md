@@ -178,7 +178,7 @@
 | 日志管理 | dsh web 落盘输出 tail + 过滤 + 着色 + token 脱敏 |
 | 设置 | 配置标签页化，保存即热重载；诊断报告（脱敏可外发）与配置导入导出 |
 | 主题 | 明/暗变体一键切换 + 全部界面颜色实时可调（即时预览），可存/载主题文件、设启动默认 |
-| 关于与更新 | 当前版本 / 检查更新 / 更新日志 / 一键自动更新 |
+| 关于与更新 | 当前版本 / 检查更新 / 更新日志 / 一键自动更新（安装版直接下载安装包、退出并运行安装程序） |
 
 ![总览](docs/screenshots/main.png)
 
@@ -304,7 +304,7 @@ See the Chinese section above for the full field table.
 | Logs | live tail of dsh web output with filtering, coloring, token masking |
 | Settings | config as tabs, hot-reload on save; masked diagnostics report & config import/export |
 | Theme | toggle dark/light variant + edit every UI color live (instant preview), save/load theme files, set startup default |
-| About & update | current version / check update / changelog / one-click auto-update |
+| About & update | current version / check update / changelog / one-click auto-update (installed build downloads and launches the installer) |
 
 ![Sessions](docs/screenshots/sessions.png)
 

@@ -204,3 +204,24 @@ class TestDshService:
         assert len(stream_calls) == 1
         cmd, desc = stream_calls[0]
         assert cmd[-2:] == ["add", "awesome-plugin"]
+
+    def test_service_download_console_installer(self, qapp_mod, tmp_path, monkeypatch):
+        # 验证 service.download_console_installer 起线程跑 core 并回 result("version-installer")
+        from app.services import DshService
+        from core import version as vmod
+        svc = DshService(str(tmp_path))
+        seen = []
+        monkeypatch.setattr(vmod, "download_installer",
+                            lambda ev, version: seen.append(version) or
+                            {"path": "C:/tmp/setup.exe", "err": ""})
+        got = []
+        svc.result.connect(lambda op, p: got.append((op, p)))
+        svc.download_console_installer("0.8.0")
+        for _ in range(50):
+            qapp_mod.processEvents()
+            if got:
+                break
+            time.sleep(0.02)
+        assert seen == ["0.8.0"]
+        assert got and got[0][0] == "version-installer"
+        assert got[0][1]["path"] == "C:/tmp/setup.exe"

@@ -6,7 +6,7 @@
 # Qt 自动断开); 不 connect service.log/status —— 主窗口级已接, 页面级再接会重复输出。
 # 本地更新日志是小文件, 经 core.version.read_local_notes 同步直读(不起线程);
 # 下载/解压/替换等 IO 与子进程一律在 core, 页面不再 import subprocess/urllib/zipfile。
-# 重启程序是 UI 生命周期动作: 调 core.spawn_restart 成功后页面才关窗退出。
+# UI 生命周期动作(源码模式重启 / 安装版运行安装器并退出)由页面在 core 成功后执行。
 
 import os
 import sys
@@ -47,7 +47,8 @@ class VersionPage(BasePage):
         head.addWidget(self._status_lbl)
         root.addLayout(head)
         hint = QLabel("检查更新读取 GitHub main 分支 version.json; "
-                      "一键更新会下载代码并替换本地程序文件(自动备份)。",
+                      "源码模式一键更新会下载代码并替换本地程序文件(自动备份); "
+                      "安装版一键更新会下载最新安装包、自动退出并运行安装程序。",
                       objectName="cardHint")
         root.addWidget(hint)
 
@@ -112,11 +113,13 @@ class VersionPage(BasePage):
             self._apply_check(payload)
         elif op == "version-update":
             self._after_update(payload)
+        elif op == "version-installer":
+            self._after_installer(payload)
 
     def _on_finished(self, op, ok):
         # finished(op, ok) 每次操作恰好一发, 统一在此解除 busy(无论成败);
         # err 文案展示由 _on_result 先行处理。
-        if op in ("version-check", "version-update"):
+        if op in ("version-check", "version-update", "version-installer"):
             self._set_busy(False)
 
     # ---- 检查更新 ----
@@ -151,13 +154,20 @@ class VersionPage(BasePage):
         if not self._latest:
             return
         if getattr(sys, "frozen", False):
-            # 打包(exe)版: 更新 = 打开 GitHub Releases 下载新安装包(天然支持升级安装)
+            # 安装版: 直接下载最新安装包 -> 退出控制台 -> 运行安装器(覆盖升级)
+            def do_download():
+                self._set_busy(True)
+                self._set_status("正在下载安装包 v%s…" % self._latest)
+                self.app.service.download_console_installer(self._latest)
+
             self._confirm.ask(
-                "下载新版本 v" + self._latest,
-                "当前为安装版。将打开 GitHub Releases 页面下载新版本安装包，下载后运行安装器即可完成升级（本地配置与数据均保留）。",
-                self._open_releases,
+                "下载并安装 v" + self._latest,
+                "将执行：<br>1. 从 GitHub 下载最新安装包 v%s<br>"
+                "2. 下载完成后自动退出控制台<br>"
+                "3. 运行安装程序完成升级（本地配置与数据均保留）" % self._latest,
+                do_download,
                 level="warn",
-                confirm_text="打开下载页面"
+                confirm_text="下载并安装"
             )
             return
 
@@ -208,11 +218,33 @@ class VersionPage(BasePage):
         except RuntimeError:
             pass
 
-    def _open_releases(self):
+    def _after_installer(self, payload):
+        # 安装版: 安装包已下载 -> 启动安装器 -> 退出本进程(避免旧进程占用被替换文件)
+        err = str(payload.get("err") or "")
+        path = str(payload.get("path") or "")
+        if err:
+            self._set_status("下载安装包失败: " + err)
+            self.app.loge("[版本管理] 下载安装包失败: " + err, "err")
+            QMessageBox.critical(self, "更新失败", "安装包下载失败，程序未改动。\n错误: " + err)
+            return
+        self._set_status("安装包已下载, 正在启动安装程序…")
+        self.app.loge("[版本管理] 安装包已就绪: " + path, "ok")
+        res = core_version.launch_installer(path)
+        if res.get("err"):
+            self._set_status("启动安装程序失败: " + res["err"])
+            self.app.loge("[版本管理] 启动安装程序失败: " + res["err"], "err")
+            QMessageBox.critical(
+                self, "启动失败",
+                "安装包已下载到:\n" + path + "\n\n自动运行失败: " + res["err"]
+                + "\n请手动双击该文件完成升级。")
+            return
+        self.app.loge("[版本管理] 安装程序已启动, 退出控制台", "ok")
         try:
-            os.startfile("https://github.com/JimyuAn-98/dsh-console-aio/releases")
+            self.app._real_quit()
         except Exception as e:
-            QMessageBox.critical(self, "无法打开", str(e))
+            # 退出失败不静默: 提示手动关闭, 否则安装器可能因文件占用而卡住
+            QMessageBox.information(self, "请手动退出",
+                                    "安装程序已启动，请手动关闭控制台以完成升级。\n(%s)" % e)
 
     def _open_github(self):
         try:
