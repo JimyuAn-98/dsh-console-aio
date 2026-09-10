@@ -20,7 +20,7 @@
 
 | # | 页面 | key | 状态 | 发现/修复 |
 |---|------|-----|------|-----------|
-| 1 | 总览 | overview | ✅ 已核对 | 修 3 项(主题色/缓存失效/右栏日志色), 留 2 项待决(见下) |
+| 1 | 总览 | overview | ✅ 已核对 | 修 5 项：主题色 token 化、缓存失效纳入 config/价格、右栏日志色、命中缓存补实时探活、busy 防重入加严 |
 | 2 | DSH 管理 | dsh | ✅ 已核对 | 批1 版本发布日志查看(含状态色 token 化); 批2 部署指定版本/固定/回退 + 更新/部署进度条 |
 | 3 | SSH隧道管理 | tunnels | ⬜ 待做 | |
 | 4 | 会话与工作区 | sessions | ⬜ 待做 | |
@@ -49,16 +49,24 @@
   改端口/命名或价格后总览缓存不失效。已补齐，并在 `tests/test_core_cache.py` 增加
   `test_overview_source_mtime_tracks_config`。
 
-**待决：**
+**待决项已落地（2026-09-10）：**
 
-- D1/D4 实时探针被缓存：`collect_overview_data` 的 `web_ok/web_ms/local_token` 是实时值，却被写入总览缓存；
-  服务启停不改变任何源文件 mtime，命中缓存时会长期显示过期的在线/离线状态。
-  建议：命中缓存时仍做一次廉价本机 socket 探活刷新状态卡，或把实时字段排除出缓存。
-- D5 force 绕过 busy：`refresh(force=True)` 在 `_busy` 时仍会发起第二次后台读取，两次结果都会 `_apply_data`。
-  建议 busy 时忽略 force 或做结果合并。
+- D1/D4 实时探针被缓存 → 采用"命中缓存补轻量探活"：新增 `core/data.py::probe_local_web`（纯 socket 0.8s + 运行时 token）
+  与 `app/services.py::probe_overview_local`；`ui/pages_overview.py` 命中缓存时渲染后异步补探活，只刷新运行状态卡/本地徽章
+  （不写缓存，`--smoke` 跳过）。
+- D5 force 绕过 busy → 改为 `if self._busy: return`（force 仅绕缓存，不绕防重入）；总览「刷新」按钮读取中置灰。
+  同一模式在 `ui/pages_plugins.py` 一并加严。
+
+**转为跨页技术债：**
+
+- 7 个数据页（overview/agents/profiles/sessions/plugins/taskboard/usage）各自复制同一段缓存编排
+  （`read_cache → needs_refresh → 拉取 → data_changed/write_cache → spinner 状态机 → busy 防重入`），
+  存储层 `core/cache.py` 已集中，缺的是**编排层**收口（见 §四）。
 
 ## 四、跨页已确认待修点
 
+- [ ] **缓存编排收口（跨页技术债）**：7 个数据页重复同一段缓存样板；建议抽 `ui/` 共享 mixin/控制器统一
+  （kind 注册 + 源 mtime 函数 + 拉取 op + apply 回调 + spinner/busy 状态机），存储层不动。
 - [ ] 4 处遗留 `QMessageBox.question`（`ui/dialog_tunnel_wizard.py`、`ui/pages_tunnels.py`×2、`ui/pages_ops.py`）→ `ConfirmBanner`。
 - [ ] 布局记忆：主分栏 `setSizes([172,700])` 写死，无 `saveState/restoreState`。
 - [ ] `run_dsh("restart")` 忽略 `stop_dsh` 返回值 + 固定 `sleep(1)`。

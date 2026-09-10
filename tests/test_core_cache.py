@@ -172,3 +172,35 @@ class TestMtimeAndDataAggregators:
         after = d.overview_source_mtime({"dash_port": 3080})
         assert before >= 1000
         assert after > before
+
+
+class _Ctx:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class TestProbeLocalWeb:
+    # probe_local_web: 纯 socket + 运行时 token 的轻量本机探活(monkeypatch, 不真连 3080)。
+    def test_online_with_token(self, monkeypatch):
+        import core.data as d
+        monkeypatch.setattr(d.socket, "create_connection", lambda *a, **k: _Ctx())
+        monkeypatch.setattr("core.dshctl.get_runtime_token",
+                            lambda name, refresh=False: "TOK")
+        r = d.probe_local_web({"dash_port": 3080})
+        assert r["web_ok"] is True and r["local_token"] == "TOK"
+        assert r["local_auth_url"].endswith("/?token=TOK")
+        assert r["web_ms"] >= 0
+
+    def test_offline_clears_token(self, monkeypatch):
+        import core.data as d
+
+        def boom(*a, **k):
+            raise OSError("refused")
+
+        monkeypatch.setattr(d.socket, "create_connection", boom)
+        r = d.probe_local_web({"dash_port": 3081})
+        assert r["web_ok"] is False and r["local_token"] is None
+        assert r["web_ms"] == -1 and r["dash_port"] == 3081

@@ -54,9 +54,9 @@ class OverviewPage(BasePage):
         head.addStretch(1)
         self._status_lbl = QLabel("就绪", objectName="monVal")
         head.addWidget(self._status_lbl)
-        refresh = QPushButton("刷新", objectName="primary")
-        refresh.clicked.connect(lambda: self.refresh(force=True))
-        head.addWidget(refresh)
+        self._btn_refresh = QPushButton("刷新", objectName="primary")
+        self._btn_refresh.clicked.connect(lambda: self.refresh(force=True))
+        head.addWidget(self._btn_refresh)
         root.addLayout(head)
         root.addWidget(QLabel("本机与远程部署的实时状态、数据速览与隧道探测(纯读获取, 进页自动取缓存)。",
                               objectName="cardHint"))
@@ -179,28 +179,37 @@ class OverviewPage(BasePage):
 
     # ── 读取(先读缓存, mtime 变化或强制时后台拉取) ──
     def refresh(self, force=False):
-        if self._busy and not force:
+        if self._busy:
+            # force 只用于"绕过缓存", 不绕过"正在读取中"的防重入(避免重复后台扫描/SSH 快照)
             return
         cfg = dsh_config.load_config()
         src_mtime = dsh_data.overview_source_mtime(cfg)
         cache_data, _ = core_cache.read_cache("overview")
         if not force and cache_data is not None and not core_cache.needs_refresh("overview", src_mtime):
-            # 缓存已是最新: 秒开直接呈现, 标绿
+            # 缓存已是最新: 秒开直接呈现, 标绿; 再补一次轻量探活刷新"实时"字段(web_ok/token)
             self._apply_data(cache_data)
             self._spinner.set_status("ok")
             self._spinner.setToolTip("无变化(缓存已是最新)")
+            if not getattr(self.app, "smoke", False):
+                self._probe_live(cfg)
             return
 
         self._busy = True
+        self._btn_refresh.setEnabled(False)
         self._set_status("正在读取总览数据...")
         self._spinner.set_loading(True)
         depls = dsh_data.load_deployments()
         smoke = bool(getattr(self.app, "smoke", False))
         self.app.service.read_overview(cfg, depls, smoke=smoke, op="overview-read")
 
+    def _probe_live(self, cfg):
+        # 命中缓存时补一次本机 web 探活(纯 socket, 0.8s 超时), 只刷新运行状态卡等实时字段
+        self.app.service.probe_overview_local(cfg, op="overview-live")
+
     def _on_result(self, op, payload):
         if op == "overview-read":
             self._busy = False
+            self._btn_refresh.setEnabled(True)
             self._spinner.set_loading(False)
             err = payload.get("err")
             data = payload.get("data")
@@ -218,6 +227,11 @@ class OverviewPage(BasePage):
             else:
                 self._spinner.set_status("ok")
                 self._spinner.setToolTip("无变化(缓存已是最新)")
+        elif op == "overview-live":
+            live = payload.get("data") or {}
+            if live and getattr(self, "_last_payload", None):
+                self._last_payload.update(live)
+                self._apply_data(self._last_payload)
 
     def _copy_local_auth_url(self):
         url = getattr(self, "_last_payload", {}).get("local_auth_url")

@@ -9,6 +9,7 @@ import re
 import sys
 import io
 import json
+import socket
 import time
 import zipfile
 import datetime
@@ -1124,6 +1125,30 @@ def read_sessions_data(remote=None):
     ws = read_workspace(remote=_r)
     groups = list_sessions(remote=_r)
     return {"ws": ws or {}, "groups": groups or []}
+
+
+def probe_local_web(cfg=None):
+    # 轻量本机 dsh web 探活(纯 socket + 运行时 token): 供总览页命中缓存时刷新"实时"字段,
+    # 避免缓存的 web_ok / token 长期过期(启停 web 不会改任何数据源文件 mtime)。
+    # 返回 {"web_ok","web_ms","dash_port","local_token","local_auth_url"}。
+    if cfg is None:
+        from core import config as _cfg
+        cfg = _cfg.load_config()
+    port = int((cfg or {}).get("dash_port") or 3080)
+    web_ok, web_ms = False, -1
+    t0 = time.time()
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.8):
+            web_ok = True
+            web_ms = int((time.time() - t0) * 1000)
+    except OSError:
+        web_ok, web_ms = False, -1
+    from core.dshctl import get_runtime_token
+    tok = get_runtime_token("local", refresh=True) if web_ok else None
+    url = (("http://127.0.0.1:%s/?token=%s" % (port, tok)) if tok
+           else ("http://127.0.0.1:%s" % port))
+    return {"web_ok": web_ok, "web_ms": web_ms, "dash_port": port,
+            "local_token": tok, "local_auth_url": url}
 
 
 def collect_overview_data(cfg, depls, smoke=False):

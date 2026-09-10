@@ -250,7 +250,8 @@ class PluginPage(BasePage):
         profile = self._profile_cb.currentText().strip()
         if not profile:
             return
-        if self._busy and not force:
+        if self._busy:
+            # force 只用于"绕过缓存", 不绕过"正在读取中"的防重入
             return
         src_mtime = dsh_data.plugins_source_mtime(profile, self._remote)
         cache_key = "plugins_" + profile

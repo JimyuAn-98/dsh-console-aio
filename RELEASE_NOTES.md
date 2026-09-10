@@ -22,6 +22,12 @@
 - **更新/部署进度条**：`update_dsh`/`deploy_dsh_version` 全程发 `step` 事件，更新卡与版本卡新增 7 段进度条；
 - **新增纯读**：`dsh_repo_state`（当前 ref / 是否 detached / 是否脏 / pin）、`_default_branch`（优先 `origin/HEAD`，回退 `main`）。
 
+### 总览页：实时状态缓存过期与缓存防重入修复（2026-09-10）
+
+- **命中缓存补轻量探活**（`core/data.py::probe_local_web` + `app/services.py::probe_overview_local`）：总览的运行状态卡/本地节点徽章此前会把 `web_ok/web_ms/local_token` 连同快照一起缓存，而 dsh web 启停不改任何源文件 mtime，命中缓存时会长期显示过期的在线/离线；现在命中缓存渲染后再异步补一次纯 socket 探活（0.8s 超时）只刷新实时字段，不写缓存，`--smoke` 跳过；
+- **force 语义收窄**：`refresh(force=True)` 不再绕过"正在读取中"的防重入（force 只用于绕缓存），总览「刷新」按钮读取中置灰；`ui/pages_plugins.py` 同款判断一并加严；
+- 新增 `tests/test_core_cache.py::TestProbeLocalWeb`。
+
 ## v0.8.0 (2026-09-10)
 
 ### 安装版一键更新：下载安装包并自动退出运行安装程序（2026-09-10）

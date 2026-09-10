@@ -315,6 +315,11 @@ class DshService(QObject):
         from core import data as _data
         self._run_core_op(op, _data.collect_overview_data, cfg, depls, smoke)
 
+    def probe_overview_local(self, cfg, op="overview-live"):
+        # 总览命中缓存时刷新"实时"字段(本机 web 探活 + 运行时 token), 不写缓存
+        from core import data as _data
+        self._run_core_op(op, _data.probe_local_web, cfg)
+
     def read_sessions(self, remote=None, op="sessions-read"):
         from core import data as _data
         self._run_core_op(op, _data.read_sessions_data, remote)
