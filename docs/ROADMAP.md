@@ -32,6 +32,7 @@
 
 **未做：**
 
+- **卸载删净实测（BUG-011）**：`_rmtree_force` 已实现，待回家在 `C:\Users` 下的 dsh 源码环境实测确认（只读 `.git` 场景）。
 - **布局记忆**：分栏尺寸/收起状态持久化（全仓库无 `saveState/restoreState`，主分栏 `setSizes([172,700])` 写死）。
 - **弹窗收敛剩余（4 处）**：`ui/dialog_tunnel_wizard.py`、`ui/pages_tunnels.py`（2 处）、`ui/pages_ops.py` 仍使用 `QMessageBox.question`，与「全页内联确认」目标不符。
 - **主题文件跨机导出/导入**：`themes/*.json` 目前仅本机保存/加载，无打包导出。
