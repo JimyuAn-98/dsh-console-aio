@@ -64,6 +64,13 @@
 - 远程节点在线改为"经隧道/直连访问端口探活"（`collect_overview_data` 写 `web_ok/web_ms`，`--smoke` 跳过）；
 - 新增「在浏览器打开」。阶段 2/3（配置显式化、节点码/信箱/发现）见 `docs/plans/20260911-节点访问规划-v1.md`。
 
+**节点访问规划·阶段 2（2026-09-11）：**
+
+- `deployments[]` 显式化 `node_key/web_port/tunnel_id/access_port` + 节点添加/编辑对话框（含正向隧道下拉与端口校验）；
+- 访问端口推导收口为 `core/data.py::deployment_access_port`（唯一实现，概览页/部署页共用）；
+- 部署页新增「编辑节点」「在浏览器打开」，详情卡新增「访问端口」；
+- **命名去冗余**：设置页移除 `lab_name` 入口；命名单一来源见 `docs/ARCHITECTURE.md` §3.1。
+
 **转为跨页技术债：**
 
 - 7 个数据页（overview/agents/profiles/sessions/plugins/taskboard/usage）各自复制同一段缓存编排

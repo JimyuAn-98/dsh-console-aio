@@ -9,13 +9,17 @@
 # 部署信息只写本地 config.json(gitignored); 远程操作只读; 写操作留待后续版本。
 # DshRemote 走 ssh BatchMode(免密), 不收集/保存密码明文(AGENTS.md 安全约定)。
 
+import os
+import re
+
+from core import config as dsh_config
 from core import data as dsh_data
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit, QScrollArea,
     QPushButton, QMessageBox, QDialog, QLineEdit, QFormLayout,
-    QGridLayout, QWidget)
+    QGridLayout, QWidget, QComboBox)
 
 from core import deployments as core_deployments
 from ui.base import BasePage
@@ -38,37 +42,61 @@ def _human_size(n):
 
 
 class _AddDeployDialog(QDialog):
-    # 添加部署的小对话框(独立 QDialog, 非 BasePage): 名称/主机/user/端口(默认22)/dsh_home(默认~/.dsh)。
+    # 添加/编辑"节点"的对话框(独立 QDialog, 非 BasePage):
+    # SSH 连接(name/host/user/port/dsh_home) + 远端 web 端口 + 关联正向隧道 +
+    # 本机访问端口 + 节点标识(node_key, 公网信箱 key, ASCII)。
     # 只收集字段并返回 result dict; 写 config.json 由页面负责(save_deployments 自动备份)。
-    def __init__(self, deployments, parent=None):
+    def __init__(self, deployments, cfg=None, parent=None, edit=None):
         super().__init__(parent)
-        self.setWindowTitle("添加部署")
+        self.setWindowTitle("编辑节点" if edit else "添加节点")
         self.setModal(True)
         self._deployments = deployments or []
+        self._cfg = cfg or {}
+        self._edit = edit or None
         self.result = None
-        self._name = QLineEdit()
-        self._host = QLineEdit()
-        self._user = QLineEdit()
-        self._port = QLineEdit("22")
-        self._home = QLineEdit("~/.dsh")
+        e = edit or {}
+        self._name = QLineEdit(e.get("name") or "")
+        self._host = QLineEdit(e.get("host") or "")
+        self._user = QLineEdit(e.get("user") or "")
+        self._port = QLineEdit(str(e.get("port") or 22))
+        self._home = QLineEdit(e.get("dsh_home") or "~/.dsh")
+        self._web_port = QLineEdit(str(e.get("web_port") or ""))
+        self._tunnel = QComboBox()
+        self._tunnel.addItem("(不关联隧道)", "")
+        for tun in dsh_config.normalize_tunnels(self._cfg):
+            if (tun.get("mode") or "forward") == "forward":
+                self._tunnel.addItem(tun.get("name") or tun.get("id") or "隧道",
+                                     tun.get("id") or "")
+        idx = self._tunnel.findData(str(e.get("tunnel_id") or ""))
+        self._tunnel.setCurrentIndex(idx if idx >= 0 else 0)
+        self._access = QLineEdit(str(e.get("access_port") or ""))
+        self._node_key = QLineEdit(str(e.get("node_key") or ""))
         self._build()
 
     def _build(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(8)
-        title = QLabel("添加远程部署", objectName="cardTitle")
-        root.addWidget(title)
-        hint = QLabel("部署信息只写本地 config.json（自动备份 .bak），不会连接远程。",
-                      objectName="cardHint")
-        root.addWidget(hint)
+        root.addWidget(QLabel("编辑远程节点" if self._edit else "添加远程节点",
+                              objectName="cardTitle"))
+        root.addWidget(QLabel("节点信息只写本地 config.json（自动备份 .bak），不会连接远程。",
+                              objectName="cardHint"))
         form = QFormLayout()
         form.addRow("名称", self._name)
         form.addRow("主机", self._host)
         form.addRow("user", self._user)
-        form.addRow("端口", self._port)
+        form.addRow("SSH 端口", self._port)
         form.addRow("dsh_home", self._home)
+        form.addRow("远端 web 端口", self._web_port)
+        form.addRow("关联正向隧道", self._tunnel)
+        form.addRow("本机访问端口", self._access)
+        form.addRow("节点标识(信箱 key)", self._node_key)
         root.addLayout(form)
+        hint = QLabel("「本机访问端口」留空则按关联隧道的本地端口/远端 web 端口推导；"
+                      "「节点标识」用于跨网从公网信箱取 Token，需 ASCII，局域网可留空。",
+                      objectName="cardHint")
+        hint.setWordWrap(True)
+        root.addWidget(hint)
         btns = QHBoxLayout()
         btns.addStretch(1)
         cancel_btn = QPushButton("取消")
@@ -81,15 +109,30 @@ class _AddDeployDialog(QDialog):
         root.addLayout(btns)
         self._name.setFocus()
 
+    @staticmethod
+    def _opt_port(le):
+        # 可选端口字段: 空 -> (None, ""); 非法 -> (None, 错误文案)
+        t = le.text().strip()
+        if not t:
+            return None, ""
+        try:
+            v = int(t)
+            if not (1 <= v <= 65535):
+                raise ValueError
+            return v, ""
+        except ValueError:
+            return None, "端口必须是 1-65535 的整数"
+
     def _confirm(self):
-        # 校验并组装部署 dict; 通过后写 result 并 accept(父页面负责保存)
+        # 校验并组装节点 dict; 通过后写 result 并 accept(父页面负责保存)
         name = self._name.text().strip()
         host = self._host.text().strip()
         user = self._user.text().strip()
         port_s = self._port.text().strip() or "22"
         home = self._home.text().strip() or "~/.dsh"
+        node_key = self._node_key.text().strip()
         if not name:
-            QMessageBox.warning(self, "缺少名称", "请填写部署名称。")
+            QMessageBox.warning(self, "缺少名称", "请填写节点名称。")
             return
         if not host:
             QMessageBox.warning(self, "缺少主机", "请填写主机地址(IP 或域名)。")
@@ -102,16 +145,40 @@ class _AddDeployDialog(QDialog):
             if not (1 <= port <= 65535):
                 raise ValueError
         except ValueError:
-            QMessageBox.warning(self, "端口无效", "端口必须是 1-65535 的整数。")
+            QMessageBox.warning(self, "端口无效", "SSH 端口必须是 1-65535 的整数。")
             return
-        # 同主机同用户同端口重复添加会让人混淆, 直接拦截
+        web_port, err = self._opt_port(self._web_port)
+        if err:
+            QMessageBox.warning(self, "远端 web 端口无效", err)
+            return
+        access_port, err = self._opt_port(self._access)
+        if err:
+            QMessageBox.warning(self, "访问端口无效", err)
+            return
+        if node_key and not re.match(r'^[A-Za-z0-9_\-]+$', node_key):
+            QMessageBox.warning(self, "节点标识无效",
+                                "节点标识只能用字母/数字/下划线/连字符（公网信箱文件名的要求）。")
+            return
+        # 同主机同用户同端口重复添加会让人混淆, 直接拦截(编辑自身跳过)
         for d in self._deployments:
+            if self._edit is not None and d is self._edit:
+                continue
             if d.get("host") == host and d.get("user") == user and int(d.get("port") or 22) == port:
                 QMessageBox.warning(self, "主机已存在",
-                                    "已存在同主机/同用户/同端口的部署「%s」。" % d.get("name"))
+                                    "已存在同主机/同用户/同端口的节点「%s」。" % d.get("name"))
                 return
-        self.result = {"name": name, "host": host, "user": user,
-                       "port": port, "dsh_home": home}
+        result = {"name": name, "host": host, "user": user,
+                  "port": port, "dsh_home": home}
+        if web_port:
+            result["web_port"] = web_port
+        tid = self._tunnel.currentData() or ""
+        if tid:
+            result["tunnel_id"] = tid
+        if access_port:
+            result["access_port"] = access_port
+        if node_key:
+            result["node_key"] = node_key
+        self.result = result
         self.accept()
 
 
@@ -124,6 +191,7 @@ class DeploymentPage(BasePage):
     _FIELDS = (
         ("name", "名称"),
         ("host", "主机"),
+        ("access_port", "访问端口"),
         ("version", "版本"),
         ("sessions", "会话数"),
         ("size", "会话大小"),
@@ -190,9 +258,15 @@ class DeploymentPage(BasePage):
         self._refresh_btn = QPushButton("刷新总览")
         self._refresh_btn.clicked.connect(self._refresh_all)
         self._copy_link_btn = QPushButton("复制免密链接")
-        self._copy_link_btn.setToolTip("复制选中部署节点的免密访问链接（含鉴权 Token）")
+        self._copy_link_btn.setToolTip("复制选中节点的免密访问链接（含鉴权 Token）")
         self._copy_link_btn.clicked.connect(self._copy_auth_link)
-        for b in (self._add_btn, self._del_btn, self._test_btn, self._refresh_btn, self._copy_link_btn):
+        self._open_link_btn = QPushButton("在浏览器打开")
+        self._open_link_btn.setToolTip("用系统默认浏览器打开选中节点的免密访问链接")
+        self._open_link_btn.clicked.connect(self._open_auth_link)
+        self._edit_btn = QPushButton("编辑节点")
+        self._edit_btn.clicked.connect(self._edit_deployment)
+        for b in (self._add_btn, self._edit_btn, self._del_btn, self._test_btn,
+                  self._refresh_btn, self._copy_link_btn, self._open_link_btn):
             btns.addWidget(b)
         btns.addStretch(1)
         note = QLabel("本机不可删除；状态来自 deployment_snapshot(在线/离线/未测试)",
@@ -349,17 +423,16 @@ class DeploymentPage(BasePage):
             self._del_btn.setEnabled(row is not None and not is_local)
         if self._test_btn is not None:
             self._test_btn.setEnabled(row is not None and not is_local)
+        if getattr(self, "_edit_btn", None) is not None:
+            self._edit_btn.setEnabled(row is not None and not is_local)
         if getattr(self, "_copy_link_btn", None) is not None:
             self._copy_link_btn.setEnabled(row is not None)
+        if getattr(self, "_open_link_btn", None) is not None:
+            self._open_link_btn.setEnabled(row is not None)
 
-    def _copy_auth_link(self):
-        row = self._selected_row()
-        if not row:
-            return
-        dep = row["deployment"]
+    def _auth_url_for(self, dep):
+        # 节点的 (显示名, 访问端口, 免密链接): 本机走 dash_port; 远程走共享的端口推导
         from core.dshctl import get_runtime_token
-        from core import config as dsh_config
-        from PySide6.QtWidgets import QApplication
         cfg = dsh_config.load_config()
         if dep is None:
             tok = get_runtime_token("local")
@@ -368,24 +441,32 @@ class DeploymentPage(BasePage):
         else:
             name = dep.get("name") or "remote"
             tok = get_runtime_token(name)
-            port = dep.get("web_port") or dep.get("forward_port") or dep.get("local_port")
-            if not port and dep.get("port") and dep.get("port") != 22:
-                port = dep.get("port")
-            if not port:
-                for tun in (cfg.get("tunnels") or []):
-                    if tun.get("mode") == "forward" and (tun.get("host") == dep.get("host") or tun.get("name") == name):
-                        fws = tun.get("forwards") or []
-                        if fws:
-                            port = fws[0].get("local_port") if isinstance(fws[0], dict) else fws[0][0]
-                            break
-            if not port and cfg.get("forward_ports"):
-                port = cfg.get("forward_ports")[0]
-            if not port:
-                port = cfg.get("lab_port") or 3080
-        url = ("http://127.0.0.1:%s/?token=%s" % (port, tok)) if tok else ("http://127.0.0.1:%s" % port)
+            port = dsh_data.deployment_access_port(dep, cfg)
+        url = (("http://127.0.0.1:%s/?token=%s" % (port, tok)) if tok
+               else ("http://127.0.0.1:%s" % port))
+        return name, port, url
+
+    def _copy_auth_link(self):
+        row = self._selected_row()
+        if not row:
+            return
+        name, _port, url = self._auth_url_for(row["deployment"])
+        from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(url)
         self._op("已复制「%s」免密访问链接: %s" % (name, url), "ok")
         self.app.loge("已复制「%s」免密访问链接至剪贴板: %s" % (name, url), "ok")
+
+    def _open_auth_link(self):
+        row = self._selected_row()
+        if not row:
+            return
+        name, _port, url = self._auth_url_for(row["deployment"])
+        try:
+            os.startfile(url)
+            self._op("已在浏览器打开「%s」: %s" % (name, url), "ok")
+            self.app.loge("已打开「%s」免密访问链接: %s" % (name, url), "ok")
+        except Exception as e:
+            self._op("打开失败: %s" % e, "err")
 
     def _fill_detail(self, row):
         # 只读展示快照字段; 未选中或未测过时用占位符
@@ -396,10 +477,13 @@ class DeploymentPage(BasePage):
         dep = row["deployment"]
         snap = row["snap"]
         local = dep is None
+        cfg = dsh_config.load_config()
         name = _LOCAL_NAME if local else (dep.get("name") or dep.get("host") or "-")
         host = "本地" if local else (dep.get("host") or "-")
+        access = (str(cfg.get("dash_port") or 3080) if local
+                  else str(dsh_data.deployment_access_port(dep, cfg) or "-"))
         if snap is None:
-            vals = {"name": name, "host": host,
+            vals = {"name": name, "host": host, "access_port": access,
                     "version": "-", "sessions": "-", "size": "-",
                     "plugins": "-", "profiles": "-", "presets": "-",
                     "error": "未测试（点“刷新总览”获取）"}
@@ -407,6 +491,7 @@ class DeploymentPage(BasePage):
             vals = {
                 "name": name,
                 "host": host,
+                "access_port": access,
                 "version": snap.get("version") or "-",
                 "sessions": str(snap.get("sessions") or 0),
                 "size": _human_size(snap.get("session_bytes")),
@@ -422,11 +507,26 @@ class DeploymentPage(BasePage):
     # ── 添加 / 删除(写 config.json 走 service 信号桥) ──
     def _add_deployment(self):
         # 小对话框收集字段 -> service.save_deployments(数据层自动备份)
-        dlg = _AddDeployDialog(self._deployments, self)
+        dlg = _AddDeployDialog(self._deployments, dsh_config.load_config(), self)
         if dlg.exec() != QDialog.Accepted or not dlg.result:
             return
         self._deployments = list(self._deployments) + [dlg.result]
-        self._save_and_reload("已添加部署「%s」" % dlg.result.get("name"))
+        self._save_and_reload("已添加节点「%s」" % dlg.result.get("name"))
+
+    def _edit_deployment(self):
+        # 编辑选中远程节点(本机不可编辑); 写回 config.json 走 service
+        row = self._selected_row()
+        if row is None or row["deployment"] is None:
+            return
+        dep = row["deployment"]
+        dlg = _AddDeployDialog(self._deployments, dsh_config.load_config(), self, edit=dep)
+        if dlg.exec() != QDialog.Accepted or not dlg.result:
+            return
+        idx = row["dep_index"]
+        if 0 <= idx < len(self._deployments):
+            self._deployments = list(self._deployments)
+            self._deployments[idx] = dlg.result
+        self._save_and_reload("已更新节点「%s」" % dlg.result.get("name"))
 
     def _delete_deployment(self):
         # 删除 config.json 里的部署记录(本机不可删); 远程数据不受影响

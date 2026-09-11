@@ -826,6 +826,60 @@ def load_deployments():
         return []
 
 
+def deployment_access_port(dep, cfg=None):
+    # 节点(部署)的"本机访问端口"推导(单一事实源, 概览页与部署页共用):
+    #   显式 access_port > 关联正向隧道的 forward local_port > web_port/forward_port/local_port
+    #   > port(非22) > 按 host/name 命中的正向隧道 > forward_ports[0] > lab_port/dash_port。
+    # 返回 int(兜底 3080); 入参非法返回 None。
+    if not isinstance(dep, dict):
+        return None
+    cfg = cfg or {}
+    tunnels = cfg.get("tunnels") or []
+
+    def _int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    p = _int(dep.get("access_port"))
+    if p:
+        return p
+    tid = dep.get("tunnel_id")
+    if tid:
+        for tun in tunnels:
+            if tun.get("id") != tid:
+                continue
+            for fw in tun.get("forwards") or []:
+                lp = fw.get("local_port") if isinstance(fw, dict) else (fw[0] if fw else None)
+                return _int(lp) or None
+    for key in ("web_port", "forward_port", "local_port"):
+        p = _int(dep.get(key))
+        if p:
+            return p
+    if dep.get("port") and _int(dep.get("port")) != 22:
+        p = _int(dep.get("port"))
+        if p:
+            return p
+    dname = dep.get("name") or ""
+    for tun in tunnels:
+        if (tun.get("mode") or "forward") != "forward":
+            continue
+        if tun.get("host") == dep.get("host") or tun.get("name") == dname:
+            fws = tun.get("forwards") or []
+            if fws:
+                lp = fws[0].get("local_port") if isinstance(fws[0], dict) else (fws[0][0] if fws[0] else None)
+                p = _int(lp)
+                if p:
+                    return p
+            break
+    if cfg.get("forward_ports"):
+        p = _int(cfg["forward_ports"][0])
+        if p:
+            return p
+    return int(cfg.get("lab_port") or cfg.get("dash_port") or 3080)
+
+
 def save_deployments(deployments):
     # 写回 config.json 的 deployments(保留其他字段, 写前备份)
     p = _config_path()
@@ -1222,20 +1276,7 @@ def collect_overview_data(cfg, depls, smoke=False):
             rtok = pull_node_token(ssh_srv, ssh_usr, dname)
             if rtok:
                 set_runtime_token(dname, rtok)
-        dport = d.get("web_port") or d.get("forward_port") or d.get("local_port")
-        if not dport and d.get("port") and d.get("port") != 22:
-            dport = d.get("port")
-        if not dport:
-            for tun in (cfg.get("tunnels") or []):
-                if tun.get("mode") == "forward" and (tun.get("host") == d.get("host") or tun.get("name") == dname):
-                    fws = tun.get("forwards") or []
-                    if fws:
-                        dport = fws[0].get("local_port") if isinstance(fws[0], dict) else fws[0][0]
-                        break
-        if not dport and cfg.get("forward_ports"):
-            dport = cfg.get("forward_ports")[0]
-        if not dport:
-            dport = cfg.get("lab_port") or 3080
+        dport = deployment_access_port(d, cfg)
         # 经隧道/直连的本机访问端口探活: 远程节点"在线"以此为准(SSH 快照只作详情)
         r_ok, r_ms = False, -1
         if not smoke:

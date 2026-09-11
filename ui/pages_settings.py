@@ -224,17 +224,19 @@ class SettingsPage(BasePage):
         v.addWidget(QLabel("机器命名(右栏/卡片/部署下拉跟随)", objectName="rightTitle"))
         form = QFormLayout()
         self._in_local = QLineEdit("本机")
-        self._in_lab = QLineEdit("实验室")
         self._in_ssh = QLineEdit("公网中转")
         form.addRow("本机名称:", self._in_local)
-        form.addRow("实验室名称:", self._in_lab)
         form.addRow("公网中转名称:", self._in_ssh)
         v.addLayout(form)
+        nm_hint = QLabel("「本机名称」是本机节点的唯一显示名；远端 dsh 的显示名请在"
+                         "「部署管理」里按节点设置（实验室等旧命名不再在此维护）。",
+                         objectName="cardHint")
+        nm_hint.setWordWrap(True)
+        v.addWidget(nm_hint)
 
-        # 字段回填
+        # 字段回填(实验室等远端机器不再在此命名: 它们是「部署管理」里的远程节点)
         cfg = dsh_config.load_config(self._config_path)
         self._in_local.setText(cfg.get("local_name") or "本机")
-        self._in_lab.setText(cfg.get("lab_name") or "实验室")
         self._in_ssh.setText(cfg.get("ssh_name") or "公网中转")
 
         # 动态健康监控说明卡片（替代原手工编辑端口表）
@@ -412,8 +414,9 @@ class SettingsPage(BasePage):
         cfg = dsh_config.load_config(self._config_path)
         cfg.update(fields)
         cfg["local_name"] = self._in_local.text().strip() or "本机"
-        cfg["lab_name"] = self._in_lab.text().strip() or "实验室"
         cfg["ssh_name"] = self._in_ssh.text().strip() or "公网中转"
+        # lab_name 是固定三机时代的遗留字段: 动态隧道下实验室只是「部署管理」里的远程节点,
+        # 不再由本页命名; 旧配置里的值保留不动(仅不再暴露入口)
         # 彻底清理历史遗留隧道字段，避免污染配置与破坏动态监控
         for legacy_key in ("local_ports", "remote_tunnels", "forward_ports", "reverse_port", "lab_port", "lab_server", "lab_user"):
             cfg.pop(legacy_key, None)

@@ -109,6 +109,19 @@ class DshService(QObject):
 | **主题引擎** | `ui/theme.py` | `pages_theme.py` | TOKENS 全局色板、亚克力/明暗变体切换、实时 QSS 编译生成 |
 | **关于与更新** | `version.py` | `pages_version.py` | 控制台自身版本比对、Release 自动下载与自更新 |
 
+### 3.1 命名与节点标识的单一来源（去冗余硬约束）
+
+同一概念只允许一个来源，**禁止**把显示名与机器标识混用：
+
+| 概念 | 唯一来源 | 说明 |
+|---|---|---|
+| 本机节点显示名 | `local_name`（设置页） | 右栏/卡片/概览本机节点统一取它 |
+| 远程节点显示名 | `deployments[].name`（部署管理） | 不再从 `lab_name` 等旧字段派生 |
+| 节点访问端口 | `deployments[].access_port` → 关联正向隧道 → 远端 `web_port` → 旧启发式；**唯一实现** `core/data.py::deployment_access_port` | 概览页与部署页共用，不得各自再写一份 |
+| 公网信箱 key | 部署 `node_key` / 本机 `node_id`（阶段 3） | **必须 ASCII**；与显示名分离，禁止用 `local_name` 兼任 |
+| 中转服务器显示名 | `ssh_name`（设置页） | 中转不是 dsh 节点 |
+| `lab_name` | 遗留（固定三机时代） | 已移除设置页入口；动态隧道下由远程节点名取代（代码兜底保留） |
+
 ---
 
 ## 4. 三地网络拓扑与 SSH 鉴权信箱架构
