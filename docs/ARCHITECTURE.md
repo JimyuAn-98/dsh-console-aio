@@ -129,11 +129,12 @@ dsh 有两条官方安装路径，控制台的启动 / 更新 / 卸载 / 版本�
 | 模式 | 判定 | 安装 / 更新 / 卸载 / 启动 |
 |---|---|---|
 | `source` | `config.dash_repo` 指向可用源码目录（`package.json` 为 `@deepseek-ai/dsh-root`，或含 `apps/cli` / `pnpm-workspace.yaml`） | `git clone + pnpm install + build` / `git pull + build` / 删源码目录 / `pnpm.cmd dsh web`（cwd=仓库） |
-| `package` | 全局已安装 `@deepseek-ai/dsh`（npm 官方包，`bin=dsh`） | `pnpm add -g @deepseek-ai/dsh[@版本]` / `pnpm update -g @deepseek-ai/dsh` / `pnpm remove -g @deepseek-ai/dsh` / 全局 `dsh web` |
+| `package` | npm 全局已安装 `@deepseek-ai/dsh`（官方包，`bin=dsh`） | `npm install -g @deepseek-ai/dsh[@版本]` / `npm install -g @deepseek-ai/dsh@latest` / `npm uninstall -g @deepseek-ai/dsh` / npm 全局前缀下的 `dsh.cmd web` |
 
 - **唯一判定实现**：`core/pkgmgr.py::detect_mode(cfg)`；显式 `config.dsh_install_mode`（`source`/`package`）优先，其次源码可用则 `source`，再全局包则 `package`，都没有则 `none`。DSH 管理页页头展示检测结果。
-- **pnpm 环境修正**：pnpm（corepack）在全局 bin 目录不在 `PATH` 时会直接报错退出；所有 `pnpm -g` 调用一律带 `core/pkgmgr.py::pnpm_env()`（全局 bin 前置进 `PATH` + 补 `PNPM_HOME`）。`core/env.py::pnpm_env` 仅作为稳定入口委托它，不再自带一份实现。
-- **dsh CLI 无更新/卸载子命令**（`apps/cli/src/args.ts` 只有 `web` / `plugin`），更新/卸载是 pnpm 全局包的职责。
+- **为什么是 npm 而不是 pnpm**（实机 BUG-016）：dsh 的 `cordis-plugin-loader` 用**运行时动态 `import()`** 加载插件包，Node 只从 loader 自己的目录逐级向上找 `node_modules`；pnpm 的隔离式布局（全局虚拟仓库 `store/v11/links/...`）不把插件放在 loader 的祖先链上，启动即 100+ 条 `ERR_MODULE_NOT_FOUND` 退出。npm（`install -g`）是扁平提升布局，与官方 `npx @deepseek-ai/dsh web` 同源，能解析。官方 README 只文档化 npx；控制台改用 npm 全局安装以获得明确的安装/更新/卸载状态（npx 每次启动都要解析 registry、可能重新下载）。
+- **环境修正**：`core/pkgmgr.py::npm_env()` 把 npm 全局前缀（`npm prefix -g`）前置进 `PATH`，供全局命令与 `dsh.cmd` shim 使用；旧的 `pnpm_env()` 仅保留给环境检查卡的 pnpm 工具命令，其红线是**绝不设置 `PNPM_HOME`**（pnpm 会在其后拼一层 `bin`，见 BUG-013）。
+- **dsh CLI 无更新/卸载子命令**（`apps/cli/src/args.ts` 只有 `web` / `plugin`），更新/卸载由包管理器（npm）负责。
 
 ---
 

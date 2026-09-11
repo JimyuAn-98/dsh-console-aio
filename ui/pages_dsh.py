@@ -219,9 +219,9 @@ class DshManagePage(BasePage):
         self._update_local_ver_label()
         if (self._mode_info or {}).get("mode") == "package":
             self._update_desc.setText(
-                "运行一次完整更新: pnpm update -g @deepseek-ai/dsh -> 重启 web")
+                "运行一次完整更新: npm install -g @deepseek-ai/dsh@latest -> 重启 web")
             self._uninst_hint.setText(
-                "先停 dsh web, 再卸载全局包 @deepseek-ai/dsh；二选一决定是否一并删除数据")
+                "先停 dsh web, 再 npm uninstall -g @deepseek-ai/dsh；二选一决定是否一并删除数据")
         else:
             self._update_desc.setText(
                 "运行一次完整更新: git 拉取 -> 依赖 -> 构建 -> 重启 web")
@@ -496,7 +496,7 @@ class DshManagePage(BasePage):
         mrow = QHBoxLayout()
         mrow.addWidget(QLabel("安装方式:", objectName="cardHint"))
         self._inst_mode = QComboBox()
-        self._inst_mode.addItem("全局包（推荐，免克隆/免构建）", "package")
+        self._inst_mode.addItem("npm 全局包（推荐，免克隆/免构建）", "package")
         self._inst_mode.addItem("源码克隆（可跑本地未发布代码）", "source")
         self._inst_mode.currentIndexChanged.connect(self._on_inst_mode_changed)
         mrow.addWidget(self._inst_mode, 1)
@@ -551,7 +551,7 @@ class DshManagePage(BasePage):
                   self._inst_dir, self._inst_browse):
             w.setVisible(not pkg)
         self._inst_mode_hint.setText(
-            "官方全局包: pnpm add -g @deepseek-ai/dsh（更新/卸载也走 pnpm，最简）"
+            "官方 npm 全局包: npm install -g @deepseek-ai/dsh（更新/卸载走 npm；与官方 npx 同源布局）"
             if pkg else
             "源码克隆: git clone + pnpm install + pnpm build（可跑本地未发布的 DSH 代码）")
 
@@ -562,7 +562,7 @@ class DshManagePage(BasePage):
             self._inst_dir.setText(chosen)
 
     def _start_install(self):
-        # 校验输入后在后台线程跑安装: 全局包走 core.env.install_dsh_pkg(pnpm add -g),
+        # 校验输入后在后台线程跑安装: 全局包走 core.env.install_dsh_pkg(npm install -g),
         # 源码走 core.env.install_dsh(git clone + build); 本页只把 events 转成信号。
         mode = self._inst_mode.currentData() or "package"
         version = self._inst_ver.currentData() or ""

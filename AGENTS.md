@@ -29,7 +29,7 @@ dsh-console-aio — PySide6（Qt）Windows GUI，面向 dsh 用户的"控制台"
 ```
 dsh-console-aio.py  主程序（控制台布局: 顶部部署栏 + 左导航 + 中栏页面容器 + 右状态 + 底部日志）
 core/               后端业务层（纯 Python 零 Qt）: data.py 数据层 / tunnel_mgr.py 隧道 /
-                    dshctl.py 启停更新 / pkgmgr.py 安装方式(源码/全局包)判定与 pnpm -g 命令 /
+                    dshctl.py 启停更新 / pkgmgr.py 安装方式(源码/npm 全局包)判定与命令拼装 /
                     config.py / 各数据域(keys/env/ops/profiles/sessions/plugins/deployments/version)
 ui/                 前端页面包（pages_*.py 全 17 个功能页; base.py 页面基类;
                     cacheable.py 数据页缓存编排 mixin; theme.py 主题引擎(token/实时换肤) +

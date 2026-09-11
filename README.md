@@ -68,13 +68,13 @@
 
 | 安装方式 | 说明 |
 |---|---|
-| **全局包（推荐）** | 官方 npm 包：`pnpm add -g @deepseek-ai/dsh`，免 clone / 免构建，秒级完成；更新用 `pnpm update -g @deepseek-ai/dsh`、卸载用 `pnpm remove -g @deepseek-ai/dsh`；可选指定版本 |
+| **npm 全局包（推荐）** | 官方 npm 包：`npm install -g @deepseek-ai/dsh`，免 clone / 免构建；更新用 `npm install -g @deepseek-ai/dsh@latest`、卸载用 `npm uninstall -g @deepseek-ai/dsh`；可选指定版本。用 npm 而非 pnpm 是因为 dsh 的插件加载器依赖扁平 `node_modules`（与官方 `npx` 同源布局） |
 | **源码克隆** | `git clone + pnpm install + pnpm run build`，可跑本地未发布的 DSH 代码（开发用） |
 
 两种方式都在页面内分步（step in place）执行：
 
 1. **环境预检**：检查 git / node / npm / pnpm 是否可用，缺失会明确提示先装什么
-2. 按所选方式安装（全局包：`pnpm add -g`；源码：clone → install → build）
+2. 按所选方式安装（全局包：`npm install -g`；源码：clone → install → build）
 3. 完成后写 config（全局包写 `dsh_install_mode=package`；源码把目标目录写进 `dash_repo`，重启后生效）
 
 进度条 + 流式日志显示在页内安装卡；全过程另有一份**完整日志文件**，点页头「打开操作日志」随时复查。适合在没有 dsh 的新机器 / 新用户上从零搭好本机 dsh。
@@ -86,7 +86,7 @@
 **DSH 管理** 页「卸载 dsh」卡按**当前检测到的安装方式**执行，均先停 web：
 
 - **源码模式**：删除 `dash_repo` 源码目录并清空 config（只读 `.git` 有强制删除加固）
-- **全局包模式**：`pnpm remove -g @deepseek-ai/dsh`（无残留，秒级）
+- **全局包模式**：`npm uninstall -g @deepseek-ai/dsh`（无残留，秒级）
 
 两种模式都提供两档：
 
@@ -276,12 +276,12 @@ MIT © 2025 JimyuAn
 
 ## One-click dsh install
 The **DSH Manage** page auto-detects which way dsh is installed (source checkout / global package) and shows it in the page header. The "Install dsh" card offers two modes:
-- **Global package (recommended)**: `pnpm add -g @deepseek-ai/dsh` — no clone, no build, seconds to finish; update with `pnpm update -g @deepseek-ai/dsh`, uninstall with `pnpm remove -g @deepseek-ai/dsh`; a specific version can be pinned
+- **npm global package (recommended)**: `npm install -g @deepseek-ai/dsh` — no clone, no build; update with `npm install -g @deepseek-ai/dsh@latest`, uninstall with `npm uninstall -g @deepseek-ai/dsh`; a specific version can be pinned. npm (not pnpm) is used because dsh's plugin loader relies on a flat `node_modules` — the same layout the official `npx` uses
 - **Source checkout**: `git clone + pnpm install + pnpm run build` — for running unreleased local DSH code
 
 Both run **in-page** (step in place) with a progress bar and streaming log:
 1. Pre-check environment (git / node / npm / pnpm)
-2. Install by the selected mode (global package: `pnpm add -g`; source: clone → install → build)
+2. Install by the selected mode (global package: `npm install -g`; source: clone → install → build)
 3. Write config on success (global package: `dsh_install_mode=package`; source: target dir into `dash_repo`)
 
 The full output of every long operation is also saved to a log file — click "Open operation log" in the page header.
@@ -292,7 +292,7 @@ On the **DSH Manage** page, the "Development environment check" card shows git /
 ## Uninstall dsh
 On the **DSH Manage** page, the "Uninstall dsh" card follows the **detected install mode** and always stops the web first:
 - **Source mode**: deletes the source directory (`dash_repo`) and clears config (hardened force-delete for read-only `.git`)
-- **Global package mode**: `pnpm remove -g @deepseek-ai/dsh` (clean and fast)
+- **Global package mode**: `npm uninstall -g @deepseek-ai/dsh` (clean and fast)
 
 Both modes offer two options:
 - **Keep data**: removes the source / global package only; `~/.dsh` (conversations/sessions/workspaces/config) is kept

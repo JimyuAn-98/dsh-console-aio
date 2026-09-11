@@ -44,3 +44,12 @@
 3. **BUG-015 tag 前缀未规范化**：dsh Release tag 实测为 `dsh-v0.1.5-rc.2`（`git tag` 列表确认），包模式只去单个 `v` 会拼出非法 npm 版本。修复：新增 `pkgmgr.npm_version()` 作为唯一规范化实现，`install_cmd`、`_deploy_pkg_version`、`fetch_dsh_releases` 三处共用；源码模式仍用原始 tag。
 
 测试：`tests/test_core_pkgmgr.py` 增 PNPM_HOME 回归 / `<PNPM_HOME>\bin` 推导 / `npm_version` / `dsh-v` 部署；`tests/test_core_env.py` 增非 dsh 目标拒绝、已是 dsh 工作区跳过 clone。
+
+## 补充二（2026-09-11）：包管理器从 pnpm 改为 npm（BUG-016）
+
+实机启动包模式失败：dsh 进程退出码 1，`dsh-web.err.log` 里 100+ 条 `ERR_MODULE_NOT_FOUND: Cannot find package '@deepseek-ai/dsh-*'`，解析路径全在 pnpm 全局虚拟仓库 `AppData/Local/pnpm/store/v11/links/...`。
+
+- **根因**：dsh 的 `cordis-plugin-loader` 是**运行时动态 `import('<插件包>')`** 加载插件，Node 只从 loader 自己的目录逐级向上找 `node_modules`；pnpm 的隔离式布局（全局虚拟仓库）不把插件放在 loader 的祖先链上 → 全部找不到。npm/npx 是扁平提升布局，能解析（官方 README 也只文档化 `npx @deepseek-ai/dsh web`）。
+- **决策**：包模式改用 **npm 全局**——`npm install -g @deepseek-ai/dsh[@版本]` / `npm install -g @deepseek-ai/dsh@latest` / `npm uninstall -g @deepseek-ai/dsh`，启动用 `npm prefix -g` 下的 `dsh.cmd web`。理由：与 npx 同源的扁平布局能解析插件，同时保留控制台「安装/更新/卸载」的明确状态；**不用 npx** 是因为它每次启动都要解析 registry、可能重新下载（用户实测「巨慢」）。
+- **实现**：`core/pkgmgr.py` 新增 `npm_global_prefix()`（`npm prefix -g`，60s 缓存）、`global_bin_dir()`（Windows = npm 前缀）、`npm_env()`；`_deps()` 改 `npm ls -g --depth=0 --json`；`package_info()` 错误文案改 npm；命令 `install_cmd/update_cmd/remove_cmd` 改 npm；`start_cmd` 用 npm 前缀下 `dsh.cmd`。`pnpm_env()` 降级为「环境检查卡的 pnpm 工具命令」专用，仍保留 BUG-013 的「不设置 PNPM_HOME」红线。
+- **未采用**：npx（启动慢/每次解析 registry、安装-卸载语义被架空）；pnpm + `node-linker=hoisted`（全局虚拟仓库能否治未经验证）。

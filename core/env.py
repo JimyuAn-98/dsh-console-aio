@@ -338,7 +338,7 @@ def install_dsh(events=None, url=None, target=None, version=""):
 
 
 def install_dsh_pkg(events=None, version=""):
-    # 全局包安装(官方路径): pnpm add -g @deepseek-ai/dsh[@版本]; 成功后写
+    # 全局包安装: npm install -g @deepseek-ai/dsh[@版本](npm 扁平布局, 与官方 npx 同源); 成功后写
     # config.dsh_install_mode=package, 保证启动/更新/卸载一致。契约同 install_dsh + mode。
     from core import pkgmgr
     version = (version or "").strip()
@@ -351,17 +351,17 @@ def install_dsh_pkg(events=None, version=""):
         if events:
             events("log", text)
 
-    need = missing_tools()
+    need = missing_tools(("node", "npm"))   # 包模式只需要 node + npm(git/pnpm 非必需)
     if need:
         line("[安装] 缺少依赖: " + ", ".join(need))
         return {"msg": "", "err": "缺少依赖: " + ", ".join(need), "target": "", "version": version}
 
     ctl = DshCtl(dsh_config.load_derived())
     bridge = _bridge(events)
-    step(1, "步骤 1/2: pnpm add -g " + pkgmgr.DSH_PKG + (("@" + version) if version else ""))
+    step(1, "步骤 1/2: " + " ".join(pkgmgr.install_cmd(version)))
     line("[安装] 全局包安装: " + " ".join(pkgmgr.install_cmd(version)))
-    if not ctl.stream_cmd(pkgmgr.install_cmd(version), env=pkgmgr.pnpm_env(), events=bridge):
-        return {"msg": "", "err": "pnpm add -g 失败(详见安装日志)", "target": "", "version": version}
+    if not ctl.stream_cmd(pkgmgr.install_cmd(version), env=pkgmgr.npm_env(), events=bridge):
+        return {"msg": "", "err": "npm install -g 失败(详见安装日志)", "target": "", "version": version}
 
     step(2, "步骤 2/2: 校验安装结果")
     info = pkgmgr.package_info(force=True)
@@ -464,7 +464,7 @@ def uninstall_dsh(events=None, keep_data=True):
 
 
 def _uninstall_dsh_pkg(events=None, keep_data=True):
-    # 全局包卸载: 停 web -> pnpm remove -g @deepseek-ai/dsh -> 清模式配置
+    # 全局包卸载: 停 web -> npm uninstall -g @deepseek-ai/dsh -> 清模式配置
     # -> (keep_data=False) 删 ~/.dsh 数据目录。契约与 uninstall_dsh 一致。
     from core import pkgmgr
 
@@ -484,10 +484,10 @@ def _uninstall_dsh_pkg(events=None, keep_data=True):
     step(1, "步骤 1/3: 停止本机 dsh web")
     ctl.stop_dsh(events=bridge)
 
-    step(2, "步骤 2/3: pnpm remove -g " + pkgmgr.DSH_PKG)
+    step(2, "步骤 2/3: " + " ".join(pkgmgr.remove_cmd()))
     line("[卸载] 全局包卸载: " + " ".join(pkgmgr.remove_cmd()))
-    if not ctl.stream_cmd(pkgmgr.remove_cmd(), env=pkgmgr.pnpm_env(), events=bridge):
-        return {"msg": "", "err": "pnpm remove -g 失败(详见卸载日志)", "removed_repo": False,
+    if not ctl.stream_cmd(pkgmgr.remove_cmd(), env=pkgmgr.npm_env(), events=bridge):
+        return {"msg": "", "err": "npm uninstall -g 失败(详见卸载日志)", "removed_repo": False,
                 "removed_data": False, "data_dir": ""}
     pkgmgr.package_info(force=True)
     try:

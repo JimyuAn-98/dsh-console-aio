@@ -472,7 +472,7 @@ class DshService(QObject):
         self._run_result_op(op, _env.install_dsh, url, target, version, log_full=True)
 
     def install_dsh_pkg(self, version="", op="dsh-install-pkg"):
-        # 官方全局包安装: pnpm add -g @deepseek-ai/dsh[@版本]。
+        # 官方全局包安装(npm): npm install -g @deepseek-ai/dsh[@版本]。
         from core import env as _env
         self._run_result_op(op, _env.install_dsh_pkg, version, log_full=True)
 

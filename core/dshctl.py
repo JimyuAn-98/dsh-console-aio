@@ -277,10 +277,10 @@ class DshCtl:
         proc_env = None
         cwd = dash_repo
         if mode == "package":
-            # 全局包模式: 用 pnpm 全局 bin 下的 dsh shim 启动, 环境把该目录前置进 PATH。
+            # 全局包模式: 用 npm 全局前缀下的 dsh shim 启动, 环境把该目录前置进 PATH。
             dash_cmd = pkgmgr.start_cmd()
             cwd = None
-            proc_env = pkgmgr.pnpm_env()
+            proc_env = pkgmgr.npm_env()
             self._log(events, "  [模式] 全局包模式: " + " ".join(dash_cmd))
         elif not os.path.isdir(dash_repo):
             self._log(events, "  仓库不存在: %s" % dash_repo, "err")
@@ -512,7 +512,7 @@ class DshCtl:
         return True
 
     def update_dsh_pkg(self, events=None):
-        # 全局包模式更新: 停 web -> pnpm update -g @deepseek-ai/dsh -> 重启(3 步)。
+        # 全局包模式更新: 停 web -> npm install -g @deepseek-ai/dsh@latest -> 重启(3 步)。
         from core import pkgmgr
 
         def step(n, text):
@@ -524,10 +524,10 @@ class DshCtl:
         self.stop_dsh(events)
         import time as _t
         _t.sleep(1)
-        step(2, "步骤2/3: pnpm update -g " + pkgmgr.DSH_PKG)
-        self._log(events, "[更新] pnpm update -g " + pkgmgr.DSH_PKG, "warn")
-        if not self.stream_cmd(pkgmgr.update_cmd(), env=pkgmgr.pnpm_env(), events=events):
-            self._status(events, "更新失败: pnpm update -g")
+        step(2, "步骤2/3: npm install -g " + pkgmgr.DSH_PKG + "@latest")
+        self._log(events, "[更新] npm install -g " + pkgmgr.DSH_PKG + "@latest", "warn")
+        if not self.stream_cmd(pkgmgr.update_cmd(), env=pkgmgr.npm_env(), events=events):
+            self._status(events, "更新失败: npm install -g @latest")
             return False
         step(3, "步骤3/3: 重启 dsh web")
         self._log(events, "[更新] 步骤3/3: 重启 dsh web", "warn")
@@ -637,7 +637,7 @@ class DshCtl:
         return {"err": "", "dirty": False, "msg": "已部署 " + tag, "tag": tag}
 
     def _deploy_pkg_version(self, events=None, tag=""):
-        # 全局包模式的"部署指定版本" = pnpm add -g @deepseek-ai/dsh@<版本>(tag 去掉 v 前缀)。
+        # 全局包模式的"部署指定版本" = npm install -g @deepseek-ai/dsh@<版本>(tag 归一为 npm 版本)。
         from core import pkgmgr
         tag = str(tag or "").strip()
         if not tag:
@@ -654,10 +654,10 @@ class DshCtl:
         import time as _t
         _t.sleep(1)
         step(2, "步骤2/3: 安装 %s@%s" % (pkgmgr.DSH_PKG, ver))
-        self._log(events, "[部署] 步骤2/3: pnpm add -g %s@%s" % (pkgmgr.DSH_PKG, ver), "warn")
-        if not self.stream_cmd(pkgmgr.install_cmd(ver), env=pkgmgr.pnpm_env(), events=events):
-            self._status(events, "部署失败: pnpm add -g")
-            return {"err": "pnpm add -g 失败", "dirty": False, "msg": "", "tag": tag}
+        self._log(events, "[部署] 步骤2/3: npm install -g %s@%s" % (pkgmgr.DSH_PKG, ver), "warn")
+        if not self.stream_cmd(pkgmgr.install_cmd(ver), env=pkgmgr.npm_env(), events=events):
+            self._status(events, "部署失败: npm install -g")
+            return {"err": "npm install -g 失败", "dirty": False, "msg": "", "tag": tag}
         step(3, "步骤3/3: 重启 dsh web")
         self._log(events, "[部署] 步骤3/3: 重启 dsh web", "warn")
         if not self.start_dsh(events):

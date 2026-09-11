@@ -103,13 +103,15 @@ class TestCommands:
         assert pkgmgr.install_cmd('')[-1] == '@deepseek-ai/dsh'
 
     def test_update_remove_cmd(self):
-        assert pkgmgr.update_cmd()[1:3] == ['update', '-g']
-        assert pkgmgr.remove_cmd()[1:3] == ['remove', '-g']
+        # 包模式走 npm: 更新 = install -g @latest, 卸载 = uninstall -g
+        assert pkgmgr.update_cmd()[1:3] == ['install', '-g']
+        assert pkgmgr.update_cmd()[-1].endswith('@latest')
+        assert pkgmgr.remove_cmd()[1:3] == ['uninstall', '-g']
 
 
 
 class TestPackageModeLifecycle:
-    # 包模式路由: update / deploy / uninstall 必须走 pnpm -g 命令(不碰 git)。
+    # 包模式路由: update / deploy / uninstall 必须走 npm -g 命令(不碰 git)。
     def _ctl(self, monkeypatch):
         import core.dshctl as dshctl
         calls = []
@@ -143,7 +145,7 @@ class TestPackageModeLifecycle:
         ctl, calls = self._ctl(monkeypatch)
         r = ctl.deploy_dsh_version(None, tag='dsh-v0.1.5-rc.2')
         assert r['err'] == '' and r['tag'] == 'dsh-v0.1.5-rc.2'
-        assert ['pnpm.cmd', 'add', '-g', '@deepseek-ai/dsh@0.1.5-rc.2'] in calls
+        assert ['npm.cmd', 'install', '-g', '@deepseek-ai/dsh@0.1.5-rc.2'] in calls
 
     def test_uninstall_routes_to_pnpm_remove(self, monkeypatch):
         import core.dshctl as dshctl
