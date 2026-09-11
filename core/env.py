@@ -133,12 +133,10 @@ def missing_tools(tools=("git", "node", "npm", "pnpm")):
 
 
 def pnpm_env():
-    # pnpm 要求全局 bin 目录在 PATH 中, 自动注入避免报错; 返回新的 env dict。
-    env = dict(os.environ)
-    pnpm_bin = os.path.join(os.environ.get("LOCALAPPDATA", ""), "pnpm", "bin")
-    if pnpm_bin and pnpm_bin not in env.get("PATH", ""):
-        env["PATH"] = env.get("PATH", "") + os.pathsep + pnpm_bin
-    return env
+    # pnpm 要求全局 bin 目录在 PATH 中, 自动注入避免报错; 委托 core.pkgmgr(单一实现,
+    # 统一处理 PNPM_HOME / 前置 PATH / Windows PATH 大小写), 这里只保留稳定入口。
+    from core import pkgmgr
+    return pkgmgr.pnpm_env()
 
 
 def run_capture(cmd, timeout=600):
@@ -258,6 +256,49 @@ def install_dsh(events=None, url=None, target=None, version=""):
     return {"msg": msg, "err": "", "target": target, "version": version}
 
 
+def install_dsh_pkg(events=None, version=""):
+    # 全局包安装(官方路径): pnpm add -g @deepseek-ai/dsh[@版本]; 成功后写
+    # config.dsh_install_mode=package, 保证启动/更新/卸载一致。契约同 install_dsh + mode。
+    from core import pkgmgr
+    version = (version or "").strip()
+
+    def step(n, text):
+        if events:
+            events("step", (n, text))
+
+    def line(text):
+        if events:
+            events("log", text)
+
+    need = missing_tools()
+    if need:
+        line("[安装] 缺少依赖: " + ", ".join(need))
+        return {"msg": "", "err": "缺少依赖: " + ", ".join(need), "target": "", "version": version}
+
+    ctl = DshCtl(dsh_config.load_derived())
+    bridge = _bridge(events)
+    step(1, "步骤 1/2: pnpm add -g " + pkgmgr.DSH_PKG + (("@" + version) if version else ""))
+    line("[安装] 全局包安装: " + " ".join(pkgmgr.install_cmd(version)))
+    if not ctl.stream_cmd(pkgmgr.install_cmd(version), env=pkgmgr.pnpm_env(), events=bridge):
+        return {"msg": "", "err": "pnpm add -g 失败(详见安装日志)", "target": "", "version": version}
+
+    step(2, "步骤 2/2: 校验安装结果")
+    info = pkgmgr.package_info(force=True)
+    if not info.get("ok"):
+        return {"msg": "", "err": info.get("error") or "安装完成但未检测到全局包",
+                "target": "", "version": version}
+    line("[安装] 已安装 %s %s" % (pkgmgr.DSH_PKG, info["version"]))
+    try:
+        cfg = dsh_config.load_config()
+        cfg["dsh_install_mode"] = "package"
+        if dsh_config.save_config(cfg):
+            line("[安装] 已把 dsh_install_mode=package 写入 config.json。")
+    except Exception as e:
+        line("[安装] 写 config 失败: " + str(e))
+    return {"msg": "dsh 全局包安装完成: %s %s" % (pkgmgr.DSH_PKG, info["version"]),
+            "err": "", "target": "", "version": info["version"], "mode": "package"}
+
+
 def uninstall_dsh(events=None, keep_data=True):
     # 卸载本机 dsh(与 install_dsh 对应的纯业务, 零 Qt): 停 web -> 删源码目录(dash_repo)
     # -> 清 config.dash_repo; keep_data=False 时再删 ~/.dsh 数据目录。
@@ -273,6 +314,9 @@ def uninstall_dsh(events=None, keep_data=True):
             events("log", text)
 
     cfg = dsh_config.load_config()
+    from core import pkgmgr
+    if pkgmgr.detect_mode(cfg).get("mode") == "package":
+        return _uninstall_dsh_pkg(events, keep_data)
     repo = (cfg.get("dash_repo") or "").strip()
     ctl = DshCtl(dsh_config.load_derived())
 
@@ -338,5 +382,64 @@ def uninstall_dsh(events=None, keep_data=True):
             "removed_data": removed_data, "data_dir": data_dir}
 
 
+def _uninstall_dsh_pkg(events=None, keep_data=True):
+    # 全局包卸载: 停 web -> pnpm remove -g @deepseek-ai/dsh -> 清模式配置
+    # -> (keep_data=False) 删 ~/.dsh 数据目录。契约与 uninstall_dsh 一致。
+    from core import pkgmgr
+
+    def step(n, text):
+        if events:
+            events("step", (n, text))
+
+    def line(text):
+        if events:
+            events("log", text)
+
+    ctl = DshCtl(dsh_config.load_derived())
+    bridge = _bridge(events)
+    removed_data = False
+    data_dir = ""
+
+    step(1, "步骤 1/3: 停止本机 dsh web")
+    ctl.stop_dsh(events=bridge)
+
+    step(2, "步骤 2/3: pnpm remove -g " + pkgmgr.DSH_PKG)
+    line("[卸载] 全局包卸载: " + " ".join(pkgmgr.remove_cmd()))
+    if not ctl.stream_cmd(pkgmgr.remove_cmd(), env=pkgmgr.pnpm_env(), events=bridge):
+        return {"msg": "", "err": "pnpm remove -g 失败(详见卸载日志)", "removed_repo": False,
+                "removed_data": False, "data_dir": ""}
+    pkgmgr.package_info(force=True)
+    try:
+        cfg2 = dsh_config.load_config()
+        if cfg2.get("dsh_install_mode"):
+            cfg2["dsh_install_mode"] = ""
+            dsh_config.save_config(cfg2)
+    except Exception as e:
+        line("[卸载] 清 config.dsh_install_mode 失败: " + str(e))
+
+    if not keep_data:
+        from core import data as dsh_data
+        data_dir = dsh_data.dsh_home()
+        if os.path.isabs(data_dir) and os.path.isdir(data_dir) \
+                and os.path.abspath(data_dir) != os.path.abspath(os.path.expanduser("~")):
+            step(3, "删除数据目录 ~/.dsh")
+            line("[卸载] 删除数据目录: " + data_dir)
+            try:
+                _rmtree_force(data_dir, log=line)
+                removed_data = True
+            except Exception as e:
+                line("[卸载] 删除数据目录失败: " + str(e))
+                return {"msg": "", "err": "删除数据目录失败: %s" % e, "removed_repo": True,
+                        "removed_data": False, "data_dir": data_dir}
+        else:
+            line("[卸载] 未检测到数据目录(跳过): " + data_dir)
+
+    parts = ["全局包已卸载"]
+    if not keep_data and removed_data:
+        parts.append("数据目录(~/.dsh)已删除")
+    return {"msg": "dsh 卸载完成: " + "; ".join(parts), "err": "", "removed_repo": True,
+            "removed_data": removed_data, "data_dir": data_dir}
+
+
 __all__ = ["get_version", "tool_versions", "missing_tools", "pnpm_env",
-           "run_capture", "test_ssh", "install_dsh", "uninstall_dsh"]
+           "run_capture", "test_ssh", "install_dsh", "install_dsh_pkg", "uninstall_dsh"]

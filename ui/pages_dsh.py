@@ -83,6 +83,8 @@ class DshManagePage(BasePage):
         self._uninst_running = False
         self._update_running = False
         self._deploy_running = False
+        self._mode_info = {}           # 当前 dsh 安装模式检测结果(core.pkgmgr.detect_mode)
+        self._mode_applied = False     # 首次检测后据此预选安装方式
         super().__init__(app, parent)
         self.app.service.card.connect(self._apply_card)
         self.app.service.log.connect(self._on_service_log)
@@ -92,11 +94,13 @@ class DshManagePage(BasePage):
         for key, on in self.app._card_state.items():
             self._set_card(key, on)
         self._fetch_releases()
+        self._detect_mode()
 
     def on_show(self):
         # 页面实例常驻(见 MainWindow._show_page): 切回本页时刷新版本发布信息;
         # 安装/卸载/更新进行中的进度与日志控件内容保持不变。
         self._fetch_releases()
+        self._detect_mode()
 
     def _on_service_log(self, text, _tag=""):
         if self._inst_running:
@@ -121,7 +125,9 @@ class DshManagePage(BasePage):
             self._apply_env(payload.get("data") or {})
         elif op == "dsh-releases":
             self._on_releases(payload.get("data") or [], payload.get("err", ""))
-        elif op == "dsh-install":
+        elif op == "dsh-mode":
+            self._apply_mode(payload.get("data") or {})
+        elif op in ("dsh-install", "dsh-install-pkg"):
             self._on_install_done(not payload.get("err"), payload.get("err") or payload.get("msg", ""))
         elif op == "dsh-uninstall":
             self._on_uninstall_done(not payload.get("err"), payload.get("err") or payload.get("msg", ""))
@@ -150,6 +156,9 @@ class DshManagePage(BasePage):
         head = QHBoxLayout()
         head.addWidget(title)
         head.addStretch(1)
+        # 当前 dsh 安装方式(源码 / 全局包): 自动探测, 决定启动/更新/卸载走哪条路。
+        self._mode_lbl = QLabel("模式: 检测中…", objectName="cardHint")
+        head.addWidget(self._mode_lbl)
         # 长操作(安装/更新/卸载/部署)完整输出落盘在 service 侧, 这里给一个打开入口。
         self._btn_oplog = QPushButton("打开操作日志")
         self._btn_oplog.setToolTip("查看最近一次安装/更新/卸载/部署的完整输出")
@@ -193,6 +202,61 @@ class DshManagePage(BasePage):
         except OSError as e:
             self.app.loge("[日志] 打开失败: %s" % e, "err")
 
+    # ── 当前安装方式检测(源码模式 / 全局包模式) ──
+    def _detect_mode(self):
+        # 后台探测: 源码目录是否可用 + 全局是否装了 @deepseek-ai/dsh(约 1s, core 侧有缓存)。
+        self.app.service.detect_dsh_mode(op="dsh-mode")
+
+    def _apply_mode(self, info):
+        self._mode_info = info or {}
+        try:
+            from core import pkgmgr
+            label = pkgmgr.mode_label(self._mode_info)
+        except Exception:
+            label = "模式未知"
+        self._mode_lbl.setText("模式: " + label)
+        self._mode_lbl.setToolTip(self._mode_tooltip())
+        self._update_local_ver_label()
+        if (self._mode_info or {}).get("mode") == "package":
+            self._update_desc.setText(
+                "运行一次完整更新: pnpm update -g @deepseek-ai/dsh -> 重启 web")
+            self._uninst_hint.setText(
+                "先停 dsh web, 再卸载全局包 @deepseek-ai/dsh；二选一决定是否一并删除数据")
+        else:
+            self._update_desc.setText(
+                "运行一次完整更新: git 拉取 -> 依赖 -> 构建 -> 重启 web")
+            self._uninst_hint.setText(
+                "先停 dsh web, 再删除源码目录并清空 config；二选一决定是否一并删除数据")
+        # 首次检测后按检测结果预选安装方式(源码模式则默认源码, 否则全局包)
+        if not self._mode_applied:
+            self._mode_applied = True
+            idx = self._inst_mode.findData(self._mode_info.get("mode") or "package")
+            if idx >= 0:
+                self._inst_mode.setCurrentIndex(idx)
+
+    def _mode_tooltip(self):
+        info = self._mode_info or {}
+        s = info.get("source") or {}
+        p = info.get("package") or {}
+        src = ("是 v%s（%s）" % (s.get("version") or "?", s.get("repo"))) if s.get("ok") else "未检测到"
+        pkg = ("是 %s" % (p.get("version") or "?")) if p.get("ok") else (p.get("error") or "未检测到")
+        return "当前安装方式:\n源码模式: %s\n全局包模式: %s\n全局 bin: %s" % (
+            src, pkg, p.get("bin_dir") or "-")
+
+    def _update_local_ver_label(self):
+        # 版本卡的本机版本: package 模式取全局包版本, 否则取源码 package.json。
+        cfg = dsh_config.load_config()
+        mode = (self._mode_info or {}).get("mode")
+        local = core_dshctl.dsh_local_version(cfg, mode=mode)
+        self._local_ver = local
+        self._pin = str(cfg.get("dsh_version_pin") or "")
+        base = ("v%s" % local) if local else "未知(未安装)"
+        if mode == "package":
+            extra = "全局包模式"
+        else:
+            extra = ("已固定 @ %s" % self._pin) if self._pin else "跟随默认分支"
+        self._local_ver_lbl.setText("本机版本: %s · %s" % (base, extra))
+
     # ── 卡: 本机 dsh 操控(与原隧道页 dsh-web 卡同源: service.start_dsh) ──
     def _card_dsh(self):
         card = QFrame(objectName="card")
@@ -234,6 +298,7 @@ class DshManagePage(BasePage):
         desc = QLabel("运行一次完整更新:\ngit 拉取 -> 依赖 -> 构建 -> 重启 web",
                       objectName="cardHint")
         desc.setWordWrap(True)
+        self._update_desc = desc
         lv.addWidget(desc)
         btns = QHBoxLayout()
         self._update_btn = QPushButton("运行更新")
@@ -428,18 +493,30 @@ class DshManagePage(BasePage):
         v.setContentsMargins(16, 14, 16, 14)
         v.setSpacing(8)
         v.addWidget(QLabel("安装 dsh（本机）", objectName="cardTitle"))
-        v.addWidget(QLabel("dsh 仓库地址（git 克隆源）:",
-                           objectName="cardHint"))
+        mrow = QHBoxLayout()
+        mrow.addWidget(QLabel("安装方式:", objectName="cardHint"))
+        self._inst_mode = QComboBox()
+        self._inst_mode.addItem("全局包（推荐，免克隆/免构建）", "package")
+        self._inst_mode.addItem("源码克隆（可跑本地未发布代码）", "source")
+        self._inst_mode.currentIndexChanged.connect(self._on_inst_mode_changed)
+        mrow.addWidget(self._inst_mode, 1)
+        v.addLayout(mrow)
+        self._inst_mode_hint = QLabel("", objectName="cardHint")
+        self._inst_mode_hint.setWordWrap(True)
+        v.addWidget(self._inst_mode_hint)
+        self._inst_url_lbl = QLabel("dsh 仓库地址（git 克隆源）:", objectName="cardHint")
+        v.addWidget(self._inst_url_lbl)
         self._inst_url = QLineEdit("https://github.com/deepseek-ai/deepseek-harness.git")
         v.addWidget(self._inst_url)
-        v.addWidget(QLabel("安装到的目标目录（留空则默认用户主目录/dsh）:",
-                           objectName="cardHint"))
+        self._inst_dir_lbl = QLabel("安装到的目标目录（留空则默认用户主目录/dsh）:",
+                                    objectName="cardHint")
+        v.addWidget(self._inst_dir_lbl)
         drow = QHBoxLayout()
         self._inst_dir = QLineEdit()
-        browse = QPushButton("浏览…")
-        browse.clicked.connect(self._inst_browse_dir)
+        self._inst_browse = QPushButton("浏览…")
+        self._inst_browse.clicked.connect(self._inst_browse_dir)
         drow.addWidget(self._inst_dir, 1)
-        drow.addWidget(browse)
+        drow.addWidget(self._inst_browse)
         v.addLayout(drow)
         vrow = QHBoxLayout()
         vrow.addWidget(QLabel("安装版本(默认最新):", objectName="cardHint"))
@@ -464,7 +541,19 @@ class DshManagePage(BasePage):
         self._inst_log.setMinimumHeight(140)
         self._inst_log.setPlaceholderText("安装日志(流式显示在这里)...")
         v.addWidget(self._inst_log)
+        self._on_inst_mode_changed()
         return card
+
+    def _on_inst_mode_changed(self, _idx=0):
+        # 全局包模式无需仓库地址/目标目录, 隐藏这两组输入; 版本下拉两种模式共用。
+        pkg = (self._inst_mode.currentData() or "package") == "package"
+        for w in (self._inst_url_lbl, self._inst_url, self._inst_dir_lbl,
+                  self._inst_dir, self._inst_browse):
+            w.setVisible(not pkg)
+        self._inst_mode_hint.setText(
+            "官方全局包: pnpm add -g @deepseek-ai/dsh（更新/卸载也走 pnpm，最简）"
+            if pkg else
+            "源码克隆: git clone + pnpm install + pnpm build（可跑本地未发布的 DSH 代码）")
 
     def _inst_browse_dir(self):
         start = self._inst_dir.text().strip() or os.path.expanduser("~")
@@ -473,24 +562,29 @@ class DshManagePage(BasePage):
             self._inst_dir.setText(chosen)
 
     def _start_install(self):
-        # 校验输入后在后台线程跑安装: 业务全在 core.env.install_dsh(events 回调),
-        # 本页只把 events 转成信号 -> 更新进度/日志。
-        url = self._inst_url.text().strip()
-        target = self._inst_dir.text().strip()
-        if not url:
-            QMessageBox.critical(self, "缺少仓库地址", "请填写 dsh 的 git 仓库地址。")
-            return
-        target = target or os.path.join(os.path.expanduser("~"), "dsh")
+        # 校验输入后在后台线程跑安装: 全局包走 core.env.install_dsh_pkg(pnpm add -g),
+        # 源码走 core.env.install_dsh(git clone + build); 本页只把 events 转成信号。
+        mode = self._inst_mode.currentData() or "package"
         version = self._inst_ver.currentData() or ""
+        if mode == "source":
+            url = self._inst_url.text().strip()
+            if not url:
+                QMessageBox.critical(self, "缺少仓库地址", "请填写 dsh 的 git 仓库地址。")
+                return
+            target = self._inst_dir.text().strip() or os.path.join(os.path.expanduser("~"), "dsh")
         self._inst_running = True
         self._inst_start.setEnabled(False)
+        self._inst_mode.setEnabled(False)
         self._inst_url.setEnabled(False)
         self._inst_dir.setEnabled(False)
         self._inst_ver.setEnabled(False)
         self._inst_bar.setValue(0)
         self._inst_step_lbl.setText("正在安装…")
         self._inst_log.clear()
-        self.app.service.install_dsh(url, target, version=version, op="dsh-install")
+        if mode == "source":
+            self.app.service.install_dsh(url, target, version=version, op="dsh-install")
+        else:
+            self.app.service.install_dsh_pkg(version=version, op="dsh-install-pkg")
 
     def _on_install_step(self, step, text):
         self._inst_bar.setValue(step)
@@ -504,6 +598,7 @@ class DshManagePage(BasePage):
     def _on_install_done(self, ok, msg):
         self._inst_running = False
         self._inst_start.setEnabled(True)
+        self._inst_mode.setEnabled(True)
         self._inst_url.setEnabled(True)
         self._inst_dir.setEnabled(True)
         self._inst_ver.setEnabled(True)
@@ -511,10 +606,11 @@ class DshManagePage(BasePage):
             self._inst_bar.setValue(4)
             self._inst_step_lbl.setText("完成")
             self.app.loge("[安装] " + msg, "ok")
-            self.app.set_status("安装完成，dash_repo 已更新")
-            # 安装成功: 刷新部署列表(新仓库可被部署联动), 收尾提示
+            self.app.set_status("安装完成，dsh 已就绪")
+            # 安装成功: 刷新部署列表(新仓库可被部署联动) + 重新检测安装方式
             if hasattr(self.app, "_refresh_deploy_list"):
                 self.app._refresh_deploy_list()
+            self._detect_mode()
             QMessageBox.information(self, "安装完成", msg)
         else:
             self._inst_step_lbl.setText("安装失败")
@@ -531,8 +627,11 @@ class DshManagePage(BasePage):
         head.addWidget(QLabel("卸载 dsh（本机）", objectName="cardTitle"))
         head.addStretch(1)
         v.addLayout(head)
-        v.addWidget(QLabel("先停 dsh web，再删除源码目录并清空 config；二选一决定是否一并删除数据",
-                           objectName="cardHint"))
+        self._uninst_hint = QLabel(
+            "先停 dsh web，再按当前安装方式删除（源码目录 / 全局包）；二选一决定是否一并删除数据",
+            objectName="cardHint")
+        self._uninst_hint.setWordWrap(True)
+        v.addWidget(self._uninst_hint)
         hint2 = QLabel("「保留数据」只删源码(~/.dsh 数据保留)；「彻底卸载」连 ~/.dsh 数据一起删。",
                        objectName="cardHint")
         hint2.setWordWrap(True)
@@ -666,14 +765,7 @@ class DshManagePage(BasePage):
 
     def _fetch_releases(self, force=False):
         # 经 service 信号桥拉 GitHub Releases(core 侧 TTL 缓存; force 供「刷新」按钮)
-        cfg = dsh_config.load_config()
-        local = core_dshctl.dsh_local_version(cfg)
-        self._local_ver = local
-        self._pin = str(cfg.get("dsh_version_pin") or "")
-        base = ("v%s" % local) if local else "未知(未配置 dash_repo 或未安装)"
-        self._local_ver_lbl.setText(
-            "本机版本: %s · %s" % (base, ("已固定 @ %s" % self._pin) if self._pin
-                                    else "跟随默认分支"))
+        self._update_local_ver_label()
         self._btn_rel_open.setEnabled(False)
         self._btn_rel_deploy.setEnabled(False)
         self._rel_body.setPlainText("正在获取发布信息(GitHub Releases)…")

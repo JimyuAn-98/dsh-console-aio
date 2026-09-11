@@ -123,11 +123,17 @@ def fetch_dsh_releases(force=False, per_page=30):
     return out
 
 
-def dsh_local_version(cfg=None):
-    # 本机 dsh 版本 = dash_repo/package.json 的 version; 未配置/未安装/损坏返回 None。
+def dsh_local_version(cfg=None, mode=None):
+    # 本机 dsh 版本: package 模式取全局包版本, 否则取 dash_repo/package.json;
+    # 未配置/未安装/损坏返回 None。mode 由调用方传入(避免此处再跑一次模式探测)。
     if cfg is None:
         from core import config as _cfg
         cfg = _cfg.load_config()
+    if mode is None:
+        mode = str((cfg or {}).get("dsh_install_mode") or "").strip().lower() or None
+    if mode == "package":
+        from core import pkgmgr
+        return pkgmgr.package_info().get("version") or None
     repo = (cfg or {}).get("dash_repo") or ""
     try:
         with open(os.path.join(repo, "package.json"), encoding="utf-8") as f:
@@ -269,7 +275,17 @@ class DshCtl:
         dash_repo = self.d.get("dash_repo") or ""
         dash_cmd = self.d.get("dash_cmd") or []
         dash_port = self.d.get("dash_port") or 3080
-        if not os.path.isdir(dash_repo):
+        from core import pkgmgr
+        mode = pkgmgr.detect_mode(self.d).get("mode")
+        proc_env = None
+        cwd = dash_repo
+        if mode == "package":
+            # 全局包模式: 用 pnpm 全局 bin 下的 dsh shim 启动, 环境把该目录前置进 PATH。
+            dash_cmd = pkgmgr.start_cmd()
+            cwd = None
+            proc_env = pkgmgr.pnpm_env()
+            self._log(events, "  [模式] 全局包模式: " + " ".join(dash_cmd))
+        elif not os.path.isdir(dash_repo):
             self._log(events, "  仓库不存在: %s" % dash_repo, "err")
             self._status(events, "启动失败: 仓库目录不存在")
             return False
@@ -287,7 +303,7 @@ class DshCtl:
             if self.probe("127.0.0.1", dash_port)[0]:
                 self._log(events, "  [警告] 端口 %d 仍被占用，启动可能遇到冲突" % dash_port, "warn")
 
-        self._log(events, "  $ cd %s && %s" % (dash_repo, " ".join(dash_cmd)))
+        self._log(events, "  $ cd %s && %s" % (cwd or "(继承当前目录)", " ".join(dash_cmd)))
         try:
             logdir = os.path.join(os.environ.get("TEMP", "."), "dsh-dash")
             os.makedirs(logdir, exist_ok=True)
@@ -302,7 +318,7 @@ class DshCtl:
 
             out = open(out_file, "ab")
             err = open(err_file, "ab")
-            proc = subprocess.Popen(dash_cmd, cwd=dash_repo, stdout=out, stderr=err,
+            proc = subprocess.Popen(dash_cmd, cwd=cwd, env=proc_env, stdout=out, stderr=err,
                                     creationflags=subprocess.CREATE_NO_WINDOW)
             self._log(events, "  进程已启动 (PID %d), 正在检测运行状态..." % proc.pid, "ok")
             self._status(events, "正在启动本机 dsh (PID %d)..." % proc.pid)
@@ -447,6 +463,9 @@ class DshCtl:
         # 任一命令失败即中止。to_main=True 由 UI 在"已固定版本"确认后传入; 每步发 step 事件供
         # 页面进度条。清理一步不可省: dsh 的 lib/ 构建产物被 gitignore, git pull 不动它, 上游
         # 改名/删导出后过期生成物会让 tsdown 报 MISSING_EXPORT。
+        from core import pkgmgr
+        if pkgmgr.detect_mode(self.d).get("mode") == "package":
+            return self.update_dsh_pkg(events)
         dash_repo = self.d.get("dash_repo") or ""
         if not os.path.isdir(dash_repo):
             self._log(events, "  仓库不存在: %s" % dash_repo, "err")
@@ -495,6 +514,35 @@ class DshCtl:
         self._status(events, "更新完成")
         return True
 
+    def update_dsh_pkg(self, events=None):
+        # 全局包模式更新: 停 web -> pnpm update -g @deepseek-ai/dsh -> 重启(3 步)。
+        from core import pkgmgr
+
+        def step(n, text):
+            if events:
+                events("step", (n, text))
+
+        step(1, "步骤1/3: 停止当前 dsh web")
+        self._log(events, "[更新] 步骤1/3: 停止当前 dsh web", "warn")
+        self.stop_dsh(events)
+        import time as _t
+        _t.sleep(1)
+        step(2, "步骤2/3: pnpm update -g " + pkgmgr.DSH_PKG)
+        self._log(events, "[更新] pnpm update -g " + pkgmgr.DSH_PKG, "warn")
+        if not self.stream_cmd(pkgmgr.update_cmd(), env=pkgmgr.pnpm_env(), events=events):
+            self._status(events, "更新失败: pnpm update -g")
+            return False
+        step(3, "步骤3/3: 重启 dsh web")
+        self._log(events, "[更新] 步骤3/3: 重启 dsh web", "warn")
+        if not self.start_dsh(events):
+            self._log(events, "  [更新] 包已更新, 但 dsh web 启动失败, 请查看上方控制台报错", "err")
+            self._status(events, "更新完成但启动失败")
+            return False
+        pkgmgr.package_info(force=True)   # 刷新版本缓存
+        self._log(events, "  [更新] 完成, 访问 http://127.0.0.1:%d" % self.d["dash_port"], "ok")
+        self._status(events, "更新完成")
+        return True
+
     # ---------- 版本固定状态(config.dsh_version_pin) ----------
     def _set_pin(self, tag, events=None):
         try:
@@ -519,6 +567,9 @@ class DshCtl:
         # 契约: {"err","dirty","msg","tag"}; events 为首参(配合 services._run_result_op)。
         dash_repo = self.d.get("dash_repo") or ""
         tag = str(tag or "").strip()
+        from core import pkgmgr
+        if pkgmgr.detect_mode(self.d).get("mode") == "package":
+            return self._deploy_pkg_version(events, tag)
         if not os.path.isdir(dash_repo):
             self._log(events, "  仓库不存在: %s" % dash_repo, "err")
             self._status(events, "部署失败: 仓库目录不存在")
@@ -587,6 +638,40 @@ class DshCtl:
         self._log(events, "  [部署] 完成, 已切换到 %s" % tag, "ok")
         self._status(events, "已部署版本 " + tag)
         return {"err": "", "dirty": False, "msg": "已部署 " + tag, "tag": tag}
+
+    def _deploy_pkg_version(self, events=None, tag=""):
+        # 全局包模式的"部署指定版本" = pnpm add -g @deepseek-ai/dsh@<版本>(tag 去掉 v 前缀)。
+        from core import pkgmgr
+        tag = str(tag or "").strip()
+        if not tag:
+            return {"err": "版本为空", "dirty": False, "msg": "", "tag": tag}
+        ver = tag[1:] if tag.startswith("v") else tag
+        ver = ver.lstrip("@")
+
+        def step(n, text):
+            if events:
+                events("step", (n, text))
+
+        step(1, "步骤1/3: 停止当前 dsh web")
+        self._log(events, "[部署] 步骤1/3: 停止当前 dsh web", "warn")
+        self.stop_dsh(events)
+        import time as _t
+        _t.sleep(1)
+        step(2, "步骤2/3: 安装 %s@%s" % (pkgmgr.DSH_PKG, ver))
+        self._log(events, "[部署] 步骤2/3: pnpm add -g %s@%s" % (pkgmgr.DSH_PKG, ver), "warn")
+        if not self.stream_cmd(pkgmgr.install_cmd(ver), env=pkgmgr.pnpm_env(), events=events):
+            self._status(events, "部署失败: pnpm add -g")
+            return {"err": "pnpm add -g 失败", "dirty": False, "msg": "", "tag": tag}
+        step(3, "步骤3/3: 重启 dsh web")
+        self._log(events, "[部署] 步骤3/3: 重启 dsh web", "warn")
+        if not self.start_dsh(events):
+            self._log(events, "  [部署] 包已切换, 但 dsh web 启动失败", "err")
+            self._status(events, "部署完成但启动失败")
+            return {"err": "部署完成但启动失败", "dirty": False, "msg": "", "tag": tag}
+        pkgmgr.package_info(force=True)
+        self._log(events, "  [部署] 完成, 全局包已切到 %s" % ver, "ok")
+        self._status(events, "已部署版本 " + ver)
+        return {"err": "", "dirty": False, "msg": "已部署 " + ver, "tag": tag}
 
     # ---------- 通用命令流(流式打日志) ----------
     def stream_cmd(self, cmd, cwd=None, env=None, events=None, timeout_override=None):

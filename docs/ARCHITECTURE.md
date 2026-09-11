@@ -122,6 +122,19 @@ class DshService(QObject):
 | 中转服务器显示名 | `ssh_name`（设置页） | 中转不是 dsh 节点 |
 | `lab_name` | 遗留（固定三机时代） | 已移除设置页入口；动态隧道下由远程节点名取代（代码兜底保留） |
 
+### 3.2 dsh 安装方式（源码 / 全局包）单一判定
+
+dsh 有两条官方安装路径，控制台的启动 / 更新 / 卸载 / 版本必须按**同一判定**分流，禁止各模块各猜一套：
+
+| 模式 | 判定 | 安装 / 更新 / 卸载 / 启动 |
+|---|---|---|
+| `source` | `config.dash_repo` 指向可用源码目录（`package.json` 为 `@deepseek-ai/dsh-root`，或含 `apps/cli` / `pnpm-workspace.yaml`） | `git clone + pnpm install + build` / `git pull + build` / 删源码目录 / `pnpm.cmd dsh web`（cwd=仓库） |
+| `package` | 全局已安装 `@deepseek-ai/dsh`（npm 官方包，`bin=dsh`） | `pnpm add -g @deepseek-ai/dsh[@版本]` / `pnpm update -g @deepseek-ai/dsh` / `pnpm remove -g @deepseek-ai/dsh` / 全局 `dsh web` |
+
+- **唯一判定实现**：`core/pkgmgr.py::detect_mode(cfg)`；显式 `config.dsh_install_mode`（`source`/`package`）优先，其次源码可用则 `source`，再全局包则 `package`，都没有则 `none`。DSH 管理页页头展示检测结果。
+- **pnpm 环境修正**：pnpm（corepack）在全局 bin 目录不在 `PATH` 时会直接报错退出；所有 `pnpm -g` 调用一律带 `core/pkgmgr.py::pnpm_env()`（全局 bin 前置进 `PATH` + 补 `PNPM_HOME`）。`core/env.py::pnpm_env` 仅作为稳定入口委托它，不再自带一份实现。
+- **dsh CLI 无更新/卸载子命令**（`apps/cli/src/args.ts` 只有 `web` / `plugin`），更新/卸载是 pnpm 全局包的职责。
+
 ---
 
 ## 4. 三地网络拓扑与 SSH 鉴权信箱架构

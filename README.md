@@ -64,23 +64,33 @@
 
 ## 一键安装 dsh（全新环境）
 
-在 **DSH 管理** 页的「安装 dsh」卡填写 dsh 的 git 仓库地址（默认官方 deepseek-harness）与目标目录（可浏览选择，留空默认用户主目录/dsh），点「开始安装」即在页面内分步（step in place）执行：
+**DSH 管理** 页「安装 dsh」卡支持两种安装方式，页头会**自动检测**本机当前是哪种模式（源码目录 / 全局包）：
+
+| 安装方式 | 说明 |
+|---|---|
+| **全局包（推荐）** | 官方 npm 包：`pnpm add -g @deepseek-ai/dsh`，免 clone / 免构建，秒级完成；更新用 `pnpm update -g @deepseek-ai/dsh`、卸载用 `pnpm remove -g @deepseek-ai/dsh`；可选指定版本 |
+| **源码克隆** | `git clone + pnpm install + pnpm run build`，可跑本地未发布的 DSH 代码（开发用） |
+
+两种方式都在页面内分步（step in place）执行：
 
 1. **环境预检**：检查 git / node / npm / pnpm 是否可用，缺失会明确提示先装什么
-2. **git clone**：拉取 dsh 源码到目标目录
-3. **pnpm install**：安装依赖
-4. **pnpm run build**：构建
-5. 完成后**自动把目标目录写进 config.json 的 dash_repo**（重启后生效）
+2. 按所选方式安装（全局包：`pnpm add -g`；源码：clone → install → build）
+3. 完成后写 config（全局包写 `dsh_install_mode=package`；源码把目标目录写进 `dash_repo`，重启后生效）
 
-进度条 + 流式日志显示在页内安装卡，安装过程中实时可见每步输出。适合在没有 dsh 的新机器 / 新用户上，从零一键搭好本机 dsh。
+进度条 + 流式日志显示在页内安装卡；全过程另有一份**完整日志文件**，点页头「打开操作日志」随时复查。适合在没有 dsh 的新机器 / 新用户上从零搭好本机 dsh。
 
 同页的「开发环境检查」卡内联展示 git / node / npm / pnpm 的版本与推荐基准，点「更新/安装/卸载」会先说明将执行什么，确认后才执行（环境检查/安装向导已退役模态弹窗，改为页面内分步）。
 
 ## 卸载 dsh
 
-**DSH 管理** 页「卸载 dsh」卡提供两种模式，均先停 web、再删源码目录并清空 config：
+**DSH 管理** 页「卸载 dsh」卡按**当前检测到的安装方式**执行，均先停 web：
 
-- **保留数据卸载**：只删源码（`dash_repo`）并清空 `config.json` 的 dash_repo；`~/.dsh` 数据（对话/会话/工作区/配置）保留
+- **源码模式**：删除 `dash_repo` 源码目录并清空 config（只读 `.git` 有强制删除加固）
+- **全局包模式**：`pnpm remove -g @deepseek-ai/dsh`（无残留，秒级）
+
+两种模式都提供两档：
+
+- **保留数据卸载**：只删源码 / 全局包；`~/.dsh` 数据（对话/会话/工作区/配置）保留
 - **彻底卸载（含数据）**：额外删除 `~/.dsh` 数据目录——会清掉所有对话记录，**二次确认**后才执行
 
 执行前会逐条列出将删除的具体路径；源码/数据目录删除有防误删守卫（绝不删用户主目录）。
@@ -265,17 +275,27 @@ MIT © 2025 JimyuAn
       python dsh-console-aio.py   (requires Python 3 + `pip install PySide6`)
 
 ## One-click dsh install
-On the **DSH Manage** page, the "Install dsh" card takes a git repo URL (default: official deepseek-harness) and target directory (browse or leave blank for `~/dsh`). Click **Start Install** to run the steps **in-page** (step in place) with a progress bar and streaming log:
+The **DSH Manage** page auto-detects which way dsh is installed (source checkout / global package) and shows it in the page header. The "Install dsh" card offers two modes:
+- **Global package (recommended)**: `pnpm add -g @deepseek-ai/dsh` — no clone, no build, seconds to finish; update with `pnpm update -g @deepseek-ai/dsh`, uninstall with `pnpm remove -g @deepseek-ai/dsh`; a specific version can be pinned
+- **Source checkout**: `git clone + pnpm install + pnpm run build` — for running unreleased local DSH code
+
+Both run **in-page** (step in place) with a progress bar and streaming log:
 1. Pre-check environment (git / node / npm / pnpm)
-2. git clone → 3. pnpm install → 4. pnpm run build
-5. Auto-write the target dir into config.json's dash_repo
+2. Install by the selected mode (global package: `pnpm add -g`; source: clone → install → build)
+3. Write config on success (global package: `dsh_install_mode=package`; source: target dir into `dash_repo`)
+
+The full output of every long operation is also saved to a log file — click "Open operation log" in the page header.
 
 ## Environment check
 On the **DSH Manage** page, the "Development environment check" card shows git / node / npm / pnpm versions vs. a recommended baseline, each with Update / Install / Uninstall actions (confirm-before-run). The env check and install wizard are step-in-place cards on the page (the modal EnvDialog / InstallDialog windows are retired).
 
 ## Uninstall dsh
-On the **DSH Manage** page, the "Uninstall dsh" card stops the running web, deletes the source directory (`dash_repo`) and clears `config.json`'s dash_repo, with two modes:
-- **Keep data**: removes the source only; `~/.dsh` (conversations/sessions/workspaces/config) is kept
+On the **DSH Manage** page, the "Uninstall dsh" card follows the **detected install mode** and always stops the web first:
+- **Source mode**: deletes the source directory (`dash_repo`) and clears config (hardened force-delete for read-only `.git`)
+- **Global package mode**: `pnpm remove -g @deepseek-ai/dsh` (clean and fast)
+
+Both modes offer two options:
+- **Keep data**: removes the source / global package only; `~/.dsh` (conversations/sessions/workspaces/config) is kept
 - **Full uninstall (with data)**: additionally deletes `~/.dsh` — irreversible, requires a double confirmation
 
 The exact paths to be deleted are listed before running; delete guards never touch the user home directory.

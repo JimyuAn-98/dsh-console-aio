@@ -49,6 +49,12 @@ class _FakeService:
     def install_dsh(self, *a, **k):
         pass
 
+    def install_dsh_pkg(self, *a, **k):
+        pass
+
+    def detect_dsh_mode(self, *a, **k):
+        pass
+
     def uninstall_dsh(self, *a, **k):
         pass
 
@@ -198,9 +204,30 @@ class TestDshManagePage:
         page = DshManagePage(app)
         qapp_mod.processEvents()
         page._inst_url.setText("")
-        # 直接触发安装应被 URL 校验拦截(_inst_running 仍为 False)
+        # 源码模式才校验仓库地址: 切到源码后直接触发应被拦截(_inst_running 仍为 False)
+        page._inst_mode.setCurrentIndex(page._inst_mode.findData("source"))
         page._start_install()
         assert page._inst_running is False
+        page.close()
+        qapp_mod.processEvents()
+
+    def test_install_pkg_mode_needs_no_url(self, qapp_mod, monkeypatch):
+        # 全局包模式无需仓库地址: 直接走 install_dsh_pkg
+        from ui.pages_dsh import DshManagePage
+        import core.env as _env
+        monkeypatch.setattr(_env, "tool_versions", lambda tools: {})
+        import core.dshctl as _dshctl
+        monkeypatch.setattr(_dshctl, "fetch_dsh_releases",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+        called = []
+        app = self._FakeApp()
+        app.service.install_dsh_pkg = lambda *a, **k: called.append(k)
+        page = DshManagePage(app)
+        qapp_mod.processEvents()
+        page._inst_mode.setCurrentIndex(page._inst_mode.findData("package"))
+        page._inst_url.setText("")
+        page._start_install()
+        assert called and page._inst_running is True
         page.close()
         qapp_mod.processEvents()
 

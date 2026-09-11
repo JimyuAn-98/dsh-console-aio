@@ -10,6 +10,7 @@
 
 ### 最近批次
 
+- ✅ **dsh 双安装模式（源码 / 全局包）+ 自动检测**（2026-09-11，未发版）：新增 `core/pkgmgr.py`（`detect_mode` 判定源码/全局包/未安装 + `pnpm_env` PATH 修正 + 命令拼装）；启动/更新/卸载/版本/部署按模式分流（全局包走 `pnpm add|update|remove -g @deepseek-ai/dsh`，官方 npm 包）；DSH 管理页页头展示「模式: 源码模式（路径，版本）/ 全局包模式（版本）」，安装卡可选安装方式（默认全局包）。规划见 `docs/plans/20260911-全局包安装模式-v1.md`。
 - ✅ **长操作完整输出日志 + 卸载删除加固**（2026-09-11，未发版）：安装/更新/卸载/部署/启停/批量隧道/通用命令全过程落盘 `<临时目录>/dsh-console-ops/<op>-<时间戳>.log`（DSH 管理页「打开操作日志」；落盘前对 `token=`/`Bearer` 脱敏）；`_rmtree_force` 加长路径前缀 + 3 次重试 + `cmd rmdir` 兜底 + 逐行删除日志。单测 `tests/test_core_rmtree_force.py`、`tests/test_service_oplog.py`。
 - ✅ **节点访问规划·阶段 3**（2026-09-11，未发版）：`core/nodeid.py`（节点码）+ `core/runtime.py`（runtime.json 落盘/公网信箱 JSON/Token 三级解析）；捕获即投递，`_sync_push_token` 改用 `node_id`；设置页「本机节点」卡（节点码/重新生成/立即同步）+ 部署页「从公网信箱发现」（绑定/删除条目）。**规划四阶段全部落地。**
 - ✅ **节点访问规划·阶段 2**（2026-09-11，未发版）：`deployments[]` 显式化 `node_key/web_port/tunnel_id/access_port` + 节点添加/编辑对话框；访问端口推导收口 `deployment_access_port`；部署页「编辑节点」「在浏览器打开」；设置页移除遗留 `lab_name`（命名单一来源见 ARCHITECTURE §3.1）。

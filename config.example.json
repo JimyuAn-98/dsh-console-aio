@@ -4,6 +4,7 @@
   "dash_repo": "D:\\Applications\\deepseek-harness",
   "dash_port": 3080,
   "dash_cmd": ["pnpm.cmd", "dsh", "web"],
+  "dsh_install_mode": "",
 
   "poll_seconds": 4,
   "remote_poll_seconds": 20,

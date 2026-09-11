@@ -462,9 +462,19 @@ class DshService(QObject):
         from core.dshctl import fetch_dsh_releases
         self._run_core_op(op, fetch_dsh_releases, force)
 
+    def detect_dsh_mode(self, force=False, op="dsh-mode"):
+        # 检测本机 dsh 安装方式(源码/全局包/未安装) + 版本, 供 DSH 管理页展示与分流。
+        from core import pkgmgr
+        self._run_core_op(op, pkgmgr.detect_mode, self._cfg, force)
+
     def install_dsh(self, url, target, version="", op="dsh-install"):
         from core import env as _env
         self._run_result_op(op, _env.install_dsh, url, target, version, log_full=True)
+
+    def install_dsh_pkg(self, version="", op="dsh-install-pkg"):
+        # 官方全局包安装: pnpm add -g @deepseek-ai/dsh[@版本]。
+        from core import env as _env
+        self._run_result_op(op, _env.install_dsh_pkg, version, log_full=True)
 
     def uninstall_dsh(self, keep_data=True, op="dsh-uninstall"):
         from core import env as _env
