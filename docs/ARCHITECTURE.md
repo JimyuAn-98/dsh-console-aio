@@ -95,7 +95,7 @@ class DshService(QObject):
 | **隧道方案规划** | `tunnel_planner.py` | `pages_tunnels.py` (规划器卡片) | 整套动态拓扑快照保存/切换，本地/远端端口冲突检测 |
 | **本机 dsh 操控** | `dshctl.py` | `pages_dsh.py` (DSH 管理) | 启停进程、启动日志流式观测与报错捕获、一键更新 (git pull + clean + build)、GitHub Releases 版本发布日志查看、部署指定版本 (切换/固定/回退，config.dsh_version_pin) |
 | **环境与安装** | `env.py` | `pages_dsh.py` (页面内分步) | 工具链检查 (git/node/npm/pnpm)、一键全新安装、彻底卸载守卫 |
-| **总览概览** | `data.py` + `diagnostics.py` | `pages_overview.py` | 运行状态卡 + 数据域指标速览 + 部署列表 |
+| **总览概览** | `data.py` + `diagnostics.py` | `pages_overview.py` | 运行状态卡 + 数据域指标速览 + 节点列表（本机/远程：经隧道探活 + 免密链接复制/浏览器打开） |
 | **会话与工作区** | `sessions.py` | `pages_sessions.py` | 会话分组、归档、恢复、彻底删除；**远程部署只读** |
 | **插件管理** | `plugins.py` | `pages_plugins.py` | cordis.yml 语法解析、patch 层启停、官方 CLI 安装/卸载/单个与批量更新；**远程只读** |
 | **Profile 管理** | `profiles.py` | `pages_profiles.py` | profile 列出、复制、删除 (web 主配置保护)；**远程只读** |

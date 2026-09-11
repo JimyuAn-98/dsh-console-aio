@@ -1208,6 +1208,8 @@ def collect_overview_data(cfg, depls, smoke=False):
         "local": True,
         "token": local_tok,
         "auth_url": local_auth_url,
+        "web_ok": bool(payload.get("web_ok")),
+        "web_ms": payload.get("web_ms"),
     })
 
     # 远程节点 (若配置了公网 SSH 则尝试拉取信箱 Token)
@@ -1234,12 +1236,24 @@ def collect_overview_data(cfg, depls, smoke=False):
             dport = cfg.get("forward_ports")[0]
         if not dport:
             dport = cfg.get("lab_port") or 3080
+        # 经隧道/直连的本机访问端口探活: 远程节点"在线"以此为准(SSH 快照只作详情)
+        r_ok, r_ms = False, -1
+        if not smoke:
+            try:
+                t0 = time.time()
+                with socket.create_connection(("127.0.0.1", int(dport)), timeout=0.8):
+                    r_ok = True
+                    r_ms = int((time.time() - t0) * 1000)
+            except (OSError, TypeError, ValueError):
+                r_ok, r_ms = False, -1
         payload["deploys"].append({
             "dep": d,
             "snap": snap_for(d, False),
             "local": False,
             "token": rtok,
             "auth_url": ("http://127.0.0.1:%s/?token=%s" % (dport, rtok)) if rtok else ("http://127.0.0.1:%s" % dport),
+            "web_ok": r_ok,
+            "web_ms": r_ms,
         })
 
     # 数据速览

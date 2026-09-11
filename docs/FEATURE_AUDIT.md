@@ -57,6 +57,13 @@
 - D5 force 绕过 busy → 改为 `if self._busy: return`（force 仅绕缓存，不绕防重入）；总览「刷新」按钮读取中置灰。
   同一模式在 `ui/pages_plugins.py` 一并加严。
 
+**节点访问规划·阶段 1（2026-09-11）：**
+
+- 删除总览底部「隧道状态」卡（与右栏重复；其 `probe/remote_probe` 数据源在 `collect_overview_data` 中从未赋值，实为死卡）；
+- 「部署」区改名「节点」、标题改「节点总览」；
+- 远程节点在线改为"经隧道/直连访问端口探活"（`collect_overview_data` 写 `web_ok/web_ms`，`--smoke` 跳过）；
+- 新增「在浏览器打开」。阶段 2/3（配置显式化、节点码/信箱/发现）见 `docs/plans/20260911-节点访问规划-v1.md`。
+
 **转为跨页技术债：**
 
 - 7 个数据页（overview/agents/profiles/sessions/plugins/taskboard/usage）各自复制同一段缓存编排

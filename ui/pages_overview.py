@@ -2,16 +2,18 @@
 # ui/pages_overview.py - 部署总览页: 运行状态卡 + 数据速览 + 部署列表 + 隧道速览。
 # 数据经 service 信号桥调度回主线程; 接入 core/cache 缓存, 进页秒开+按需刷新。
 
+import os
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton)
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPushButton, QMessageBox)
 
 from core import data as dsh_data
 from core import config as dsh_config
 from ui.base import BasePage
 from ui.cacheable import CacheableMixin
 from ui.theme import TOKENS
-from ui.widgets import ModernList, RefreshIndicator, card_wrap
+from ui.widgets import ModernList, RefreshIndicator
 
 
 def _ov_size(n):
@@ -47,7 +49,7 @@ class OverviewPage(CacheableMixin, BasePage):
 
         head = QHBoxLayout()
         head.setSpacing(8)
-        head.addWidget(QLabel("部署总览", objectName="cardTitle"))
+        head.addWidget(QLabel("节点总览", objectName="cardTitle"))
         self._spinner = RefreshIndicator()
         self._spinner.setToolTip("刷新状态: 绿=无变化 / 黄=数据有变化 / 红=获取错误")
         head.addWidget(self._spinner)
@@ -58,7 +60,7 @@ class OverviewPage(CacheableMixin, BasePage):
         self._btn_refresh.clicked.connect(lambda: self.refresh(force=True))
         head.addWidget(self._btn_refresh)
         root.addLayout(head)
-        root.addWidget(QLabel("本机与远程部署的实时状态、数据速览与隧道探测(纯读获取, 进页自动取缓存)。",
+        root.addWidget(QLabel("本机与远程节点的实时状态、数据速览与访问链接(纯读获取, 进页自动取缓存)。",
                               objectName="cardHint"))
 
         # 运行状态卡: dsh web 探测 + 本体版本 + 鉴权链接与捕获状态
@@ -106,7 +108,7 @@ class OverviewPage(CacheableMixin, BasePage):
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(6)
         dh = QHBoxLayout()
-        dh.addWidget(QLabel("部署", objectName="rightTitle"))
+        dh.addWidget(QLabel("节点", objectName="rightTitle"))
         dh.addSpacing(10)
         self._dep_auth_lbl = QLabel("", objectName="monName")
         self._dep_auth_lbl.setTextFormat(Qt.RichText)
@@ -118,18 +120,17 @@ class OverviewPage(CacheableMixin, BasePage):
         self._copy_link_btn.setEnabled(False)
         self._copy_link_btn.clicked.connect(self._copy_selected_auth_url)
         dh.addWidget(self._copy_link_btn)
+        self._open_link_btn = QPushButton("在浏览器打开")
+        self._open_link_btn.setToolTip("用系统默认浏览器打开选中节点的免密访问链接")
+        self._open_link_btn.setEnabled(False)
+        self._open_link_btn.clicked.connect(self._open_selected_auth_url)
+        dh.addWidget(self._open_link_btn)
         dv.addLayout(dh)
         self._dep_list = ModernList()
         self._dep_list.itemSelectionChanged.connect(self._on_dep_select)
         self._dep_list.itemClicked.connect(lambda _: self._on_dep_select())
         dv.addWidget(self._dep_list, 1)
         root.addWidget(dep_card, 1)
-
-        # 隧道速览(富文本圆点, 与右栏监控同口径)
-        self._tunnel_lbl = QLabel("", objectName="monName")
-        self._tunnel_lbl.setTextFormat(Qt.RichText)
-        self._tunnel_lbl.setWordWrap(True)
-        root.addWidget(card_wrap("隧道状态", self._tunnel_lbl))
 
     def _selected_item_data(self):
         row = self._dep_list.current_data()
@@ -139,6 +140,7 @@ class OverviewPage(CacheableMixin, BasePage):
         item = self._selected_item_data()
         if not item:
             self._copy_link_btn.setEnabled(False)
+            self._open_link_btn.setEnabled(False)
             self._dep_auth_lbl.setText("")
             return
         url = item.get("auth_url") or ""
@@ -146,7 +148,12 @@ class OverviewPage(CacheableMixin, BasePage):
         name = item.get("dep", {}).get("name") or "节点"
         snap = item.get("snap") or {}
         is_local = bool(item.get("local"))
-        is_online = (getattr(self, "_last_payload", {}).get("web_ok") if is_local else snap.get("ok"))
+        if is_local:
+            is_online = bool(getattr(self, "_last_payload", {}).get("web_ok"))
+        else:
+            # 远程节点在线以"经隧道/直连的本机访问端口探活"为准; SSH 快照只作详情
+            is_online = (bool(item.get("web_ok")) if item.get("web_ok") is not None
+                         else bool(snap.get("ok")))
         if is_online:
             if tok:
                 self._dep_auth_lbl.setText(
@@ -159,11 +166,13 @@ class OverviewPage(CacheableMixin, BasePage):
                     '<span style="color:%s; font-family:Consolas,monospace;">%s (信箱未同步Token)</span>'
                     % (_c("dim"), name, _c("warn"), url))
             self._copy_link_btn.setEnabled(bool(url))
+            self._open_link_btn.setEnabled(bool(url))
         else:
             self._dep_auth_lbl.setText(
                 '<span style="color:%s">「%s」: </span>'
                 '<span style="color:%s;">离线 / 未配置</span>' % (_c("dim"), name, _c("err")))
             self._copy_link_btn.setEnabled(False)
+            self._open_link_btn.setEnabled(False)
 
     def _copy_selected_auth_url(self):
         item = self._selected_item_data()
@@ -176,6 +185,23 @@ class OverviewPage(CacheableMixin, BasePage):
             QApplication.clipboard().setText(url)
             self._set_status("已复制「%s」免密访问链接" % name)
             self.app.loge("已复制「%s」免密访问链接至剪贴板: %s" % (name, url), "ok")
+
+    def _open_selected_auth_url(self):
+        # 用系统默认浏览器打开选中节点的免密访问链接(本机/远程同源)
+        item = self._selected_item_data()
+        if not item:
+            return
+        url = item.get("auth_url") or ""
+        name = item.get("dep", {}).get("name") or "节点"
+        if not url:
+            self._set_status("该节点没有可打开的链接")
+            return
+        try:
+            os.startfile(url)
+            self._set_status("已在浏览器打开「%s」" % name)
+            self.app.loge("已打开「%s」免密访问链接: %s" % (name, url), "ok")
+        except Exception as e:
+            QMessageBox.critical(self, "无法打开", str(e))
 
     # ── 缓存编排钩子(见 ui/cacheable.py); refresh() 由 mixin 提供 ──
     def _cache_kind(self):
@@ -288,7 +314,11 @@ class OverviewPage(CacheableMixin, BasePage):
                                           _ov_size(snap.get("session_bytes"))))
             tok = item.get("token")
             is_local = bool(item.get("local"))
-            is_online = (p.get("web_ok") if is_local else snap.get("ok"))
+            if is_local:
+                is_online = bool(p.get("web_ok"))
+            else:
+                is_online = (bool(item.get("web_ok")) if item.get("web_ok") is not None
+                             else bool(snap.get("ok")))
             if is_online:
                 dot = _c("ok")
                 badges = [("在线", "ok")]
@@ -336,27 +366,6 @@ class OverviewPage(CacheableMixin, BasePage):
             "%d bundles · %d profile\n%d 预设" % (local_snap.get("plugins") or 0,
                                                   local_snap.get("profiles") or 0,
                                                   local_snap.get("presets") or 0))
-
-        # 隧道速览(圆点富文本, 与右栏监控同口径)
-        def dot(ok):
-            return '<span style="color:%s">●</span>' % (_c("ok") if ok else _c("err"))
-
-        segs = []
-        for port, label, note in p.get("local_ports") or []:
-            segs.append("%s:%s %s" % (label, port, dot(p.get("probe", {}).get(("L", int(port))))))
-        ltext = "  ".join(segs) if segs else "（未配置本机监测端口）"
-        r = p.get("remote_probe")
-        if r is None:
-            rtext = '<span style="color:%s">公网侧未探测(未配置或中转不可达)</span>' % _c("dim")
-        else:
-            rsegs = ["%s:%s %s" % (label, port, dot(bool(r.get(int(port)))))
-                     for port, label, note in p.get("remote_tunnels") or []]
-            rtext = "  ".join(rsegs) if rsegs else "（未配置反向隧道）"
-        self._tunnel_lbl.setText(
-            '<span style="color:%s">%s端口</span> %s<br>'
-            '<span style="color:%s">%s反向隧道</span> %s'
-            % (_c("dim"), p.get("local_name"), ltext,
-               _c("dim"), p.get("ssh_name"), rtext))
 
         self._set_status("总览已刷新(数据为只读快照)")
 
