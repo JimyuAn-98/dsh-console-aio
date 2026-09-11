@@ -53,3 +53,11 @@
 - **决策**：包模式改用 **npm 全局**——`npm install -g @deepseek-ai/dsh[@版本]` / `npm install -g @deepseek-ai/dsh@latest` / `npm uninstall -g @deepseek-ai/dsh`，启动用 `npm prefix -g` 下的 `dsh.cmd web`。理由：与 npx 同源的扁平布局能解析插件，同时保留控制台「安装/更新/卸载」的明确状态；**不用 npx** 是因为它每次启动都要解析 registry、可能重新下载（用户实测「巨慢」）。
 - **实现**：`core/pkgmgr.py` 新增 `npm_global_prefix()`（`npm prefix -g`，60s 缓存）、`global_bin_dir()`（Windows = npm 前缀）、`npm_env()`；`_deps()` 改 `npm ls -g --depth=0 --json`；`package_info()` 错误文案改 npm；命令 `install_cmd/update_cmd/remove_cmd` 改 npm；`start_cmd` 用 npm 前缀下 `dsh.cmd`。`pnpm_env()` 降级为「环境检查卡的 pnpm 工具命令」专用，仍保留 BUG-013 的「不设置 PNPM_HOME」红线。
 - **未采用**：npx（启动慢/每次解析 registry、安装-卸载语义被架空）；pnpm + `node-linker=hoisted`（全局虚拟仓库能否治未经验证）。
+
+## 补充三（2026-09-12）：操作后自动热重载配置（BUG-018）
+
+用户实测：安装 dsh 后必须去设置页点一次「保存」，「DSH 管理」的后续功能（更新、部署、模式徽章）才生效；更新按钮与版本卡「部署此版本」都误走源码分支，后者还提示「仓库不存在」。
+
+- **根因**：`DshService` 持有构造时的派生配置 `_cfg`，只有 `MainWindow.reload_config()`（设置页保存、隧道页操作）会刷新它。`ui/pages_dsh` 的安装/卸载/部署/更新成功回调都没调用，于是 `detect_mode(self.d)`、`update_dsh`、`deploy_dsh_version` 全部读**旧配置**——刚写盘的 `dash_repo`/`dsh_install_mode` 不可见。
+- **修复**：新增 `DshManagePage._reload_app_config()`（包一层 `app.reload_config()`，失败只告警），在安装/卸载/部署/更新成功后调用，并在其后重新 `_detect_mode()`。注意这**不是**「自动保存设置」——安装流程本来就已经 `save_config()` 落盘，缺的是**热重载**。
+- **顺带**：更新与「部署此版本」的确认文案改为**随模式**（包模式：`npm install -g @deepseek-ai/dsh@版本`；源码模式：git/构建步骤），此前写死为源码步骤，进一步加深了「更新固定走源码」的错觉。

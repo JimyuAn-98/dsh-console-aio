@@ -139,7 +139,10 @@ class DshManagePage(BasePage):
         if op == "update-dsh":
             self._update_running = False
             self._update_btn.setEnabled(True)
-            if not ok:
+            if ok:
+                self._reload_app_config()   # 更新成功可能清除了版本固定
+                self._detect_mode()
+            else:
                 self._update_step_lbl.setText("更新失败(详见日志)")
         elif op == "dsh-deploy-version":
             self._deploy_running = False
@@ -201,6 +204,18 @@ class DshManagePage(BasePage):
             os.startfile(path)   # 交给系统默认程序(记事本)打开
         except OSError as e:
             self.app.loge("[日志] 打开失败: %s" % e, "err")
+
+    def _reload_app_config(self):
+        # 安装/卸载/部署/更新都会改 config.json(dash_repo / dsh_install_mode / 版本固定),
+        # 必须热重载, 否则 service 的派生配置与模式判定仍是旧值(此前只能手动去设置页点保存)。
+        fn = getattr(self.app, "reload_config", None)
+        if fn is None:
+            return
+        try:
+            fn()
+        except Exception as e:
+            # 重载失败不能影响安装/卸载结果展示: 记一条告警, 设置页保存时会再试
+            self.app.loge("[配置] 重载失败: %s" % e, "warn")
 
     # ── 当前安装方式检测(源码模式 / 全局包模式) ──
     def _detect_mode(self):
@@ -320,6 +335,7 @@ class DshManagePage(BasePage):
 
     def _run_update(self):
         pinned = str(self._pin or "")
+        pkg_mode = (self._mode_info or {}).get("mode") == "package"
 
         def start(to_main):
             def run():
@@ -328,10 +344,24 @@ class DshManagePage(BasePage):
                 self._update_bar.setValue(0)
                 self._update_step_lbl.setText("正在更新…")
                 self.app.loge("[update-dsh] 开始完整更新...", "warn")
-                self.app.set_status("正在运行更新(构建较久, 请耐心)...")
+                self.app.set_status("正在更新 npm 全局包..." if pkg_mode
+                                    else "正在运行更新(构建较久, 请耐心)...")
                 self.app.service.update_dsh(to_main=to_main)
             return run
 
+        if pkg_mode:
+            # 包模式: 只更新 npm 全局包(不碰 git/构建), 文案必须与实际执行一致
+            self._confirm_update.ask(
+                "更新 dsh 本体（npm 全局包）",
+                "将对本机 dsh（npm 全局包）执行更新：<br>"
+                "1. 停止当前 dsh web<br>"
+                "2. npm install -g @deepseek-ai/dsh@latest<br>"
+                "3. 重启 dsh web",
+                start(False),
+                level="warn",
+                confirm_text="确认开始更新"
+            )
+            return
         if pinned:
             self._confirm_update.ask(
                 "更新 dsh 本体（当前固定版本）",
@@ -607,9 +637,8 @@ class DshManagePage(BasePage):
             self._inst_step_lbl.setText("完成")
             self.app.loge("[安装] " + msg, "ok")
             self.app.set_status("安装完成，dsh 已就绪")
-            # 安装成功: 刷新部署列表(新仓库可被部署联动) + 重新检测安装方式
-            if hasattr(self.app, "_refresh_deploy_list"):
-                self.app._refresh_deploy_list()
+            # 安装成功: 热重载配置(写入了 dash_repo / dsh_install_mode) -> 再重新检测模式
+            self._reload_app_config()
             self._detect_mode()
             QMessageBox.information(self, "安装完成", msg)
         else:
@@ -710,8 +739,9 @@ class DshManagePage(BasePage):
             self._uninst_step_lbl.setText("完成")
             self.app.loge("[卸载] " + msg, "ok")
             self.app.set_status("本机 dsh 已卸载")
-            self.app._refresh_deploy_list()
-            QMessageBox.information(self, "卸载完成", msg + "\n\n重启控制台后侧栏部署将不再包含本机。")
+            self._reload_app_config()
+            self._detect_mode()
+            QMessageBox.information(self, "卸载完成", msg)
         else:
             self._uninst_step_lbl.setText("卸载失败")
             self.app.loge("[卸载] 失败: " + msg, "err")
@@ -861,6 +891,19 @@ class DshManagePage(BasePage):
                 older = idx > versions.index(self._local_ver)
         warn = ("<br><br>⚠️ 这是比当前本机版本更旧的版本，可能与 ~/.dsh 数据不兼容；"
                 "建议先到「备份与凭据」页备份。") if older else ""
+        if (self._mode_info or {}).get("mode") == "package":
+            # 包模式: 只从 npm 装指定版本并重启, 不碰 git/构建
+            self._confirm_deploy.ask(
+                "部署版本 " + ver,
+                "将把本机 dsh（npm 全局包）切换到 <b>%s</b>：<br>"
+                "1. 停止当前 dsh web<br>"
+                "2. npm install -g @deepseek-ai/dsh@%s<br>"
+                "3. 重启 dsh web%s" % (ver, ver, warn),
+                lambda: self._do_deploy(tag),
+                level="warn",
+                confirm_text="确认部署"
+            )
+            return
         self._confirm_deploy.ask(
             "部署版本 " + ver,
             "将把本机 dsh 切换到 <b>%s</b>：<br>"
@@ -908,7 +951,8 @@ class DshManagePage(BasePage):
         self._deploy_step_lbl.setText("部署完成")
         self.app.loge("[部署] " + str(payload.get("msg") or "完成"), "ok")
         self.app.set_status("dsh 版本部署完成")
-        self._fetch_releases()   # 刷新本机版本与固定状态
+        self._reload_app_config()   # 版本固定等配置可能已变
+        self._fetch_releases()      # 刷新本机版本与固定状态
 
     # ── 卡片状态(service.card 信号槽, 主线程) ──
     def _apply_card(self, key, on):
