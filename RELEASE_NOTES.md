@@ -15,7 +15,7 @@
 - **长操作完整输出落盘**（`app/services.py`）：安装/更新/卸载/部署/启停/批量隧道/通用命令等长操作，全过程逐行写入 `<临时目录>/dsh-console-ops/<op>-<时间戳>.log`（`_begin_op` 建文件并写头、`_op_log_write` 逐行 flush、收尾关闭）；页面日志控件有行数上限，该文件保留完整输出，主日志会打印「[日志] 完整输出: <路径>」。
 - **落盘前脱敏**（`_redact_secrets`）：操作日志抹掉 `token=...` / `Bearer ...`，控制台内存显示保持原样 —— 守住「Token 绝不写入日志」红线，同时不影响「鉴权链接」功能。
 - **DSH 管理页「打开操作日志」**（`ui/pages_dsh.py`）：页头按钮用系统默认程序打开最近一次长操作日志；无日志时页内中文提示。
-- **卸载删除加固 + 逐行日志**（`core/env.py::_rmtree_force`）：清只读位 → Windows `\\?\` 长路径前缀 → 带兜底回调 rmtree → 3 次重试（0.4s 间隔）→ `cmd rmdir /s /q` 兜底；删除全程逐行中文日志（开始/无法删除项/重试/完成），仍未删净则以带路径的 OSError 收场。
+- **卸载删除加固 + 逐行日志**（`core/env.py::_rmtree_force`）：清只读位 → Windows `\\?\` 长路径前缀 → 带兜底回调 rmtree → 3 次重试（0.4s 间隔）→ `cmd rmdir /s /q` 兜底；此前“先全树 os.walk 清只读再 rmtree”的写法在大目录（pnpm node_modules）上会走两遍全树，慢到像卡死。二次加固（2026-09-11）改为：先原生 `cmd rmdir /s /q` 快删（junction 只删链接）→ Python 迭代式后序精修残留（就地清只读、跳过 junction 防环、每 2000 项进度日志）→ 残留清单 + 带路径 OSError。
 - 测试：`tests/test_core_rmtree_force.py`、`tests/test_service_oplog.py`（含 Token 脱敏断言）；并修正 3 个过期/竞态用例（`update_dsh` 替身补 `to_main` 形参、数据目录守卫用例改为打桩 `_rmtree_force`、启停用例以 `finished` 为同步点）。
 ### DSH 管理页：版本发布日志查看（2026-09-10）
 

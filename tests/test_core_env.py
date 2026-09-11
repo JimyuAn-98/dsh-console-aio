@@ -240,9 +240,10 @@ class TestUninstallDsh:
         repo, data = self._fake_repo(tmp_path)
         self._patch(monkeypatch, tmp_path, repo, data)
 
-        def boom(p):
+        # 删除失败路径: 打桩 _rmtree_force 抛错(删除加固本身的用例见 test_core_rmtree_force.py)
+        def boom(p, log=None):
             raise OSError("access denied")
-        monkeypatch.setattr(env_mod.shutil, "rmtree", lambda p: boom(p))
+        monkeypatch.setattr(env_mod, "_rmtree_force", boom)
         r = env_mod.uninstall_dsh(None, keep_data=True)
         assert "删除源码目录失败" in r["err"] and r["removed_repo"] is False
 

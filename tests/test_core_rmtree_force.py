@@ -31,3 +31,22 @@ class TestRmtreeForce:
         lines = []
         _rmtree_force(str(tmp_path / 'nope'), log=lines.append)
         assert lines and '跳过' in lines[0]
+
+    def test_deletes_junction_without_following(self, tmp_path):
+        # junction 指向源目录本身(成环): 只删链接本身, 绝不递归进目标
+        import subprocess
+        if os.name != 'nt':
+            import pytest
+            pytest.skip('junction 仅 Windows')
+        src = tmp_path / 'src'
+        src.mkdir()
+        (src / 'a.txt').write_text('x', encoding='utf-8')
+        link = src / 'loop'
+        r = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(src)],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            import pytest
+            pytest.skip('无法创建 junction')
+        assert os.path.isdir(str(link))
+        _rmtree_force(str(src))
+        assert not src.exists()

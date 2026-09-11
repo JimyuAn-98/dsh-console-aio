@@ -33,3 +33,16 @@
 
 - BUG-011 的最终确认仍需实机复测（用户在家）。
 - 安装输出同时出现在页内与主控制台，去重仍待议（用户已提，本次未动）。
+
+## 补充（2026-09-11）：删除改为「原生快删 + Python 精修」
+
+实机复测 BUG-011：日志停在 `[删除] 开始: C:\Users\JimyuAn\dsh` 之后长时间无输出，表现为卡死。
+
+- **根因**：原实现先做一遍全树 `os.walk` 清只读位，再让 `shutil.rmtree` 走一遍全树，失败还要重试——大目录（pnpm `node_modules` 常有数十万条目）等于两到三遍 Python 级全树遍历，慢到像挂起，且中途没有任何日志。
+- **本机复现**：3002 项 + 只读 `.git/objects` + junction 成环的目录，旧写法耗时明显；junction 本身在 Python 3.12+ 的 `os.walk` 已不会跟随（不会成环挂死），但目录体量才是主因。
+- **改法**：
+  1. 先跑原生 `cmd rmdir /s /q`（一次性删掉绝大多数条目，junction 只删链接本身；只读文件会被跳过）；
+  2. 再 `_purge` 迭代式后序遍历精修残留：就地 `chmod` 清只读，遇到 junction/符号链接只用 `os.rmdir`/`os.remove` 删链接（绝不递归进目标，防环），每 2000 项打一条 `[删除] 已清理 N 项...` 进度日志；
+  3. 仍删不净则列出残留文件清单与前 10 条失败原因，再抛带路径的 `OSError`。
+- **效果**：同一测试树（3002 项 + 只读 + junction 环）**0.2s 删净**，全程 7 行日志可见进度。
+- 测试：新增 junction 成环用例；`test_core_env.py::test_rmtree_failure_returns_error` 改为打桩 `_rmtree_force`（删除加固本身由 `test_core_rmtree_force.py` 覆盖）。

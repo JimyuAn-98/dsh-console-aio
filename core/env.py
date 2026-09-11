@@ -14,7 +14,6 @@
 import os
 import shutil
 import subprocess
-import sys
 
 from core import config as dsh_config
 from core.dshctl import DshCtl
@@ -23,9 +22,12 @@ CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
 
 
 def _rmtree_force(path, log=None):
-    # Windows 递归删除加固 + 全程日志: 只读文件/目录(.git/objects) + 长路径(>260) + 短暂占用句柄。
-    # 流程: 清只读位 -> 带兜底回调的 rmtree(长路径前缀) -> 重试 -> cmd rmdir 兜底;
-    # 仍未删净则抛 OSError(带路径)。log: 可选单参回调(逐行中文输出, 交调用方透传到控制台/操作日志)。
+    # Windows 递归删除加固 + 全程日志。顺序:
+    #   1) 原生 cmd rmdir /s /q 快删(大树/junction 最快; 只读文件会被跳过);
+    #   2) Python 精修残留: 迭代式后序, 就地清只读, junction/符号链接只删链接(防环),
+    #      每 2000 项打一条进度日志(避免"看着像卡死");
+    #   3) 存在性检查, 仍未删净则列出残留路径并抛 OSError(带路径)。
+    # log: 可选单参回调(逐行中文输出, 交调用方透传到控制台/操作日志)。
     import stat as _stat
     import time as _t
 
@@ -37,6 +39,7 @@ def _rmtree_force(path, log=None):
         _log("[删除] 路径不存在, 跳过: " + path)
         return
     _log("[删除] 开始: " + path)
+    t0 = _t.time()
 
     failed = []
 
@@ -46,34 +49,65 @@ def _rmtree_force(path, log=None):
         except OSError:
             pass
 
-    def _walk_clear(root):
-        # onerror 吞掉个别不可遍历子目录, 由末尾存在性检查统一报错
-        for base, dirs, files in os.walk(root, topdown=False, onerror=lambda _e: None):
-            for name in files:
-                _clear(os.path.join(base, name))
-            for name in dirs:
-                _clear(os.path.join(base, name))
+    def _is_reparse(st):
+        # junction/符号链接等重解析点: 只能删链接本身, 绝不能递归进目标(否则可能成环/误删)
+        attr = getattr(st, "st_file_attributes", 0)
+        return bool(attr & getattr(_stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
 
-    def _onerror(func, node, exc):
-        _clear(node)
-        try:
-            func(node)
-        except OSError as e:
-            if len(failed) < 8:
-                failed.append(node)
-                _log("[删除] 无法删除: %s (%s)" % (node, e))
+    def _rm_leaf(p):
+        # 叶子(文件 / junction / 符号链接): 先直删, 失败清只读再试; 文件用 remove, 目录链接用 rmdir。
+        for fn in (os.remove, os.rmdir):
+            try:
+                fn(p)
+                return True
+            except OSError:
+                continue
+        _clear(p)
+        for fn in (os.remove, os.rmdir):
+            try:
+                fn(p)
+                return True
+            except OSError:
+                continue
+        return False
 
-    def _attempt(target):
-        try:
-            _walk_clear(target)
-        except OSError as e:
-            _log("[删除] 遍历清理告警: %s" % e)
-        kwargs = ({"onexc": _onerror} if sys.version_info >= (3, 12)
-                  else {"onerror": _onerror})
-        try:
-            shutil.rmtree(target, **kwargs)
-        except OSError as e:
-            _log("[删除] rmtree 告警: %s" % e)
+    def _purge(root):
+        # 显式后序遍历(不递归进 junction): 每个条目只访问一次; 每 2000 项打进度日志。
+        count = 0
+        stack = [(root, False)]
+        while stack:
+            cur, expanded = stack.pop()
+            if expanded:
+                _clear(cur)
+                try:
+                    os.rmdir(cur)
+                except OSError as e:
+                    if os.path.exists(cur) and len(failed) < 20:
+                        failed.append((cur, str(e)))
+                continue
+            try:
+                entries = list(os.scandir(cur))
+            except OSError as e:
+                _log("[删除] 无法列出: %s (%s)" % (cur, e))
+                continue
+            stack.append((cur, True))
+            for ent in entries:
+                p = ent.path
+                try:
+                    st = ent.stat(follow_symlinks=False)
+                    is_dir = ent.is_dir(follow_symlinks=False)
+                    is_link = ent.is_symlink() or _is_reparse(st)
+                except OSError:
+                    is_dir, is_link = False, False
+                if is_dir and not is_link:
+                    stack.append((p, False))
+                    continue
+                if not _rm_leaf(p) and len(failed) < 20:
+                    failed.append((p, "删除失败(占用/权限?)"))
+                count += 1
+                if count % 2000 == 0:
+                    _log("[删除] 已清理 %d 项..." % count)
+        return count
 
     sep = os.sep
     target = path
@@ -86,27 +120,46 @@ def _rmtree_force(path, log=None):
                 ap = sep + sep + "?" + sep + ap
         target = ap
 
-    for attempt in range(1, 4):
-        if not os.path.exists(path):
-            break
-        _attempt(target)
-        if os.path.exists(path) and attempt < 3:
-            _log("[删除] 第 %d 次未清空, 0.4s 后重试..." % attempt)
-            _t.sleep(0.4)
-
-    if os.path.exists(path) and os.name == "nt":
-        _log("[删除] 尝试 cmd rmdir /s /q 兜底...")
+    # 1) 原生快删: 一次性删掉绝大多数条目(junction 只删链接), 只读文件会被跳过留给精修。
+    if os.name == "nt":
+        _log("[删除] 快速清理(cmd rmdir /s /q)...")
         try:
             subprocess.run(["cmd", "/c", 'rmdir /s /q "%s"' % path],
-                           capture_output=True, text=True, errors="replace",
-                           timeout=180, creationflags=CREATE_NO_WINDOW)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=900, creationflags=CREATE_NO_WINDOW)
+        except subprocess.TimeoutExpired:
+            _log("[删除] cmd rmdir 超时(900s), 转 Python 精修")
         except Exception as e:
             _log("[删除] cmd rmdir 异常: %s" % e)
+        _log("[删除] 快速清理结束(累计 %.1fs)" % (_t.time() - t0))
 
+    # 2) Python 精修残留(只读 / junction / 长路径)
     if os.path.exists(path):
-        _log("[删除] 失败: 仍有残留(前几项已列出) " + path)
+        _log("[删除] 精修残留(清只读 / 跳过 junction)...")
+        try:
+            n = _purge(target)
+            _log("[删除] 精修完成, 处理 %d 项(累计 %.1fs)" % (n, _t.time() - t0))
+        except Exception as e:
+            _log("[删除] 精修异常: %s" % e)
+
+    # 3) 收尾判定: 列出残留清单, 让失败可见
+    if os.path.exists(path):
+        leftovers = []
+        try:
+            for base, _dirs, files in os.walk(target, onerror=lambda _e: None):
+                for f in files:
+                    leftovers.append(os.path.join(base, f))
+                if len(leftovers) >= 10:
+                    break
+        except Exception:
+            pass
+        for p in leftovers[:10]:
+            _log("[删除] 残留: " + p)
+        for p, why in failed[:10]:
+            _log("[删除] 无法删除: %s (%s)" % (p, why))
+        _log("[删除] 失败: 仍有残留 " + path)
         raise OSError("部分文件无法删除(可能被占用或权限不足): " + path)
-    _log("[删除] 完成: " + path)
+    _log("[删除] 完成: %s (耗时 %.1fs)" % (path, _t.time() - t0))
 
 
 def get_version(cmd, timeout=8):
