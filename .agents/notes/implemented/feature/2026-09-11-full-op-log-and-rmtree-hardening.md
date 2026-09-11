@@ -65,3 +65,12 @@
 - **改进一（失败摘要）**：`stream_cmd` 边流式输出边收集错误行（`error`/`npm error`/`err!`/`ETARGET`/`notarget`），命令非 0 退出时先打 `[失败摘要]`（末 5 条），再打 `[stream] 命令失败`；命中 `ETARGET`/`notarget` 时追加中文提示「镜像未同步或版本未发布，可稍后重试或指定版本」。
 - **改进二（中性 cwd）**：`pkgmgr.npm_cwd()` 返回用户主目录，`install_dsh_pkg`/`_uninstall_dsh_pkg`/`update_dsh_pkg`/`_deploy_pkg_version` 四处全局 npm 调用都显式传它，不再继承控制台启动目录。
 - 测试：`tests/test_core.py::TestStreamCmdHeartbeat::test_failure_summary_and_registry_hint`。
+
+## 补充四（2026-09-12）：`--prefer-offline` 反噬——更新报 ETARGET（BUG-020）
+
+BUG-017 为提速给 npm 命令加了 `--prefer-offline`，随后用户更新 dsh 连续两次报：
+`ETARGET No matching version found for @deepseek-ai/dsh-tool-subagent-report@^0.1.0-rc.8`。
+
+- 初步误判为「镜像未同步的瞬时状态」（本机 `--dry-run` 当时确实能解析）。用户重试仍失败后复核：该版本 **2026-08-19 就已发布**，官方 registry 与 npmmirror 都有；本机加 `--prefer-online` 可解析 518 包。
+- **根因**：`--prefer-offline` 会**跳过缓存数据的新鲜度校验**，npm 直接复用本机过期的 packument，于是已发布版本被判为不存在。
+- **修复**：`pkgmgr._NPM_FLAGS` 由 `--prefer-offline` 改为 `--prefer-online`（强制校验新鲜度），其余 `--loglevel=http/--no-fund/--no-audit` 保留。教训：为速度加的缓存偏好参数会以正确性为代价，包管理命令应默认校验新鲜度。

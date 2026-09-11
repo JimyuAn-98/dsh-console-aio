@@ -197,9 +197,10 @@ def npm_version(tag):
     return v
 
 
-# npm 公共参数: http 级日志让下载阶段有输出(非 TTY 下 npm 默认静默), prefer-offline
-# 命中缓存则跳过重复下载(配合 stream_cmd 的心跳, 长安装不再"看着像卡死", 见 BUG-017)。
-_NPM_FLAGS = ["--loglevel=http", "--no-fund", "--no-audit", "--prefer-offline"]
+# npm 公共参数: http 级日志让下载阶段有输出(非 TTY 下 npm 默认静默); prefer-online
+# **强制缓存元数据新鲜度校验** —— 此处不能用 prefer-offline: 它会复用过期 packument,
+# 使明明已发布的子包版本被报 "No matching version found ... ETARGET"(见 BUG-020)。
+_NPM_FLAGS = ["--loglevel=http", "--no-fund", "--no-audit", "--prefer-online"]
 
 
 def install_cmd(version=""):
