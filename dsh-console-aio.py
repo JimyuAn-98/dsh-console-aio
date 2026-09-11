@@ -620,14 +620,24 @@ class MainWindow(QMainWindow):
         def _l_ok(port, ok):
             return fwd_ports.get(port, ok) if isinstance(port, int) else ok
 
+        # 隧道端口三态: 进程没跑 -> 空心灰点"未启动"(与卡片一致); 跑了才按端口/远端给绿或红。
+        # 非隧道端口(如 dsh web)沿用 绿/红。
         for port, (ok, ms) in (local or {}).items():
-            if port == "__ssh__":
+            if port == "__ssh__" or port in fwd_ports:
                 continue
-            self.right.set_state("L%d" % port, _l_ok(port, ok), ms)
-        if remote is not None:
-            for port, ok in remote.items():
+            self.right.set_state("L%d" % port, ok, ms)
+        for port, alive in fwd_ports.items():
+            if alive:
+                ok, ms = (local or {}).get(port, (False, -1))
+                self.right.set_state("L%d" % port, bool(ok), ms)
+            else:
+                self.right.set_state("L%d" % port, None, None)
+        for port, alive in rev_ports.items():
+            if not alive:
+                self.right.set_state("R%d" % port, None, None)
+            else:
                 self.right.set_state("R%d" % port,
-                                     bool(ok) and rev_ports.get(port, True), None)
+                                     bool((remote or {}).get(port)), None)
         local_ok = [p for p, (ok, _) in (local or {}).items()
                     if p != "__ssh__" and _l_ok(p, ok)]
         local_total = len([1 for p, _, _ in CONFIG.get("local_ports", [])])

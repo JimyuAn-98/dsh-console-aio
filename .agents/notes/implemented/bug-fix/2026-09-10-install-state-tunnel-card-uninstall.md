@@ -41,3 +41,4 @@
 - 反向隧道端口灯：远端在听 **且** 本地隧道进程存活。
 - `card_states_from_monitor` 仍保留为端口维度的纯函数（右栏合成/测试用），但不再是隧道卡片的最终判据。
 - 新增 `tests/test_card_states.py::TestPortStatesFromRunning`。
+- 右栏 `set_state` 支持 `ok=None` -> 空心灰点「未启动」；隧道端口在进程未运行时用它，避免「红点=还亮着」的错觉（非隧道端口如 dsh web 仍绿/红）。新增 `tests/test_gui_smoke.py::TestRightBar::test_set_state_off_is_hollow_gray`。

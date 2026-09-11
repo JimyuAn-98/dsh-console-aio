@@ -211,12 +211,19 @@ class RightBar(QFrame):
         self._cells[key] = (dot, nm, detail, val)
 
     def set_state(self, key, ok, ms=-1):
-        # 实时更新单元格状态: 圆点与数值配色(绿=在线/红=不可达)。
+        # 实时更新单元格状态: 绿=在线/红=不可达; ok=None 表示"未启动"(空心灰点, 与隧道卡片一致)。
         # ms=None 表示只有 on/off 信息(如远程隧道), 显示 在线/不可达; ms>=0 显示延迟。
         cell = self._cells.get(key)
         if cell is None:
             return
         dot, nm, detail, val = cell
+        if ok is None:
+            dot.setText("○")
+            dot.setStyleSheet("color:#999;")
+            val.setText("未启动")
+            val.setStyleSheet("color:#999;")
+            return
+        dot.setText("●")
         color = "#43d17f" if ok else "#e5574d"
         dot.setStyleSheet("color:%s;" % color)
         if ms is None:

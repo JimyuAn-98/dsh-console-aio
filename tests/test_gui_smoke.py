@@ -232,6 +232,16 @@ class TestRightBar:
         main_win.right.set_state("NONEXISTENT", True, 100)
         qapp_mod.processEvents()
 
+    def test_set_state_off_is_hollow_gray(self, main_win, qapp_mod):
+        # ok=None -> 空心灰点"未启动"(与隧道卡片"○"一致)
+        if main_win.right._cells:
+            key = list(main_win.right._cells.keys())[0]
+            main_win.right.set_state(key, None, None)
+            qapp_mod.processEvents()
+            dot, _nm, _detail, val = main_win.right._cells[key]
+            assert dot.text() == "○"
+            assert val.text() == "未启动"
+
 
 class TestOverviewPage:
     """overview page shows demo data in smoke mode."""
