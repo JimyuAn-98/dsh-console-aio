@@ -81,3 +81,29 @@ class TestBuildItems:
         items = mod.build_items({})
         assert [i["key"] for i in items] == [
             "dsh-web", "dsh-tunnel", "connect-lab-dsh", "dsh-tunnel-reverse", "update-dsh"]
+
+
+class TestPortStatesFromRunning:
+    # 右栏端口灯与隧道卡片共用的进程存活判据: 正向端口->存活; 反向端口->存活(远端另合入)。
+    def test_forward_and_reverse(self, mod):
+        tunnels = [
+            {"id": "t_fwd", "mode": "forward",
+             "forwards": [{"local_port": 8090}, {"local_port": 8022}]},
+            {"id": "t_rev", "mode": "reverse",
+             "forwards": [{"local_port": 8091}]},
+        ]
+        fwd, rev = mod.port_states_from_running(tunnels, {"t_fwd": True, "t_rev": False})
+        assert fwd == {8090: True, 8022: True}
+        assert rev == {8091: False}
+
+    def test_missing_running_entry_is_false(self, mod):
+        tunnels = [{"id": "t_fwd", "mode": "forward",
+                    "forwards": [{"local_port": 9000}]}]
+        fwd, rev = mod.port_states_from_running(tunnels, {})
+        assert fwd == {9000: False} and rev == {}
+
+    def test_bad_forwards_ignored(self, mod):
+        tunnels = [{"id": "t", "mode": "forward",
+                    "forwards": [None, {}, {"local_port": "x"}, [7000, "h", 1]]}]
+        fwd, rev = mod.port_states_from_running(tunnels, {"t": True})
+        assert fwd == {7000: True} and rev == {}

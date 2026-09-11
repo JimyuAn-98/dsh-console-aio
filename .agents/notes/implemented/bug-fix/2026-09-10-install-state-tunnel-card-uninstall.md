@@ -2,7 +2,7 @@
 
 - Status: implemented
 - Date: 2026-09-10
-- Related: `dsh-console-aio.py`, `ui/pages_dsh.py`, `core/env.py`, `core/tunnels.py`, `tests/test_core_env.py`, `tests/test_tunnel_mgr.py`
+- Related: `dsh-console-aio.py`, `ui/pages_dsh.py`, `ui/pages_tunnels.py`, `core/env.py`, `core/tunnels.py`, `tests/test_core_env.py`, `tests/test_tunnel_mgr.py`, `tests/test_card_states.py`
 
 ## 背景
 
@@ -32,3 +32,12 @@
 - 长任务跨导航不再丢状态；卸载能删净含只读文件的目录并如实报错；隧道卡不再被无关端口占用误导。
 - 新增 `TestRmtreeForce`（只读目录删除）与 `TestRunningMap`（快照合并）单测。
 - 已知遗留：全站页面缓存/on_show 语义未做；安装输出同时出现在页内与主控制台（去重待议，用户已提）。
+
+## 补充（2026-09-10）：右栏端口灯与卡片统一
+
+用户复测发现管理页卡片灯已灭、右侧监控的端口灯仍亮——两处判定不同源。已在 `MainWindow._apply_monitor` 统一：新增纯函数 `ui/pages_tunnels.py::port_states_from_running(tunnels, running_map)`，把「隧道进程存活」翻译成右栏 `L/R` 端口灯与卡片共用的判据；`running_map()` 每次监控 tick 只取一次，卡片与右栏共用，不再各判一套。
+
+- 正向隧道端口灯：进程存活即亮（不再被其它进程占用端口误报）。
+- 反向隧道端口灯：远端在听 **且** 本地隧道进程存活。
+- `card_states_from_monitor` 仍保留为端口维度的纯函数（右栏合成/测试用），但不再是隧道卡片的最终判据。
+- 新增 `tests/test_card_states.py::TestPortStatesFromRunning`。

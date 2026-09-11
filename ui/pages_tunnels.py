@@ -93,6 +93,30 @@ def card_states_from_monitor(local, remote, cfg):
     return states
 
 
+def port_states_from_running(tunnels, running_map):
+    # 纯函数: 把"隧道进程存活"翻译成右栏端口灯与隧道卡片共用的判据。
+    # 正向隧道: 本机监听端口 -> 进程是否存活(端口可能被其它进程占用, 不能只看端口)。
+    # 反向隧道: 公网监听端口 -> 进程是否存活(远端是否在听由 remote 探测另行合入)。
+    # 返回 (forward_ports, reverse_ports): {port(int): bool}。
+    fwd, rev = {}, {}
+    for tun in tunnels or []:
+        if not isinstance(tun, dict):
+            continue
+        alive = bool((running_map or {}).get(tun.get("id")))
+        mode = tun.get("mode") or "forward"
+        for fw in tun.get("forwards") or []:
+            lp = fw.get("local_port") if isinstance(fw, dict) else (fw[0] if fw else None)
+            try:
+                lp = int(lp)
+            except (TypeError, ValueError):
+                continue
+            if mode == "forward":
+                fwd[lp] = alive
+            else:
+                rev[lp] = alive
+    return fwd, rev
+
+
 class TunnelsPage(BasePage):
     # 动态 SSH 隧道管理页面
     def _build(self):

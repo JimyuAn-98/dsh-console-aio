@@ -35,7 +35,7 @@ from ui.monitor import LogBridge, StatusPanel, svg_icon
 from ui.pages_overview import OverviewPage
 from ui.pages_tunnels import (
     BTN_TEXT, ITEMS, _apply_items, build_items,
-    card_states_from_monitor, TunnelsPage)
+    card_states_from_monitor, port_states_from_running, TunnelsPage)
 from ui.palette import CommandPalette
 from ui.theme import build_qss
 
@@ -583,12 +583,13 @@ class MainWindow(QMainWindow):
     def _on_card(self, key, on):
         self._card_state[key] = on
 
-    def _sync_card_states(self, local, remote):
+    def _sync_card_states(self, local, remote, running=None):
         states = card_states_from_monitor(local, remote, CONFIG)
         # 隧道卡片以"隧道进程存活"为权威: 仅看端口监听会被其它进程占用而误报绿灯(正向隧道)。
         # 反向隧道还需远端端口在听(两者都为真才绿)。
         try:
-            running = self.service.tunnels.running_map()
+            if running is None:
+                running = self.service.tunnels.running_map()
             modes = {t.get("id"): (t.get("mode") or "forward")
                      for t in self.service.tunnels.list_tunnels() if t.get("id")}
             for tid, alive in running.items():
@@ -606,15 +607,29 @@ class MainWindow(QMainWindow):
                 self.service.card.emit(key, on)
 
     def _apply_monitor(self, local, ssh_count, remote):
-        self._sync_card_states(local, remote)
+        try:
+            running = self.service.tunnels.running_map()
+        except Exception:
+            running = {}
+        self._sync_card_states(local, remote, running)
+        # 右栏端口灯与隧道卡片共用同一套判据: 正向隧道端口看进程存活(端口可能被他人占用),
+        # 反向端口还需远端在听
+        fwd_ports, rev_ports = port_states_from_running(
+            dsh_config.normalize_tunnels(CONFIG), running)
+
+        def _l_ok(port, ok):
+            return fwd_ports.get(port, ok) if isinstance(port, int) else ok
+
         for port, (ok, ms) in (local or {}).items():
             if port == "__ssh__":
                 continue
-            self.right.set_state("L%d" % port, ok, ms)
+            self.right.set_state("L%d" % port, _l_ok(port, ok), ms)
         if remote is not None:
             for port, ok in remote.items():
-                self.right.set_state("R%d" % port, ok, None)
-        local_ok = [p for p, (ok, _) in (local or {}).items() if p != "__ssh__" and ok]
+                self.right.set_state("R%d" % port,
+                                     bool(ok) and rev_ports.get(port, True), None)
+        local_ok = [p for p, (ok, _) in (local or {}).items()
+                    if p != "__ssh__" and _l_ok(p, ok)]
         local_total = len([1 for p, _, _ in CONFIG.get("local_ports", [])])
         ssh_ok = (local or {}).get("__ssh__", (False, -1))[0]
         ssh_txt = "公网服务器 在线" if ssh_ok else "公网服务器 不可达"
