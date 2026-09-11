@@ -124,11 +124,23 @@ def _rmtree_force(path, log=None):
     if os.name == "nt":
         _log("[删除] 快速清理(cmd rmdir /s /q)...")
         try:
-            subprocess.run(["cmd", "/c", 'rmdir /s /q "%s"' % path],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=900, creationflags=CREATE_NO_WINDOW)
-        except subprocess.TimeoutExpired:
-            _log("[删除] cmd rmdir 超时(900s), 转 Python 精修")
+            # Popen + 轮询而非 run(): 大树原生删除可能数十秒, 每 15s 打一条心跳,
+            # 保证界面/日志全程有反馈(不会"看着像卡死")。
+            proc = subprocess.Popen(["cmd", "/c", 'rmdir /s /q "%s"' % path],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    creationflags=CREATE_NO_WINDOW)
+            t_fast = _t.time()
+            beat = 0
+            while proc.poll() is None:
+                elapsed = _t.time() - t_fast
+                if elapsed > 900:
+                    proc.kill()
+                    _log("[删除] cmd rmdir 超时(900s), 转 Python 精修")
+                    break
+                if int(elapsed) // 15 > beat:
+                    beat = int(elapsed) // 15
+                    _log("[删除] 快速清理中... 已 %.0fs" % elapsed)
+                _t.sleep(0.5)
         except Exception as e:
             _log("[删除] cmd rmdir 异常: %s" % e)
         _log("[删除] 快速清理结束(累计 %.1fs)" % (_t.time() - t0))
