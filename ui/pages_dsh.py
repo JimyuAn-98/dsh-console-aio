@@ -140,6 +140,8 @@ class DshManagePage(BasePage):
             self._update_running = False
             self._update_btn.setEnabled(True)
             if ok:
+                self._update_bar.setValue(self._update_bar.maximum())
+                self._update_step_lbl.setText("更新完成")
                 self._reload_app_config()   # 更新成功可能清除了版本固定
                 self._detect_mode()
             else:
@@ -341,6 +343,8 @@ class DshManagePage(BasePage):
             def run():
                 self._update_running = True
                 self._update_btn.setEnabled(False)
+                # 步数随模式: 包模式 3 步(npm), 源码模式 7 步(git+构建); 不设范围会停在 3/7≈42%
+                self._update_bar.setRange(0, 3 if pkg_mode else 7)
                 self._update_bar.setValue(0)
                 self._update_step_lbl.setText("正在更新…")
                 self.app.loge("[update-dsh] 开始完整更新...", "warn")
@@ -923,6 +927,9 @@ class DshManagePage(BasePage):
     def _do_deploy(self, tag, allow_dirty=False):
         self._deploy_running = True
         self._btn_rel_deploy.setEnabled(False)
+        # 步数随模式: 包模式 3 步(npm install -g), 源码模式 7 步
+        pkg_mode = (self._mode_info or {}).get("mode") == "package"
+        self._deploy_bar.setRange(0, 3 if pkg_mode else 7)
         self._deploy_bar.setValue(0)
         self._deploy_step_lbl.setText("正在部署 %s…" % tag)
         self.app.set_status("正在部署 dsh 版本 " + tag)

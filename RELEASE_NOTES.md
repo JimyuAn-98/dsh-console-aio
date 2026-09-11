@@ -3,6 +3,11 @@
 
 ## v0.9.0 (未发布)
 
+> 目标：**把本地 dsh 控制台全做好** —— 逐页优化完善其余功能页（隧道/会话/Agent/Profile/插件/看板/用量/LLM/备份/密钥/部署/日志/设置/主题/关于）。
+> 远程部署、Linux/macOS 部署等更高阶能力留待 0.9.0 之后单独规划。
+
+## v0.8.1
+
 ### 双安装模式实机修复：包模式改用 npm、非 dsh 目标目录、版本 tag 前缀（2026-09-11）
 
 - **BUG-013 包模式安装报 `...\pnpm\bin\bin is not in PATH`**：`core/pkgmgr.py::pnpm_env` 此前把 `PNPM_HOME` 设成全局 bin 目录本身，而 pnpm 会在 `PNPM_HOME` 之后再拼一层 `bin`。现在**不再设置 `PNPM_HOME`**，只把 `<pnpm home>\bin` 前置进 `PATH`；新增 `pnpm_home()` 统一推导（已有 `PNPM_HOME` 时用 `<PNPM_HOME>\bin`）。

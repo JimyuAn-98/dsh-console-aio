@@ -30,19 +30,14 @@ jobs:
       - name: Build onefile exe
         shell: pwsh
         run: |
+          # 用 collect-submodules 收全 core/app/ui: 三者都有函数内惰性 import 的子模块
+          # (core.pkgmgr / core.nodeid / core.runtime / core.cache 等), 手写 hidden-import 列表
+          # 容易漏; collect-submodules 由 PyInstaller 递归收集, 新增模块自动纳入。
           python -m PyInstaller --noconfirm --clean --onefile --windowed --name dsh-console-aio `
             --icon logo.ico `
-            --hidden-import core --hidden-import core.tunnel_mgr `
-            --hidden-import ui.monitor --hidden-import ui.pages_overview `
-            --hidden-import ui.pages_tunnels --hidden-import ui.dialog_tunnel_wizard `
-            --hidden-import ui.pages_sessions --hidden-import ui.pages_agents `
-            --hidden-import ui.pages_profiles --hidden-import ui.pages_plugins `
-            --hidden-import ui.pages_taskboard --hidden-import ui.pages_usage `
-            --hidden-import ui.pages_llm --hidden-import ui.pages_ops `
-            --hidden-import ui.pages_keys --hidden-import ui.pages_version `
-            --hidden-import ui.pages_deployments --hidden-import ui.pages_logs `
-            --hidden-import ui.pages_settings --hidden-import ui.pages_theme `
-            --hidden-import ui.pages_dsh `
+            --collect-submodules core `
+            --collect-submodules app `
+            --collect-submodules ui `
             --add-data "ui/theme.qss;ui" `
             --add-data "logo.png;." `
             --add-data "RELEASE_NOTES.md;." `

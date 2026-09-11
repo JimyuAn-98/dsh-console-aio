@@ -211,6 +211,23 @@ class TestDshManagePage:
         page.close()
         qapp_mod.processEvents()
 
+    def test_update_progress_reaches_full_on_success(self, qapp_mod, monkeypatch):
+        # 回归: 包模式只发 3 步(不改范围会停在 3/7≈42%), 完成信号必须把进度置满
+        from ui.pages_dsh import DshManagePage
+        import core.env as _env
+        monkeypatch.setattr(_env, "tool_versions", lambda tools: {})
+        import core.dshctl as _dshctl
+        monkeypatch.setattr(_dshctl, "fetch_dsh_releases",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+        page = DshManagePage(self._FakeApp())
+        qapp_mod.processEvents()
+        page._update_bar.setRange(0, 3)
+        page._update_bar.setValue(3)
+        page._on_finished("update-dsh", True)
+        assert page._update_bar.value() == page._update_bar.maximum()
+        page.close()
+        qapp_mod.processEvents()
+
     def test_install_pkg_mode_needs_no_url(self, qapp_mod, monkeypatch):
         # 全局包模式无需仓库地址: 直接走 install_dsh_pkg
         from ui.pages_dsh import DshManagePage

@@ -6,11 +6,12 @@
 > **已知问题**见 `docs/BUGS.md`；**实施计划索引**见 `docs/plans/README.md`；
 > **架构唯一权威**见 `docs/ARCHITECTURE.md`。
 
-## 当前状态（2026-09-11）
+## 当前状态（2026-09-12）
 
 ### 最近批次
 
-- ✅ **双安装模式实机修复**（2026-09-11，未发版）：BUG-013 包模式 `PNPM_HOME` 多拼一层 `bin`（改为只前置 `<pnpm home>\bin`，不再设 `PNPM_HOME`）；BUG-014 非 dsh 目标目录跳过 clone（改为 `_is_dsh_checkout` 校验后中文报错）；BUG-015 `dsh-v...` tag 前缀未规范化（新增 `pkgmgr.npm_version` 统一映射）；BUG-016 包模式启动 dsh 插件 `ERR_MODULE_NOT_FOUND`（pnpm 隔离布局不满足运行时动态 import）→ **包模式改用 npm 全局**（`npm install -g` / `@latest` / `uninstall -g` + npm 前缀下 `dsh.cmd`，与官方 npx 同源扁平布局）；BUG-017 安装静默无输出（`stream_cmd` 改读线程+队列+每 15s 心跳，npm 加 `--loglevel=http` 等）；BUG-018 安装/卸载后配置不生效（改为成功后自动 `app.reload_config()` 并重探模式；更新/部署确认文案随模式）；BUG-019 失败日志过长/全局 npm 继承 cwd（`stream_cmd` 加失败摘要 + 镜像提示；`pkgmgr.npm_cwd()` 中性 cwd）；BUG-020 更新 ETARGET（`--prefer-offline` 复用过期 packument → 改 `--prefer-online`）。
+- 🚀 **v0.8.1 发布（本地 dsh 管理里程碑）**（2026-09-12）：双安装模式（源码 / npm 全局包）+ 自动检测、长操作完整输出日志与失败摘要/心跳、卸载删除加固、节点访问规划（阶段 1-3）；基础 CRUD 全部打通。下一阶段 **v0.9.0**：逐页完善其余功能页，把本地 dsh 控制台全做好；远程/Linux 部署留待之后。
+- ✅ **双安装模式实机修复**（2026-09-12）：BUG-013 包模式 `PNPM_HOME` 多拼一层 `bin`（改为只前置 `<pnpm home>\bin`，不再设 `PNPM_HOME`）；BUG-014 非 dsh 目标目录跳过 clone（改为 `_is_dsh_checkout` 校验后中文报错）；BUG-015 `dsh-v...` tag 前缀未规范化（新增 `pkgmgr.npm_version` 统一映射）；BUG-016 包模式启动 dsh 插件 `ERR_MODULE_NOT_FOUND`（pnpm 隔离布局不满足运行时动态 import）→ **包模式改用 npm 全局**（`npm install -g` / `@latest` / `uninstall -g` + npm 前缀下 `dsh.cmd`，与官方 npx 同源扁平布局）；BUG-017 安装静默无输出（`stream_cmd` 改读线程+队列+每 15s 心跳，npm 加 `--loglevel=http` 等）；BUG-018 安装/卸载后配置不生效（改为成功后自动 `app.reload_config()` 并重探模式；更新/部署确认文案随模式）；BUG-019 失败日志过长/全局 npm 继承 cwd（`stream_cmd` 加失败摘要 + 镜像提示；`pkgmgr.npm_cwd()` 中性 cwd）；BUG-020 更新 ETARGET（`--prefer-offline` 复用过期 packument → 改 `--prefer-online`）。
 - ✅ **dsh 双安装模式（源码 / npm 全局包）+ 自动检测**（2026-09-11，未发版）：新增 `core/pkgmgr.py`（`detect_mode` 判定源码/全局包/未安装 + `pnpm_env` PATH 修正 + 命令拼装）；启动/更新/卸载/版本/部署按模式分流（全局包走 `pnpm add|update|remove -g @deepseek-ai/dsh`，官方 npm 包）；DSH 管理页页头展示「模式: 源码模式（路径，版本）/ 全局包模式（版本）」，安装卡可选安装方式（默认全局包）。规划见 `docs/plans/20260911-全局包安装模式-v1.md`。
 - ✅ **长操作完整输出日志 + 卸载删除加固**（2026-09-11，未发版）：安装/更新/卸载/部署/启停/批量隧道/通用命令全过程落盘 `<临时目录>/dsh-console-ops/<op>-<时间戳>.log`（DSH 管理页「打开操作日志」；落盘前对 `token=`/`Bearer` 脱敏）；`_rmtree_force` 二次加固：原生 `cmd rmdir` 快删 → Python 后序精修残留（清只读/跳 junction/每 2000 项进度日志）→ 残留清单，解决大目录（pnpm node_modules）删除像卡死。**实机验证通过（2026-09-11）：源码树卸载 75541 项 / 31.1s 删净，BUG-011 结案。** 单测 `tests/test_core_rmtree_force.py`、`tests/test_service_oplog.py`。
 - ✅ **节点访问规划·阶段 3**（2026-09-11，未发版）：`core/nodeid.py`（节点码）+ `core/runtime.py`（runtime.json 落盘/公网信箱 JSON/Token 三级解析）；捕获即投递，`_sync_push_token` 改用 `node_id`；设置页「本机节点」卡（节点码/重新生成/立即同步）+ 部署页「从公网信箱发现」（绑定/删除条目）。**规划四阶段全部落地。**
@@ -65,7 +66,8 @@
 | **P3 进阶** | 命令面板、配置导出/导入、诊断报告、数据可视化 | ✅ 完成 |
 | **P4 愿景主线** | 隧道规划器（映射/冲突/隧道组、多方案快照） | ✅ 完成 |
 | **P4 愿景主线** | 远程部署子工具组 | ⏸ 延后/独立试验 |
-| **P5 逐功能校验** | 17 页逐页校验与完善优化（当前阶段） | ⏳ 进行中 |
+| **P5 逐功能校验** | 17 页逐页校验与完善优化（当前阶段，目标 v0.9.0） | ⏳ 进行中 |
+| **P6 远程/跨平台部署** | 远程部署（SSH 驱动）、Linux/macOS 部署 | ⏸ v0.9.0 之后 |
 
 ## 索引
 

@@ -30,7 +30,7 @@
 ## 快速开始
 
 ### 方式一：安装包（推荐）
-下载 **dsh-console-aio-setup-0.8.0.exe**（[GitHub Releases](https://github.com/JimyuAn-98/dsh-console-aio/releases)），双击安装即可使用（无需 Python 环境）。
+下载 **dsh-console-aio-setup-0.8.1.exe**（[GitHub Releases](https://github.com/JimyuAn-98/dsh-console-aio/releases)），双击安装即可使用（无需 Python 环境）。
 安装后可创建桌面快捷方式；卸载走系统控制面板。
 
 ### 方式二：双击（源码）
@@ -271,7 +271,7 @@ MIT © 2025 JimyuAn
 - Modern PySide6 UI: dark acrylic, modern list/card components, thread-safe
 
 ## Quick Start
-- Download **dsh-console-aio-setup-0.8.0.exe** from [Releases](https://github.com/JimyuAn-98/dsh-console-aio/releases) (no Python needed), or run from source:
+- Download **dsh-console-aio-setup-0.8.1.exe** from [Releases](https://github.com/JimyuAn-98/dsh-console-aio/releases) (no Python needed), or run from source:
       python dsh-console-aio.py   (requires Python 3 + `pip install PySide6`)
 
 ## One-click dsh install

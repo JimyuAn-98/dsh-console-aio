@@ -45,7 +45,7 @@ if getattr(sys, 'frozen', False):
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get('DSH_AIO_CONFIG') or os.path.join(BASE_DIR, 'config.json')
-APP_VERSION = '0.8.0'
+APP_VERSION = '0.8.1'
 
 
 def _find_logo():
