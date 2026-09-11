@@ -92,8 +92,8 @@ class _AddDeployDialog(QDialog):
         form.addRow("本机访问端口", self._access)
         form.addRow("节点标识(信箱 key)", self._node_key)
         root.addLayout(form)
-        hint = QLabel("「本机访问端口」留空则按关联隧道的本地端口/远端 web 端口推导；"
-                      "「节点标识」用于跨网从公网信箱取 Token，需 ASCII，局域网可留空。",
+        hint = QLabel("局域网直连：填「主机 + user」。跨网：主机与 user 留空，填「节点标识」"
+                      "（经公网信箱取 Token）。「本机访问端口」留空则按关联隧道/远端 web 端口推导。",
                       objectName="cardHint")
         hint.setWordWrap(True)
         root.addWidget(hint)
@@ -134,11 +134,15 @@ class _AddDeployDialog(QDialog):
         if not name:
             QMessageBox.warning(self, "缺少名称", "请填写节点名称。")
             return
-        if not host:
-            QMessageBox.warning(self, "缺少主机", "请填写主机地址(IP 或域名)。")
+        if bool(host) != bool(user):
+            QMessageBox.warning(self, "主机/用户不完整",
+                                "直连 SSH 需要同时填写「主机」和「user」；"
+                                "若只经隧道访问(跨网)，两者留空并填「节点标识」。")
             return
-        if not user:
-            QMessageBox.warning(self, "缺少用户", "请填写 SSH 用户名。")
+        if not host and not node_key:
+            QMessageBox.warning(self, "缺少连接信息",
+                                "请填写「主机 + user」(局域网直连)，"
+                                "或填写「节点标识」(经公网信箱/隧道访问)。")
             return
         try:
             port = int(port_s)
@@ -159,16 +163,20 @@ class _AddDeployDialog(QDialog):
             QMessageBox.warning(self, "节点标识无效",
                                 "节点标识只能用字母/数字/下划线/连字符（公网信箱文件名的要求）。")
             return
-        # 同主机同用户同端口重复添加会让人混淆, 直接拦截(编辑自身跳过)
-        for d in self._deployments:
-            if self._edit is not None and d is self._edit:
-                continue
-            if d.get("host") == host and d.get("user") == user and int(d.get("port") or 22) == port:
-                QMessageBox.warning(self, "主机已存在",
-                                    "已存在同主机/同用户/同端口的节点「%s」。" % d.get("name"))
-                return
-        result = {"name": name, "host": host, "user": user,
-                  "port": port, "dsh_home": home}
+        # 同主机同用户同端口重复添加会让人混淆, 直接拦截(编辑自身跳过; 仅直连节点)
+        if host:
+            for d in self._deployments:
+                if self._edit is not None and d is self._edit:
+                    continue
+                if d.get("host") == host and d.get("user") == user and int(d.get("port") or 22) == port:
+                    QMessageBox.warning(self, "主机已存在",
+                                        "已存在同主机/同用户/同端口的节点「%s」。" % d.get("name"))
+                    return
+        result = {"name": name, "dsh_home": home}
+        if host:
+            result["host"] = host
+            result["user"] = user
+            result["port"] = port
         if web_port:
             result["web_port"] = web_port
         tid = self._tunnel.currentData() or ""
@@ -484,7 +492,8 @@ class DeploymentPage(BasePage):
         if self._del_btn is not None:
             self._del_btn.setEnabled(row is not None and not is_local)
         if self._test_btn is not None:
-            self._test_btn.setEnabled(row is not None and not is_local)
+            has_host = bool(row is not None and (row["deployment"] or {}).get("host"))
+            self._test_btn.setEnabled(row is not None and not is_local and has_host)
         if getattr(self, "_edit_btn", None) is not None:
             self._edit_btn.setEnabled(row is not None and not is_local)
         if getattr(self, "_copy_link_btn", None) is not None:
