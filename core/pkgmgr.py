@@ -174,4 +174,3 @@ def start_cmd():
         if os.path.isfile(p):
             return [p, "web"]
     return ["dsh", "web"]
-
