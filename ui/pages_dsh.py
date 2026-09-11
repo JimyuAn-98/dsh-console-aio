@@ -93,6 +93,11 @@ class DshManagePage(BasePage):
             self._set_card(key, on)
         self._fetch_releases()
 
+    def on_show(self):
+        # 页面实例常驻(见 MainWindow._show_page): 切回本页时刷新版本发布信息;
+        # 安装/卸载/更新进行中的进度与日志控件内容保持不变。
+        self._fetch_releases()
+
     def _on_service_log(self, text, _tag=""):
         if self._inst_running:
             self._on_install_line(text)

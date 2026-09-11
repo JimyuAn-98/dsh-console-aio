@@ -246,3 +246,20 @@ class TestConstants:
     def test_no_window_defined(self):
         from core.tunnel_mgr import NO_WINDOW
         assert isinstance(NO_WINDOW, int)
+
+
+class TestRunningMap:
+    # running_map: 合并 pid 快照(alive)与当前配置隧道(缺省 False)。
+    def test_merges_snapshot_and_configured(self, tmp_path, monkeypatch):
+        import core.tunnel_mgr as tm
+        from core.tunnels import TunnelManager
+        monkeypatch.setattr(tm, "tunnels_snapshot",
+                            lambda base: {"tun_a": {"pid": 1, "alive": True},
+                                          "tun_b": {"pid": 2, "alive": False}})
+        mgr = TunnelManager(str(tmp_path), {"tunnels": [
+            {"id": "tun_a", "mode": "forward"},
+            {"id": "tun_c", "mode": "forward"}]})
+        rm = mgr.running_map()
+        assert rm["tun_a"] is True
+        assert rm["tun_b"] is False
+        assert rm["tun_c"] is False

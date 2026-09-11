@@ -273,3 +273,22 @@ class TestSaveConfig:
         p = tmp_path / "fresh.json"
         assert dsh_config.save_config({"k": 1}, str(p)) is True
         assert not (tmp_path / "fresh.json.bak").exists()
+
+
+class TestRmtreeForce:
+    # _rmtree_force: 只读文件/只读目录(模拟 .git/objects)也能删干净。
+    def test_removes_readonly_tree(self, tmp_path):
+        import stat
+        from core.env import _rmtree_force
+        d = tmp_path / "repo" / ".git" / "objects"
+        d.mkdir(parents=True)
+        f = d / "pack.idx"
+        f.write_bytes(b"x")
+        os.chmod(str(f), stat.S_IREAD)
+        os.chmod(str(d), stat.S_IREAD | stat.S_IEXEC)
+        _rmtree_force(str(tmp_path / "repo"))
+        assert not (tmp_path / "repo").exists()
+
+    def test_missing_path_is_noop(self, tmp_path):
+        from core.env import _rmtree_force
+        _rmtree_force(str(tmp_path / "nope"))   # 不应抛异常

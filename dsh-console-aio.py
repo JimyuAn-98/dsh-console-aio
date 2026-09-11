@@ -141,6 +141,7 @@ class MainWindow(QMainWindow):
         self.service.log.connect(self.loge)
         self.service.status.connect(self.set_status)
         self._card_state = {}               # 隧道卡片最近已知状态
+        self._pages = {}                    # 常驻页面实例(长任务进行中状态需跨导航保留)
         self.service.card.connect(self._on_card)
         self._start_monitor()               # 右侧健康监控(实时探测端口/隧道)
 
@@ -364,12 +365,24 @@ class MainWindow(QMainWindow):
         while self.stack.count():
             w = self.stack.widget(0)
             self.stack.removeWidget(w)
+            # 常驻页面(self._pages)跨导航保留实例: 长任务(如 dsh 安装)进行中状态不丢;
+            # 其余页面维持"导航重建"现状
+            if any(w is p for p in self._pages.values()):
+                continue
             w.deleteLater()
+        page = self._pages.get(key)
+        if page is not None:
+            self.stack.addWidget(page)
+            hook = getattr(page, "on_show", None)
+            if callable(hook):
+                hook()
+            return
         if key == "overview":
             page = OverviewPage(self)
         elif key == "dsh":
             from ui.pages_dsh import DshManagePage
             page = DshManagePage(self)
+            self._pages["dsh"] = page   # 常驻: dsh 安装/更新进行中状态跨导航保留
         elif key == "tunnels":
             page = TunnelsPage(self)
         elif key == "sessions":
@@ -571,7 +584,23 @@ class MainWindow(QMainWindow):
         self._card_state[key] = on
 
     def _sync_card_states(self, local, remote):
-        for key, on in card_states_from_monitor(local, remote, CONFIG).items():
+        states = card_states_from_monitor(local, remote, CONFIG)
+        # 隧道卡片以"隧道进程存活"为权威: 仅看端口监听会被其它进程占用而误报绿灯(正向隧道)。
+        # 反向隧道还需远端端口在听(两者都为真才绿)。
+        try:
+            running = self.service.tunnels.running_map()
+            modes = {t.get("id"): (t.get("mode") or "forward")
+                     for t in self.service.tunnels.list_tunnels() if t.get("id")}
+            for tid, alive in running.items():
+                mode = modes.get(tid) or ("reverse" if tid == "dsh-tunnel-reverse"
+                                          else "forward")
+                if mode == "reverse":
+                    states[tid] = bool(alive) and bool(states.get(tid))
+                else:
+                    states[tid] = bool(alive)
+        except Exception:
+            pass
+        for key, on in states.items():
             if self._card_state.get(key) != on:
                 self._card_state[key] = on
                 self.service.card.emit(key, on)

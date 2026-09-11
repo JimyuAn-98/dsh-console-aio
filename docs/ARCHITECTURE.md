@@ -83,6 +83,7 @@ class DshService(QObject):
 * **长生命周期接收者（MainWindow 级别）**：如主日志区、底部状态栏，仅在 `MainWindow` 初始化时 connect 一次，避免页面反复重建导致槽函数叠加。
 * **短生命周期接收者（Page 级别）**：各页面在 `_build` 时 connect 自身所需的 `service.result` / `service.finished`，页面销毁时 Qt 会自动解除其槽绑定。
 * **`safe_emit` 防护**：页面自建信号向自身发送时，一律使用 `BasePage.safe_emit(sig, *args)`，自动捕获并忽略页面快速切换销毁时引发的 `RuntimeError: Internal C++ object already deleted`。
+* **常驻页面实例**：`MainWindow._pages` 登记需跨导航保留的页面实例（当前为 DSH 管理页——其安装/卸载/更新等长任务进行中状态不能丢）；复用实例时调用其可选 `on_show()` 钩子刷新数据，其余页面维持"导航重建"现状。
 
 ---
 

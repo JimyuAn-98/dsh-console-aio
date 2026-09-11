@@ -259,4 +259,17 @@ class TunnelManager:
         return {"running": running, "persisting": persisting, "pid": pid}
 
 
+    def running_map(self):
+        # 已配置/历史隧道的进程存活状态 {id: bool}(只读一次 pid 文件 + 逐 pid 探活)。
+        # 隧道卡片"绿灯"以此为权威: 端口监听可能被其它进程占用而误报在线。
+        from core.tunnel_mgr import tunnels_snapshot
+        out = {key: bool(rec.get("alive"))
+               for key, rec in tunnels_snapshot(self.base_dir).items()}
+        for tun in self.list_tunnels():
+            tid = tun.get("id")
+            if tid:
+                out.setdefault(tid, False)
+        return out
+
+
 __all__ = ["TunnelManager", "push_node_token", "pull_node_token"]

@@ -12,4 +12,7 @@
 | BUG-006 | 隧道页"运行更新"按钮引用未定义的 `_run_update`（点击静默报错） | 已修复（阶段1） | 从 tkinter 旧主程序恢复完整更新流至 `dshctl.update_dsh` |
 | BUG-007 | 部署快照"会话大小"恒 0：`DshRemote.dir_stats` 本地分支只数子目录直接文件，而会话目录是 组/会话/文件 三层 | 已修复（2026-08-29） | 改 `_tree_size` 有界递归；概览页/部署页快照同源修复 |
 | BUG-008 | 概览页快照结果经 bridge 发进底部日志区，`dep_status` 永远停在"读取中…"（技术债"裸线程未走信号"的实际代价） | 已修复（2026-08-29） | 概览页重设计：页面级 Signal + safe_emit 回 UI，数据改走 service.ctl 探测 |
+| BUG-010 | 页面导航重建导致进行中任务状态丢失：dsh 安装中切走再切回，进度条与页内日志清空（仅主控制台还在输出） | 已修复（2026-09-10） | MainWindow `_pages` 常驻页面实例 + `on_show` 钩子；DSH 管理页跨导航保留。见 `.agents/notes/implemented/bug-fix/2026-09-10-install-state-tunnel-card-uninstall.md` |
+| BUG-011 | 卸载 dsh 删不净：源码目录在 C:\Users 下时 `.git/objects` 等只读文件触发 WinError 5 | 已修复（2026-09-10） | `core/env.py::_rmtree_force`：递归清只读位 + rmtree 兜底回调 + 删净存在性检查 |
+| BUG-012 | 隧道卡片误报绿灯：无隧道运行时仍显示在线 | 已修复（2026-09-10） | 卡片状态改以隧道进程存活为权威（`TunnelManager.running_map`）；反向隧道需进程存活且远端在听 |
 | BUG-009 | 打包运行读不到 config.json：core/config.py 内**后置的旧 `_default_config_path` 定义覆盖了文件顶部新别名**（Python 自上而下执行），打包时 `__file__` 在临时解压目录 → 读写全落临时目录，源码运行不受影响（旧定义恰好在仓库根） | 已修复（2026-08-30） | 删除旧定义，load/save 直连公开 `default_config_path()`（frozen→exe 目录）；设置页显示配置实际路径；离屏复现+字节码比对定位 |

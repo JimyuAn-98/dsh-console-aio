@@ -14,11 +14,47 @@
 import os
 import shutil
 import subprocess
+import sys
 
 from core import config as dsh_config
 from core.dshctl import DshCtl
 
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+
+
+def _rmtree_force(path):
+    # Windows 递归删除: .git 等目录含只读文件/只读目录时, shutil.rmtree 会 PermissionError
+    # (WinError 5)。先递归清只读位, 再用带兜底回调的 rmtree; 仍未删净则抛 OSError 交调用方报错。
+    import stat as _stat
+    if not os.path.exists(path):
+        return
+
+    def _clear(node):
+        try:
+            os.chmod(node, _stat.S_IWRITE)
+        except OSError:
+            pass
+
+    for root, dirs, files in os.walk(path, topdown=False):
+        for name in files:
+            _clear(os.path.join(root, name))
+        for name in dirs:
+            _clear(os.path.join(root, name))
+
+    def _onerror(func, node, _exc):
+        # 兜底: 再清只读并重试该删除动作; 失败则忽略, 由末尾存在性检查统一报错
+        _clear(node)
+        try:
+            func(node)
+        except OSError:
+            pass
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_onerror)
+    else:
+        shutil.rmtree(path, onerror=_onerror)
+    if os.path.exists(path):
+        raise OSError("部分文件无法删除(可能被占用或权限不足): " + path)
 
 
 def get_version(cmd, timeout=8):
@@ -201,7 +237,7 @@ def uninstall_dsh(events=None, keep_data=True):
         step(2, "步骤 2/3: 删除源码目录 " + repo)
         line("[卸载] 删除源码目录: " + repo)
         try:
-            shutil.rmtree(repo)
+            _rmtree_force(repo)
             removed_repo = True
         except Exception as e:
             line("[卸载] 删除源码目录失败: " + str(e))
@@ -230,7 +266,7 @@ def uninstall_dsh(events=None, keep_data=True):
             step(4, "删除数据目录 ~/.dsh")
             line("[卸载] 删除数据目录: " + data_dir)
             try:
-                shutil.rmtree(data_dir)
+                _rmtree_force(data_dir)
                 removed_data = True
             except Exception as e:
                 line("[卸载] 删除数据目录失败: " + str(e))
