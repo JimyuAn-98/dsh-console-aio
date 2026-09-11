@@ -9,7 +9,8 @@
 - **BUG-014 源码安装对非 dsh 目录跳过 clone**：目标目录已存在且非空但不是 dsh 仓库时，此前直接跳过 clone，随后 `git fetch` 以 `not a git repository` 失败。现在 `install_dsh` 跳过 clone 前用 `_is_dsh_checkout`（复用 `pkgmgr.source_info`）校验，不是 dsh 仓库就中文报错（请换空目录或先清空）。
 - **BUG-015 版本 tag 前缀未规范化**：dsh Release tag 形如 `dsh-v0.1.5-rc.2`，包模式此前只去单个 `v` 会拼出非法的 `@deepseek-ai/dsh@dsh-v0.1.5-rc.2`。新增 `pkgmgr.npm_version()` 作为唯一映射实现（`dsh-v`/`v`/`@`/裸版本），`install_cmd`、`_deploy_pkg_version`、`fetch_dsh_releases` 三处共用；源码模式仍用原始 tag 供 `git checkout`。
 - **BUG-016 包模式启动失败（dsh 插件全部 `ERR_MODULE_NOT_FOUND`）→ 包模式从 pnpm 改用 npm**：dsh 的 `cordis-plugin-loader` 用**运行时动态 `import()`** 加载插件包，Node 只从 loader 自己的目录逐级向上找 `node_modules`；pnpm 的隔离式布局（全局虚拟仓库 `store/v11/links/...`）不把插件放在 loader 的祖先链上 → 启动时 100+ 条 `Cannot find package '@deepseek-ai/dsh-*'` 并退出。npm（`install -g`）是扁平提升布局，与官方 `npx @deepseek-ai/dsh web` 同源，能解析；官方也只文档化 npx。现包模式为 `npm install -g @deepseek-ai/dsh[@版本]` / `npm install -g @deepseek-ai/dsh@latest` / `npm uninstall -g @deepseek-ai/dsh`，启动用 `npm prefix -g` 下的 `dsh.cmd web`（`pkgmgr.npm_env()` 把该前缀前置进 `PATH`）；`pnpm_env()` 仅保留给环境检查卡的 pnpm 工具命令。
-- 测试：`tests/test_core_pkgmgr.py`（PATH 修正、`npm_version`、`dsh-v` 部署、npm 命令）、`tests/test_core_env.py`（非 dsh 目标拒绝、已是 dsh 工作区跳过 clone）。
+- **BUG-017 安装/更新期间界面无输出（约 4 分钟静默）**：npm 在非 TTY（管道）下抑制进度、依赖解析阶段本身静默，`stream_cmd` 只能收到零星行。现 `DshCtl.stream_cmd` 改为**独立读线程 + 队列**、主循环每 0.5s 醒：长命令静默期间每 15s 打一条 `... 已运行 N 秒(命令仍在执行)` 心跳，并顺带修掉「静默命令超时判断失效」的隐患；npm 命令统一加 `--loglevel=http --no-fund --no-audit --prefer-offline`（暴露下载行、减噪、命中缓存不重下）。新增 `tests/test_core.py::TestStreamCmdHeartbeat`。
+- 测试：`tests/test_core_pkgmgr.py`（PATH 修正、`npm_version`、`dsh-v` 部署、npm 命令）、`tests/test_core_env.py`（非 dsh 目标拒绝、已是 dsh 工作区跳过 clone）、`tests/test_core.py::TestStreamCmdHeartbeat`。
 
 ### dsh 双安装模式：npm 全局包与源码，自动检测（2026-09-11）
 

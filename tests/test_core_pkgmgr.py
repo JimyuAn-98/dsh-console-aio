@@ -145,7 +145,7 @@ class TestPackageModeLifecycle:
         ctl, calls = self._ctl(monkeypatch)
         r = ctl.deploy_dsh_version(None, tag='dsh-v0.1.5-rc.2')
         assert r['err'] == '' and r['tag'] == 'dsh-v0.1.5-rc.2'
-        assert ['npm.cmd', 'install', '-g', '@deepseek-ai/dsh@0.1.5-rc.2'] in calls
+        assert pkgmgr.install_cmd('dsh-v0.1.5-rc.2') in calls
 
     def test_uninstall_routes_to_pnpm_remove(self, monkeypatch):
         import core.dshctl as dshctl

@@ -670,7 +670,11 @@ class DshCtl:
         return {"err": "", "dirty": False, "msg": "已部署 " + ver, "tag": tag}
 
     # ---------- 通用命令流(流式打日志) ----------
-    def stream_cmd(self, cmd, cwd=None, env=None, events=None, timeout_override=None):
+    def stream_cmd(self, cmd, cwd=None, env=None, events=None, timeout_override=None,
+                   heartbeat=15):
+        # 流式执行: 逐行转 events(log)。读管子用独立线程 + 队列, 主循环每 0.5s 醒一次——
+        # 这样长命令"静默"期间也能按 heartbeat 打心跳(每 N 秒一条), 且超时判断真正生效
+        # (此前直接在 stdout.readline() 上阻塞, 静默命令既不心跳也不超时)。
         self._log(events, "  $ " + " ".join(cmd))
         timeout = timeout_override or self.d.get("update_timeout") or 1800
         try:
@@ -681,20 +685,44 @@ class DshCtl:
         except FileNotFoundError:
             self._log(events, "  找不到命令: " + str(cmd[0] if cmd else "?"), "err")
             return False
+        import queue
+        import threading
         import time as _t
+        q = queue.Queue()
+        done = object()
+
+        def _reader(pipe):
+            try:
+                for line in iter(pipe.readline, ""):
+                    q.put(line)
+            except Exception:
+                pass   # 读线程异常只能来自管道关闭/进程被杀, 由主循环的 poll/deadline 收场
+            finally:
+                q.put(done)
+
+        threading.Thread(target=_reader, args=(p.stdout,), daemon=True).start()
         deadline = _t.time() + timeout
+        t0 = _t.time()
+        last = _t.time()
         while True:
-            line = p.stdout.readline() if p.stdout else None
-            if line:
-                self._log(events, "    " + line.rstrip())
-                continue
-            if p.poll() is not None:
+            try:
+                line = q.get(timeout=0.5)
+            except queue.Empty:
+                line = None
+            if line is done:
                 break
-            if _t.time() > deadline:
+            if line is not None:
+                self._log(events, "    " + line.rstrip())
+                last = _t.time()
+                continue
+            now = _t.time()
+            if now > deadline:
                 p.kill()
                 self._log(events, "  [stream] 超时, 已强制终止", "err")
                 return False
-            _t.sleep(0.1)
+            if heartbeat and now - last >= heartbeat:
+                last = now
+                self._log(events, "  ... 已运行 %d 秒(命令仍在执行)" % int(now - t0), "warn")
         rc = p.wait()
         if rc != 0:
             self._log(events, "  [stream] 命令失败 (exit %s)" % rc, "err")

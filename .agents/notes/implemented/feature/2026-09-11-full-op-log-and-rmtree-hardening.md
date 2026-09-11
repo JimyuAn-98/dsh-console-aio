@@ -47,3 +47,12 @@
 - **效果**：同一测试树（3002 项 + 只读 + junction 环）**0.2s 删净**，全程 7 行日志可见进度。
 - 测试：新增 junction 成环用例；`test_core_env.py::test_rmtree_failure_returns_error` 改为打桩 `_rmtree_force`（删除加固本身由 `test_core_rmtree_force.py` 覆盖）。
 - **实机验证（2026-09-11 23:36）**：`C:\Users\JimyuAn\dsh` 源码树，快删阶段 0.5s（长路径使原生 rmdir 提前返回，实际清理由精修完成），精修处理 **75541 项 / 31.1s** 后 `[删除] 完成`；BUG-011 结案。
+
+## 补充二（2026-09-12）：stream_cmd 加心跳，修静默命令无输出与超时失效（BUG-017）
+
+用户实测 npm 全局安装约 4 分钟期间界面几乎无输出，无法判断是否卡死。
+
+- **根因**：npm 在非 TTY（管道）下抑制进度条，且依赖解析/ideal tree 阶段本身静默；`DshCtl.stream_cmd` 此前直接在 `p.stdout.readline()` 上阻塞，所以静默期间既没有输出，**超时判断也不会触发**（只有等到下一行或 EOF 才检查 deadline）——这是个潜伏隐患，不只是观感问题。
+- **改法**：读管子交给独立线程 + `queue.Queue`，主循环 `q.get(timeout=0.5)`，静默超过 `heartbeat`(默认 15s) 就打一条 `... 已运行 N 秒(命令仍在执行)`，同时每个 0.5s 都能检查 deadline 并 kill。所有走 `stream_cmd` 的长命令（安装/更新/构建/克隆等）一并受益。
+- **npm 参数**：`pkgmgr` 的 install/update 统一加 `--loglevel=http`（暴露下载行）、`--no-fund`/`--no-audit`（减噪）、`--prefer-offline`（命中缓存不重下）。
+- 测试：`tests/test_core.py::TestStreamCmdHeartbeat`（静默命令心跳、静默命令超时被杀）。

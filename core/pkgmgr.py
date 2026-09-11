@@ -191,14 +191,19 @@ def npm_version(tag):
     return v
 
 
+# npm 公共参数: http 级日志让下载阶段有输出(非 TTY 下 npm 默认静默), prefer-offline
+# 命中缓存则跳过重复下载(配合 stream_cmd 的心跳, 长安装不再"看着像卡死", 见 BUG-017)。
+_NPM_FLAGS = ["--loglevel=http", "--no-fund", "--no-audit", "--prefer-offline"]
+
+
 def install_cmd(version=""):
     v = npm_version(version)
-    return [NPM, "install", "-g", DSH_PKG + ("@" + v if v else "")]
+    return [NPM, "install", "-g"] + _NPM_FLAGS + [DSH_PKG + ("@" + v if v else "")]
 
 
 def update_cmd():
     # npm 没有 pnpm update -g 的对等语义; 明确按 latest 重装最可靠。
-    return [NPM, "install", "-g", DSH_PKG + "@latest"]
+    return [NPM, "install", "-g"] + _NPM_FLAGS + [DSH_PKG + "@latest"]
 
 
 def remove_cmd():

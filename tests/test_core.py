@@ -542,3 +542,36 @@ class TestDshCtlRunAndStart:
         assert "3080" in ps_script
         assert "apps[\\\\/]cli" in ps_script
         assert "bin\\.(ts|js)" in ps_script
+
+
+class TestStreamCmdHeartbeat:
+    # stream_cmd 长命令"静默"期间: 打心跳 + 超时真正生效(BUG-017)
+
+    def _ctl(self):
+        from core.dshctl import DshCtl
+        return DshCtl({"dash_port": 3080, "tcp_timeout": 0.8, "update_timeout": 30})
+
+    def _collector(self):
+        logs = []
+        def on_event(kind, payload):
+            if kind == "log":
+                logs.append(payload[0])
+        return logs, on_event
+
+    def test_heartbeat_on_silent_command(self):
+        import sys
+        ctl = self._ctl()
+        logs, ev = self._collector()
+        ok = ctl.stream_cmd([sys.executable, "-c", "import time; time.sleep(2.5)"],
+                            events=ev, heartbeat=1)
+        assert ok is True
+        assert any("已运行" in t for t in logs)
+
+    def test_timeout_kills_silent_command(self):
+        import sys
+        ctl = self._ctl()
+        logs, ev = self._collector()
+        ok = ctl.stream_cmd([sys.executable, "-c", "import time; time.sleep(30)"],
+                            events=ev, timeout_override=2, heartbeat=1)
+        assert ok is False
+        assert any("超时" in t for t in logs)
