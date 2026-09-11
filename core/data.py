@@ -1239,7 +1239,6 @@ def collect_overview_data(cfg, depls, smoke=False):
 
     # 部署快照: 本机必做; 远程只读(smoke/占位跳过)
     from core.dshctl import get_runtime_token, set_runtime_token
-    from core.tunnel_mgr import pull_node_token
 
     def snap_for(dep, is_local):
         if not is_local and (smoke or not dep.get("host")
@@ -1266,14 +1265,14 @@ def collect_overview_data(cfg, depls, smoke=False):
         "web_ms": payload.get("web_ms"),
     })
 
-    # 远程节点 (若配置了公网 SSH 则尝试拉取信箱 Token)
-    ssh_srv = cfg.get("ssh_server") or ""
-    ssh_usr = cfg.get("ssh_user") or ""
+    # 远程节点 Token: 运行时缓存 -> 公网信箱(node_key) -> 直连远端 runtime.json
     for d in depls:
         dname = d.get("name") or "remote"
         rtok = get_runtime_token(dname)
-        if not rtok and ssh_srv and ssh_usr and not smoke:
-            rtok = pull_node_token(ssh_srv, ssh_usr, dname)
+        tok_src = "cache" if rtok else ""
+        if not rtok and not smoke:
+            from core import runtime as _runtime
+            rtok, tok_src = _runtime.resolve_node_token(d, cfg)
             if rtok:
                 set_runtime_token(dname, rtok)
         dport = deployment_access_port(d, cfg)
@@ -1292,6 +1291,7 @@ def collect_overview_data(cfg, depls, smoke=False):
             "snap": snap_for(d, False),
             "local": False,
             "token": rtok,
+            "token_src": tok_src,
             "auth_url": ("http://127.0.0.1:%s/?token=%s" % (dport, rtok)) if rtok else ("http://127.0.0.1:%s" % dport),
             "web_ok": r_ok,
             "web_ms": r_ms,

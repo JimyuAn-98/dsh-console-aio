@@ -57,6 +57,14 @@
 - **部署页补齐**：新增「编辑节点」「在浏览器打开」按钮；详情卡新增「访问端口」；复制/打开共用 `_auth_url_for`。
 - **命名去冗余**：设置页移除「实验室名称」（`lab_name` 为固定三机时代遗留，动态隧道下实验室只是「部署管理」里的远程节点）；本机名 `local_name` 与远程节点名 `deployments[].name` 各自唯一来源，见 `docs/ARCHITECTURE.md` §3.1。
 
+### 节点访问规划（阶段 3a）：节点码 · runtime 落盘 · 公网信箱 JSON（2026-09-11）
+
+- **节点码** `core/nodeid.py`：`MAC→sha1 前 10 位`，首次生成后持久化到 config（`node_id`），ASCII 校验；与显示名分离。
+- **运行态落盘** `core/runtime.py`：远端/本机捕获到 dsh Token 后原子写 `dsh_home/.console/runtime.json`（唯一事实源）；配置了公网则经 SSH（base64 传输）镜像到 `~/.dsh_runtime/<node_id>.json`（覆盖写入、600）。
+- **Token 获取顺序**：运行时缓存 → 公网信箱（`node_key`）→ 直连远端 `runtime.json` → 手动；`core/data.py::collect_overview_data` 改用 `resolve_node_token` 并回传 `token_src`。
+- **捕获即投递**：`DshCtl._capture_local_token` 在 `start_dsh` 捕获 Token 时落盘 + 投递；`TunnelManager._sync_push_token` 的信箱 key 从 `local_name` 改为 `node_id`（消除显示名兼任 key）。
+- **信箱治理地基**：`list_mailbox`（列举 key/主机名/更新时间）、`delete_mailbox`（删条目），供近端发现与管理；兼容旧的裸 `<key>.token`。
+
 ## v0.8.0 (2026-09-10)
 
 ### 安装版一键更新：下载安装包并自动退出运行安装程序（2026-09-10）

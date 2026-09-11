@@ -228,6 +228,29 @@ class DshCtl:
         if events:
             events("status", msg)
 
+    def _capture_local_token(self, tok, events=None):
+        # 捕获到本机 Token: 内存缓存 + 落盘 dsh_home/.console/runtime.json + (配了公网)镜像到信箱。
+        if not tok:
+            return
+        set_runtime_token("local", tok)
+        try:
+            from core import config as _cfg
+            from core import nodeid as _nodeid
+            from core import runtime as _runtime
+            cfg = _cfg.load_config()
+            nid = str(cfg.get("node_id") or "")
+            if not _nodeid.valid_node_id(nid):
+                nid = _nodeid.ensure_node_id()
+                cfg = _cfg.load_config()
+            _runtime.write_runtime(nid, tok)
+            if cfg.get("ssh_server") and cfg.get("ssh_user"):
+                ok = _runtime.publish_mailbox(cfg, nid, tok)
+                self._log(events, "  [信箱] Token 已同步到公网 (%s)" % nid,
+                          "ok" if ok else "warn")
+        except Exception as e:
+            # 记录/投递失败不影响启动主流程, 仅告警
+            self._log(events, "  [信箱] 记录本机 Token 失败: %s" % e, "warn")
+
     # ---------- 本机 dsh 启停 ----------
     def run_dsh(self, mode, events=None):
         if mode == "stop":
@@ -297,7 +320,7 @@ class DshCtl:
                     self._log(events, "    " + ln, classify_line(ln))
                     tok, _ = extract_auth_token(ln)
                     if tok:
-                        set_runtime_token("local", tok)
+                        self._capture_local_token(tok, events)
 
                 # 检查进程是否已提前退出 (如崩溃/语法错误/缺少导出/端口冲突)
                 rc = proc.poll()
@@ -344,7 +367,7 @@ class DshCtl:
                         self._log(events, "    " + ln, classify_line(ln))
                         tok, _ = extract_auth_token(ln)
                         if tok:
-                            set_runtime_token("local", tok)
+                            self._capture_local_token(tok, events)
                     rc = proc.poll()
                     if rc is not None:
                         _t.sleep(0.2)

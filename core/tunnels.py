@@ -142,18 +142,25 @@ class TunnelManager:
         return True
 
     def _sync_push_token(self, events=None, item=None):
+        # 信箱 key 用机器节点码(node_id), 不再用显示名 local_name(见 ARCHITECTURE §3.1)。
         from core.dshctl import get_runtime_token
+        from core import nodeid as _nodeid
+        from core import runtime as _runtime
         tok = get_runtime_token("local")
         if not tok:
             return
         ssh_server = (item.get("host") if item else None) or self.d.get("ssh_server") or ""
         ssh_user = (item.get("user") if item else None) or self.d.get("ssh_user") or ""
-        local_name = self.d.get("local_name") or "local"
+        if not ssh_server or not ssh_user:
+            return
+        cfg = {"ssh_server": ssh_server, "ssh_user": ssh_user}
+        nid = _nodeid.ensure_node_id()
 
         def _push():
-            ok = push_node_token(ssh_server, ssh_user, local_name, tok)
-            if ok and events:
-                events("log", ("  [信箱] 鉴权 Token 已同步至公网信箱 (%s)" % local_name, "ok"))
+            ok = _runtime.publish_mailbox(cfg, nid, tok)
+            if events:
+                events("log", ("  [信箱] 鉴权 Token 已同步至公网信箱 (%s)" % nid,
+                               "ok" if ok else "warn"))
         threading.Thread(target=_push, daemon=True).start()
 
     def stop(self, key_or_id, events=None):

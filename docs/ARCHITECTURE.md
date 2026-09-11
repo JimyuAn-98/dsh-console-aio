@@ -169,6 +169,8 @@ class DshService(QObject):
 |---|---|---|
 | `config.json` | 仓库根目录（打包后在 exe 旁） | **必须 gitignored**。统一通过 `core.config.default_config_path()` 获取绝对路径，支持 `DSH_AIO_CONFIG` 环境变量覆盖。 |
 | `~/.dsh/` | dsh 本体运行时主目录 | 存放 profiles、sessions、storages、settings.yaml 等，支持 `DSH_HOME` 环境变量覆盖。 |
+| `~/.dsh/.console/runtime.json` | 控制台运行态 Token 落盘（**唯一事实源**） | 明文 Token，仅本机；近端经 SSH 直读（局域网场景） |
+| 公网 `~/.dsh_runtime/<node_id>.json` | 公网鉴权信箱（**镜像**，覆盖写入、600） | key = 机器节点码；兼容旧裸 `<key>.token`；供跨网取 Token |
 | `model_prices.json` | 软件运行目录（`config.json` 同级） | 自定义模型价格表持久化，统一通过 `core.data` 加载与保存。 |
 | `themes/*.json` | `themes/` 目录（gitignored） | 用户自定义保存的主题配色方案。 |
 | `tunnel-pids.json` | 软件运行目录（gitignored） | 正在运行的 SSH 隧道进程 PID 记录，用于退出或异常时的精准清理。 |
