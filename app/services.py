@@ -6,13 +6,27 @@
 # Signal.emit —— Qt 会自动把信号排队到接收者线程(线程安全)。后端线程绝不直接改 UI,
 # UI 只 connect 信号 + 调本类的触发方法。
 
+import os
+import re
+import tempfile
 import threading
+import time
 
 from PySide6.QtCore import QObject, Signal
 
 from core import config as dsh_config
 from core.dshctl import DshCtl
 from core.tunnels import TunnelManager
+
+# 操作日志会持久化到磁盘: 落盘前抹掉鉴权 Token(控制台内存显示保持原样,
+# 不影响"鉴权链接"等现有功能, 也守住"Token 绝不写入日志"的安全红线)。
+_SECRET_RE = re.compile(r"(?i)(token=)[A-Za-z0-9_\-]{6,}|(bearer\s+)[A-Za-z0-9._\-]{6,}")
+
+
+def _redact_secrets(text):
+    def _sub(m):
+        return (m.group(1) or m.group(2) or "") + "***"
+    return _SECRET_RE.sub(_sub, text)
 
 
 class DshService(QObject):
@@ -34,6 +48,11 @@ class DshService(QObject):
         self._cfg = dsh_config.load_derived(config_path)
         self.ctl = DshCtl(self._cfg)
         self.tunnels = TunnelManager(base_dir, self._cfg)
+        # 长操作完整输出落盘(页面日志控件有行数上限, 安装/更新可达上千行):
+        # 每次操作一个 <temp>/dsh-console-ops/<op>-<时间戳>.log, 页面可"打开操作日志"复查。
+        self._op_logs = {}          # op -> 打开的文件句柄
+        self._op_log_lock = threading.Lock()
+        self._last_op_log = ""      # 最近一次操作日志路径(UI 按钮用)
 
     def reload_config(self, config_path=None):
         # 热重载(P0): 重读配置并更新 ctl/tunnels 的派生 dict——监控探测点/卡片状态等
@@ -44,8 +63,77 @@ class DshService(QObject):
         self.ctl.d = self._cfg
         self.tunnels.d = self._cfg
 
+    # ---- 长操作完整输出日志(与 Qt 信号并列的一条"落盘"通道) ----
+    def _op_log_path(self, op):
+        # 操作名仅用于文件名, 过滤掉路径分隔符等非法字符。
+        safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in str(op)) or "op"
+        base = os.path.join(tempfile.gettempdir(), "dsh-console-ops")
+        try:
+            os.makedirs(base, exist_ok=True)
+        except OSError:
+            return ""
+        return os.path.join(base, "%s-%s.log" % (safe, time.strftime("%Y%m%d-%H%M%S")))
+
+    def _op_log_open(self, op):
+        # 建文件并写头; 失败返回 ""(磁盘权限等, 不阻断操作本身)。
+        path = self._op_log_path(op)
+        if not path:
+            return ""
+        try:
+            fh = open(path, "a", encoding="utf-8", errors="replace")
+            fh.write("# dsh 控制台操作日志 op=%s started=%s\n"
+                     % (op, time.strftime("%Y-%m-%d %H:%M:%S")))
+            fh.flush()
+        except OSError:
+            return ""
+        with self._op_log_lock:
+            old = self._op_logs.pop(op, None)   # 同名 op 重入: 关掉上一个, 不泄漏句柄
+            self._op_logs[op] = fh
+            self._last_op_log = path
+        if old is not None:
+            try:
+                old.close()
+            except OSError:
+                pass
+        return path
+
+    def _op_log_write(self, op, text):
+        with self._op_log_lock:
+            fh = self._op_logs.get(op)
+        if fh is None:
+            return
+        try:
+            fh.write(_redact_secrets(text) + "\n")
+            fh.flush()
+        except (OSError, ValueError):
+            # 句柄已关(收尾竞态)/磁盘写失败: 日志本身不得影响主流程, 静默丢弃。
+            pass
+
+    def _op_log_close(self, op):
+        with self._op_log_lock:
+            fh = self._op_logs.pop(op, None)
+        if fh is not None:
+            try:
+                fh.close()
+            except OSError:
+                pass
+
+    def latest_op_log(self):
+        # 最近一次长操作的完整日志路径(空字符串 = 本次会话尚无长操作)。
+        return self._last_op_log
+
+    def _begin_op(self, op, log_full=True):
+        # 长操作统一入口: 返回 events 回调; log_full 时同时把全过程写进操作日志,
+        # 并把路径作为一条主日志提示(用户据此打开文件复查完整输出)。
+        ev = self._events(op if log_full else None)
+        if log_full:
+            path = self._op_log_open(op)
+            if path:
+                self.log.emit("[日志] 完整输出: " + path, "ok")
+        return ev
+
     # ---- events 回调 -> Qt Signal ----
-    def _events(self):
+    def _events(self, op=None):
         def cb(kind, payload):
             if kind == "log":
                 if isinstance(payload, tuple) and len(payload) == 2:
@@ -53,34 +141,41 @@ class DshService(QObject):
                 else:
                     text, tag = str(payload), ""
                 self.log.emit(text, tag)
+                if op:
+                    self._op_log_write(op, text)
             elif kind == "status":
                 self.status.emit(str(payload))
+                if op:
+                    self._op_log_write(op, "[状态] " + str(payload))
             elif kind == "step":
                 if isinstance(payload, (tuple, list)) and len(payload) >= 2:
                     self.step.emit(int(payload[0]), str(payload[1]))
+                    if op:
+                        self._op_log_write(op, "[步骤 %s] %s" % (payload[0], payload[1]))
             elif kind == "card":
                 key, on = payload
                 self.card.emit(key, on)
             elif kind == "monitor":
                 self.monitor.emit(payload)
             elif kind == "result":
-                op, payload = payload
-                self.result.emit(op, payload)
+                op2, payload2 = payload
+                self.result.emit(op2, payload2)
         return cb
 
     # ---- UI 触发方法(每个都起后台线程, 不阻塞 UI) ----
     def start_dsh(self, mode="start", op="dsh"):
         if not isinstance(mode, str):
             mode = "start"
-        ev = self._events()
+        ev = self._begin_op(op)
 
         def run():
             try:
                 ok = self.ctl.run_dsh(mode, ev)
-                self.finished.emit(op, bool(ok))
             except Exception as e:
                 ev("log", ("[dsh] 异常: %s" % e, "err"))
-                self.finished.emit(op, False)
+                ok = False
+            self._op_log_close(op)
+            self.finished.emit(op, bool(ok))
         threading.Thread(target=run, daemon=True).start()
 
     def stop_dsh(self, op="dsh-stop"):
@@ -92,70 +187,80 @@ class DshService(QObject):
     def update_dsh(self, to_main=False, op="update-dsh"):
         # dsh 完整更新(停 web -> 拉取 -> 依赖 -> 构建 -> 重启), 业务在 dshctl.update_dsh。
         # to_main=True: 从固定版本切回默认分支再更新(UI 在固定状态下确认后传入)。
-        ev = self._events()
+        ev = self._begin_op(op)
 
         def run():
             try:
                 ok = self.ctl.update_dsh(ev, to_main=to_main)
-                self.finished.emit(op, bool(ok))
             except Exception as e:
                 ev("log", ("[update] 异常: %s" % e, "err"))
-                self.finished.emit(op, False)
+                ok = False
+            self._op_log_close(op)
+            self.finished.emit(op, bool(ok))
         threading.Thread(target=run, daemon=True).start()
 
     def deploy_dsh_version(self, tag, allow_dirty=False, op="dsh-deploy-version"):
         # 部署指定版本(切/回退到某个 Release tag), 业务在 dshctl.deploy_dsh_version;
         # 工作区脏时 core 只回 {"dirty": True} 哨兵, 由页面二次确认后以 allow_dirty=True 重发。
-        self._run_result_op(op, self.ctl.deploy_dsh_version, tag, allow_dirty)
+        self._run_result_op(op, self.ctl.deploy_dsh_version, tag, allow_dirty,
+                            log_full=True)
 
     def start_tunnel(self, key, mode="start", op=None):
         op = op or key
-        ev = self._events()
+        ev = self._begin_op(op)
 
         def run():
             try:
                 self.tunnels.start(key, mode, ev)
-                self.finished.emit(op, True)
+                ok = True
             except Exception as e:
                 ev("log", ("[%s] 异常: %s" % (key, e), "err"))
-                self.finished.emit(op, False)
+                ok = False
+            self._op_log_close(op)
+            self.finished.emit(op, ok)
         threading.Thread(target=run, daemon=True).start()
 
     def stop_tunnel(self, key, op=None):
         op = op or key
-        ev = self._events()
+        ev = self._begin_op(op)
 
         def run():
             try:
                 self.tunnels.stop(key, ev)
-                self.finished.emit(op, True)
+                ok = True
             except Exception as e:
                 ev("log", ("[%s] 停止异常: %s" % (key, e), "err"))
-                self.finished.emit(op, False)
+                ok = False
+            self._op_log_close(op)
+            self.finished.emit(op, ok)
         threading.Thread(target=run, daemon=True).start()
 
     def start_all_tunnels(self, op="start-all-tunnels"):
-        ev = self._events()
+        ev = self._begin_op(op)
 
         def run():
             try:
                 n = self.tunnels.start_all(events=ev)
-                self.finished.emit(op, n > 0)
+                ok = n > 0
             except Exception as e:
                 ev("log", ("[tunnels] 批量启动异常: %s" % e, "err"))
-                self.finished.emit(op, False)
+                ok = False
+            self._op_log_close(op)
+            self.finished.emit(op, ok)
         threading.Thread(target=run, daemon=True).start()
 
     def stop_all_tunnels(self, op="stop-all-tunnels"):
-        ev = self._events()
+        ev = self._begin_op(op)
 
         def run():
             try:
                 self.tunnels.stop_all(events=ev)
-                self.finished.emit(op, True)
+                ok = True
             except Exception as e:
                 ev("log", ("[tunnels] 批量停止异常: %s" % e, "err"))
-                self.finished.emit(op, False)
+                ok = False
+            self._op_log_close(op)
+            self.finished.emit(op, ok)
         threading.Thread(target=run, daemon=True).start()
 
     def monitor_once(self):
@@ -179,8 +284,8 @@ class DshService(QObject):
     # 起线程与信号转发(result + finished), 不含业务; core 异常也以恰好一次信号收场,
     # 不让 UI 的 busy 状态卡死。页面 connect 本类 result/finished 时接收者是页面自身,
     # 页面销毁 Qt 自动断开(勿在页面 connect 到 app 级槽, 会随页面重建叠加连接)。
-    def _run_result_op(self, op, func, *args):
-        ev = self._events()
+    def _run_result_op(self, op, func, *args, log_full=False):
+        ev = self._begin_op(op, log_full=log_full)
 
         def run():
             try:
@@ -189,6 +294,7 @@ class DshService(QObject):
             except Exception as e:
                 ev("log", ("[%s] 异常: %s" % (op, e), "err"))
                 payload = {"err": str(e)}
+            self._op_log_close(op)
             self.result.emit(op, payload)
             self.finished.emit(op, not payload.get("err"))
         threading.Thread(target=run, daemon=True).start()
@@ -200,12 +306,12 @@ class DshService(QObject):
 
     def update_console(self, op="version-update"):
         from core import version as _version
-        self._run_result_op(op, _version.download_and_apply, self.base_dir)
+        self._run_result_op(op, _version.download_and_apply, self.base_dir, log_full=True)
 
     def download_console_installer(self, version, op="version-installer"):
         # 安装版自更新: 下载最新安装包(不执行), 完成后由页面启动安装器并退出。
         from core import version as _version
-        self._run_result_op(op, _version.download_installer, version)
+        self._run_result_op(op, _version.download_installer, version, log_full=True)
 
     def list_ssh_keys(self, op="keys-list"):
         from core import keys as _keys
@@ -219,7 +325,7 @@ class DshService(QObject):
     # 远程只读红线在页面侧执行(_current_deploy 非 None 时拒绝写操作并中文提示)。
     def backup_dsh_home(self, target, op="ops-backup"):
         from core import ops as _ops
-        self._run_result_op(op, _ops.backup_dsh_home, target)
+        self._run_result_op(op, _ops.backup_dsh_home, target, log_full=True)
 
     def copy_profile(self, src, new, op="profile-copy"):
         from core import profiles as _profiles
@@ -242,7 +348,7 @@ class DshService(QObject):
     def run_cmd(self, cmd, cwd=None, env=None, op="run-cmd"):
         # 通用流式命令(dshctl.stream_cmd 的 service 入口): 逐行输出经 log 信号回主日志,
         # 完成 finished(op, ok)。插件安装/卸载、环境工具命令等共用的统一出口。
-        ev = self._events()
+        ev = self._begin_op(op)
 
         def run():
             try:
@@ -250,6 +356,7 @@ class DshService(QObject):
             except Exception as e:
                 ev("log", ("[%s] 异常: %s" % (op, e), "err"))
                 ok = False
+            self._op_log_close(op)
             self.finished.emit(op, bool(ok))
         threading.Thread(target=run, daemon=True).start()
 
@@ -357,11 +464,11 @@ class DshService(QObject):
 
     def install_dsh(self, url, target, version="", op="dsh-install"):
         from core import env as _env
-        self._run_result_op(op, _env.install_dsh, url, target, version)
+        self._run_result_op(op, _env.install_dsh, url, target, version, log_full=True)
 
     def uninstall_dsh(self, keep_data=True, op="dsh-uninstall"):
         from core import env as _env
-        self._run_result_op(op, _env.uninstall_dsh, keep_data)
+        self._run_result_op(op, _env.uninstall_dsh, keep_data, log_full=True)
 
     def test_ssh(self, host, user, port=22, op="settings-test-ssh"):
         from core import env as _env

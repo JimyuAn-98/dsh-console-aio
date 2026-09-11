@@ -95,7 +95,7 @@ class TestDshService:
         svc.start_dsh("start")
         for _ in range(50):
             qapp_mod.processEvents()
-            if len(calls) == 1:
+            if len(finished) == 1:
                 break
             time.sleep(0.02)
         assert calls == ["start"]
@@ -106,7 +106,7 @@ class TestDshService:
         svc.stop_dsh()
         for _ in range(50):
             qapp_mod.processEvents()
-            if len(calls) == 1:
+            if len(finished) == 1:
                 break
             time.sleep(0.02)
         assert calls == ["stop"]
@@ -117,7 +117,7 @@ class TestDshService:
         svc.restart_dsh()
         for _ in range(50):
             qapp_mod.processEvents()
-            if len(calls) == 1:
+            if len(finished) == 1:
                 break
             time.sleep(0.02)
         assert calls == ["restart"]

@@ -22,12 +22,23 @@ from core.dshctl import DshCtl
 CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
 
 
-def _rmtree_force(path):
-    # Windows 递归删除: .git 等目录含只读文件/只读目录时, shutil.rmtree 会 PermissionError
-    # (WinError 5)。先递归清只读位, 再用带兜底回调的 rmtree; 仍未删净则抛 OSError 交调用方报错。
+def _rmtree_force(path, log=None):
+    # Windows 递归删除加固 + 全程日志: 只读文件/目录(.git/objects) + 长路径(>260) + 短暂占用句柄。
+    # 流程: 清只读位 -> 带兜底回调的 rmtree(长路径前缀) -> 重试 -> cmd rmdir 兜底;
+    # 仍未删净则抛 OSError(带路径)。log: 可选单参回调(逐行中文输出, 交调用方透传到控制台/操作日志)。
     import stat as _stat
+    import time as _t
+
+    def _log(msg):
+        if log:
+            log(msg)
+
     if not os.path.exists(path):
+        _log("[删除] 路径不存在, 跳过: " + path)
         return
+    _log("[删除] 开始: " + path)
+
+    failed = []
 
     def _clear(node):
         try:
@@ -35,26 +46,67 @@ def _rmtree_force(path):
         except OSError:
             pass
 
-    for root, dirs, files in os.walk(path, topdown=False):
-        for name in files:
-            _clear(os.path.join(root, name))
-        for name in dirs:
-            _clear(os.path.join(root, name))
+    def _walk_clear(root):
+        # onerror 吞掉个别不可遍历子目录, 由末尾存在性检查统一报错
+        for base, dirs, files in os.walk(root, topdown=False, onerror=lambda _e: None):
+            for name in files:
+                _clear(os.path.join(base, name))
+            for name in dirs:
+                _clear(os.path.join(base, name))
 
-    def _onerror(func, node, _exc):
-        # 兜底: 再清只读并重试该删除动作; 失败则忽略, 由末尾存在性检查统一报错
+    def _onerror(func, node, exc):
         _clear(node)
         try:
             func(node)
-        except OSError:
-            pass
+        except OSError as e:
+            if len(failed) < 8:
+                failed.append(node)
+                _log("[删除] 无法删除: %s (%s)" % (node, e))
 
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=_onerror)
-    else:
-        shutil.rmtree(path, onerror=_onerror)
+    def _attempt(target):
+        try:
+            _walk_clear(target)
+        except OSError as e:
+            _log("[删除] 遍历清理告警: %s" % e)
+        kwargs = ({"onexc": _onerror} if sys.version_info >= (3, 12)
+                  else {"onerror": _onerror})
+        try:
+            shutil.rmtree(target, **kwargs)
+        except OSError as e:
+            _log("[删除] rmtree 告警: %s" % e)
+
+    sep = os.sep
+    target = path
+    if os.name == "nt":
+        ap = os.path.abspath(path)
+        if not ap.startswith(sep + sep + "?" + sep):
+            if ap.startswith(sep + sep):
+                ap = sep + sep + "?" + sep + "UNC" + sep + ap[2:]
+            else:
+                ap = sep + sep + "?" + sep + ap
+        target = ap
+
+    for attempt in range(1, 4):
+        if not os.path.exists(path):
+            break
+        _attempt(target)
+        if os.path.exists(path) and attempt < 3:
+            _log("[删除] 第 %d 次未清空, 0.4s 后重试..." % attempt)
+            _t.sleep(0.4)
+
+    if os.path.exists(path) and os.name == "nt":
+        _log("[删除] 尝试 cmd rmdir /s /q 兜底...")
+        try:
+            subprocess.run(["cmd", "/c", 'rmdir /s /q "%s"' % path],
+                           capture_output=True, text=True, errors="replace",
+                           timeout=180, creationflags=CREATE_NO_WINDOW)
+        except Exception as e:
+            _log("[删除] cmd rmdir 异常: %s" % e)
+
     if os.path.exists(path):
+        _log("[删除] 失败: 仍有残留(前几项已列出) " + path)
         raise OSError("部分文件无法删除(可能被占用或权限不足): " + path)
+    _log("[删除] 完成: " + path)
 
 
 def get_version(cmd, timeout=8):
@@ -237,7 +289,7 @@ def uninstall_dsh(events=None, keep_data=True):
         step(2, "步骤 2/3: 删除源码目录 " + repo)
         line("[卸载] 删除源码目录: " + repo)
         try:
-            _rmtree_force(repo)
+            _rmtree_force(repo, log=line)
             removed_repo = True
         except Exception as e:
             line("[卸载] 删除源码目录失败: " + str(e))
@@ -266,7 +318,7 @@ def uninstall_dsh(events=None, keep_data=True):
             step(4, "删除数据目录 ~/.dsh")
             line("[卸载] 删除数据目录: " + data_dir)
             try:
-                _rmtree_force(data_dir)
+                _rmtree_force(data_dir, log=line)
                 removed_data = True
             except Exception as e:
                 line("[卸载] 删除数据目录失败: " + str(e))

@@ -174,6 +174,7 @@ class DshService(QObject):
 | `model_prices.json` | 软件运行目录（`config.json` 同级） | 自定义模型价格表持久化，统一通过 `core.data` 加载与保存。 |
 | `themes/*.json` | `themes/` 目录（gitignored） | 用户自定义保存的主题配色方案。 |
 | `tunnel-pids.json` | 软件运行目录（gitignored） | 正在运行的 SSH 隧道进程 PID 记录，用于退出或异常时的精准清理。 |
+| `%TEMP%/dsh-console-ops/<op>-<时间戳>.log` | 长操作完整输出落盘 | 安装/更新/卸载/部署/启停/批量隧道/通用命令的全过程输出；由 `DshService._begin_op` 建文件、逐行 `_op_log_write`。**落盘前脱敏** `token=`/`Bearer`（`_redact_secrets`），DSH 管理页「打开操作日志」可复查。 |
 
 ---
 
@@ -188,6 +189,7 @@ class DshService(QObject):
    - 打包（PyInstaller frozen）环境下，`__file__` 指向临时解压目录 `_MEIxxxxxx`。所有需要持久化落盘的文件（如 `config.json`、`model_prices.json`、日志等）**严禁**使用 `__file__` 相对路径推导，必须使用 `core.config.default_config_path()` 获取真实 exe 所在目录。
 4. **敏感信息保护**：
    - 私钥、API Token 等敏感信息只做存在性检测，绝不读取明文、绝不写入日志、绝不上传诊断报告。
+   - 长操作完整日志（`%TEMP%/dsh-console-ops/*.log`）落盘前统一经 `DshService._redact_secrets` 抹掉 `token=`/`Bearer` 明文；控制台内存显示保持原样（不影响「鉴权链接」功能）。
 
 ---
 

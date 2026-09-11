@@ -255,7 +255,8 @@ class TestUninstallDsh:
         monkeypatch.setattr(dsh_config, "load_config", lambda path=None: {"dash_repo": str(repo)})
         monkeypatch.setattr(dsh_config, "save_config", lambda *a, **k: True)
         monkeypatch.setenv("DSH_HOME", _os.path.expanduser("~"))   # 数据目录 == 主目录
-        monkeypatch.setattr(env_mod.shutil, "rmtree", lambda p, **k: None)  # 双保险绝不真删
+        # 源码目录删除不是本用例主题: 打桩为"报告成功但不落盘", 专注数据目录守卫
+        monkeypatch.setattr(env_mod, "_rmtree_force", lambda p, log=None: None)
         r = env_mod.uninstall_dsh(None, keep_data=False)
         assert r["err"] == "" and r["removed_repo"] is True
         assert r["removed_data"] is False    # 守卫拒绝删主目录

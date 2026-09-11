@@ -337,7 +337,7 @@ class TestDshCtlUpdate:
                        encoding="utf-8")
         svc = DshService(base_dir=str(tmp_path), config_path=str(cfg))
         (tmp_path / "repo").mkdir()
-        monkeypatch.setattr(svc.ctl, "update_dsh", lambda ev=None: True)
+        monkeypatch.setattr(svc.ctl, "update_dsh", lambda ev=None, to_main=False: True)
         monkeypatch.setattr(time, "sleep", lambda s: None)
         got = []
         svc.finished.connect(lambda op, ok: got.append((op, ok)))

@@ -150,6 +150,11 @@ class DshManagePage(BasePage):
         head = QHBoxLayout()
         head.addWidget(title)
         head.addStretch(1)
+        # 长操作(安装/更新/卸载/部署)完整输出落盘在 service 侧, 这里给一个打开入口。
+        self._btn_oplog = QPushButton("打开操作日志")
+        self._btn_oplog.setToolTip("查看最近一次安装/更新/卸载/部署的完整输出")
+        self._btn_oplog.clicked.connect(self._open_op_log)
+        head.addWidget(self._btn_oplog)
         head.addWidget(self._status_lbl)
         root.addLayout(head)
 
@@ -173,6 +178,20 @@ class DshManagePage(BasePage):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(content)
         root.addWidget(scroll, 1)
+
+    def _open_op_log(self):
+        # 打开最近一次长操作的完整日志文件(空/不存在时中文提示, 不弹错误框)。
+        path = self.app.service.latest_op_log()
+        if not path or not os.path.exists(path):
+            self.app.loge("[日志] 本次会话还没有长操作日志(执行安装/更新/卸载/部署后生成)", "warn")
+            QMessageBox.information(self, "操作日志",
+                                    "本次会话还没有长操作日志。\n"
+                                    "执行安装 / 更新 / 卸载 / 部署后会自动生成。")
+            return
+        try:
+            os.startfile(path)   # 交给系统默认程序(记事本)打开
+        except OSError as e:
+            self.app.loge("[日志] 打开失败: %s" % e, "err")
 
     # ── 卡: 本机 dsh 操控(与原隧道页 dsh-web 卡同源: service.start_dsh) ──
     def _card_dsh(self):
