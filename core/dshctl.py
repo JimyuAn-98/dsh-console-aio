@@ -87,6 +87,7 @@ def fetch_dsh_releases(force=False, per_page=30):
     # 会话内 TTL 缓存(force=True 绕过, 供「刷新」按钮用); 网络失败抛异常, 由 service
     # 转成中文 err 交页面展示。走 api.github.com 官方接口, 不爬 HTML。
     import time
+    from core import pkgmgr as _pkgmgr   # tag -> npm 版本规范化(tag 可能是 dsh-v0.1.5-rc.2)
     now = time.time()
     cache = _DSH_RELEASES_CACHE
     if (not force and cache["data"]
@@ -104,11 +105,7 @@ def fetch_dsh_releases(force=False, per_page=30):
         tag = str(item.get("tag_name") or "")
         if not tag:
             continue
-        ver = tag
-        for prefix in ("dsh-v", "v"):
-            if ver.startswith(prefix):
-                ver = ver[len(prefix):]
-                break
+        ver = _pkgmgr.npm_version(tag)
         out.append({
             "tag": tag,
             "version": ver,
@@ -645,8 +642,7 @@ class DshCtl:
         tag = str(tag or "").strip()
         if not tag:
             return {"err": "版本为空", "dirty": False, "msg": "", "tag": tag}
-        ver = tag[1:] if tag.startswith("v") else tag
-        ver = ver.lstrip("@")
+        ver = pkgmgr.npm_version(tag)
 
         def step(n, text):
             if events:

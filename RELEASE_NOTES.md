@@ -3,10 +3,17 @@
 
 ## v0.9.0 (未发布)
 
+### 双安装模式实机修复：pnpm 环境、非 dsh 目标目录、版本 tag 前缀（2026-09-11）
+
+- **BUG-013 包模式安装报 `...\pnpm\bin\bin is not in PATH`**：`core/pkgmgr.py::pnpm_env` 此前把 `PNPM_HOME` 设成全局 bin 目录本身，而 pnpm 会在 `PNPM_HOME` 之后再拼一层 `bin`。现在**不再设置 `PNPM_HOME`**，只把 `<pnpm home>\bin` 前置进 `PATH`；新增 `pnpm_home()` 统一推导（已有 `PNPM_HOME` 时用 `<PNPM_HOME>\bin`）。
+- **BUG-014 源码安装对非 dsh 目录跳过 clone**：目标目录已存在且非空但不是 dsh 仓库时，此前直接跳过 clone，随后 `git fetch` 以 `not a git repository` 失败。现在 `install_dsh` 跳过 clone 前用 `_is_dsh_checkout`（复用 `pkgmgr.source_info`）校验，不是 dsh 仓库就中文报错（请换空目录或先清空）。
+- **BUG-015 版本 tag 前缀未规范化**：dsh Release tag 形如 `dsh-v0.1.5-rc.2`，包模式此前只去单个 `v` 会拼出非法的 `@deepseek-ai/dsh@dsh-v0.1.5-rc.2`。新增 `pkgmgr.npm_version()` 作为唯一映射实现（`dsh-v`/`v`/`@`/裸版本），`install_cmd`、`_deploy_pkg_version`、`fetch_dsh_releases` 三处共用；源码模式仍用原始 tag 供 `git checkout`。
+- 测试：`tests/test_core_pkgmgr.py`（PNPM_HOME 回归、`<PNPM_HOME>\bin` 推导、`npm_version`、`dsh-v` 部署）、`tests/test_core_env.py`（非 dsh 目标拒绝、已是 dsh 工作区跳过 clone）。
+
 ### dsh 双安装模式：全局包（pnpm -g）与源码，自动检测（2026-09-11）
 
 - **模式判定收口** `core/pkgmgr.py`：`detect_mode(cfg)` 返回 `source` / `package` / `none`——源码目录（`@deepseek-ai/dsh-root` 或含 `apps/cli`）优先，其次全局已装 `@deepseek-ai/dsh`；显式 `config.dsh_install_mode` 覆盖自动判定。
-- **pnpm 环境修正** `pnpm_env()`：pnpm（corepack）在全局 bin 目录不在 `PATH` 时会直接报错退出（本机已复现），所有 `pnpm -g` 调用一律带上（全局 bin 前置 `PATH` + 补 `PNPM_HOME`）；`core/env.py::pnpm_env` 改为委托它，消除重复实现。
+- **pnpm 环境修正** `pnpm_env()`：pnpm（corepack）在全局 bin 目录不在 `PATH` 时会直接报错退出（本机已复现），所有 `pnpm -g` 调用一律带上（全局 bin 前置 `PATH`；**不设置** `PNPM_HOME`，否则 pnpm 会拼出 `bin\bin`，见上方 BUG-013 修复）；`core/env.py::pnpm_env` 改为委托它，消除重复实现。
 - **生命周期分流**：dsh CLI 本身没有 `update` / `uninstall`（只有 `web` / `plugin`），更新/卸载是 pnpm 全局包职责。更新走 `pnpm update -g`，卸载走 `pnpm remove -g`，安装走 `pnpm add -g @deepseek-ai/dsh[@版本]`，启动用全局 `dsh web`（`core/dshctl.py::update_dsh_pkg` / `_deploy_pkg_version` / `core/env.py::install_dsh_pkg` / `_uninstall_dsh_pkg`）。
 - **UI 自动检测**：DSH 管理页页头新增「模式: 源码模式（路径，版本）/ 全局包模式（版本）」徽章（异步探测 + tooltip 显示两种模式与全局 bin）；版本卡按模式取版本；更新/卸载卡文案随模式切换；安装卡新增「安装方式」选择（全局包（推荐）/ 源码克隆，默认按检测结果预选）。
 - 测试：`tests/test_core_pkgmgr.py`（PATH 修正 / 模式优先级 / 命令拼装 / 包模式生命周期路由）。

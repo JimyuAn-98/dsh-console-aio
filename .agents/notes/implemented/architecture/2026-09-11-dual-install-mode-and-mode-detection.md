@@ -34,3 +34,13 @@
 
 - `pnpm -g` 首次安装/更新的真实链路需用户实机验证（本机当前无全局包）。
 - npm 上 `latest` 目前是预发布 `0.1.5-rc.1`，「更新」会拉到 rc，需与版本卡「预发布」标注保持一致。
+
+## 补充（2026-09-11）：实机首轮测试发现的三处修复
+
+用户实机测试双模式后逐条反馈，三处均已在同一批修掉：
+
+1. **BUG-013 包模式安装失败**：`pnpm add -g` 报 `The configured global bin directory "...\pnpm\bin\bin" is not in PATH`。根因是 `pnpm_env()` 把 `PNPM_HOME` 设成了全局 bin 目录本身，而 pnpm 会在 `PNPM_HOME` 之后**再拼一层 `bin`**。本机三组对照（A `PNPM_HOME=<...\pnpm\bin>` 复现 / B 只前置 PATH 正常 / C `PNPM_HOME=<...\pnpm>` 正常）确认。修复：不再设置 `PNPM_HOME`，只把 `<pnpm home>\bin` 前置进 `PATH`；新增 `pnpm_home()`。
+2. **BUG-014 源码安装对非 dsh 目录跳过 clone**：目标目录已存在且非空但不是 dsh 仓库时仍跳过 clone，随后 `git fetch --tags` 以 `fatal: not a git repository` 失败。修复：新增 `_is_dsh_checkout`（复用 `pkgmgr.source_info`），非 dsh 仓库直接中文报错返回，不再执行后续 git 命令。
+3. **BUG-015 tag 前缀未规范化**：dsh Release tag 实测为 `dsh-v0.1.5-rc.2`（`git tag` 列表确认），包模式只去单个 `v` 会拼出非法 npm 版本。修复：新增 `pkgmgr.npm_version()` 作为唯一规范化实现，`install_cmd`、`_deploy_pkg_version`、`fetch_dsh_releases` 三处共用；源码模式仍用原始 tag。
+
+测试：`tests/test_core_pkgmgr.py` 增 PNPM_HOME 回归 / `<PNPM_HOME>\bin` 推导 / `npm_version` / `dsh-v` 部署；`tests/test_core_env.py` 增非 dsh 目标拒绝、已是 dsh 工作区跳过 clone。

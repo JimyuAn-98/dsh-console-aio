@@ -8,14 +8,23 @@ import core.pkgmgr as pkgmgr
 
 
 class TestPnpmEnv:
-    def test_prepends_and_sets_pnpm_home(self, monkeypatch):
+    def test_prepends_bin_and_never_sets_pnpm_home(self, monkeypatch):
+        # BUG-013 回归: 不能把 PNPM_HOME 设成 bin 目录本身, 否则 pnpm 会拼出 <...>\bin\bin
         monkeypatch.delenv('PNPM_HOME', raising=False)
         monkeypatch.setenv('LOCALAPPDATA', 'C:/Users/x/AppData/Local')
         monkeypatch.setenv('PATH', 'C:/Windows')
         env = pkgmgr.pnpm_env()
         binp = os.path.join('C:/Users/x/AppData/Local', 'pnpm', 'bin')
         assert env['PATH'].split(os.pathsep)[0] == binp
-        assert env.get('PNPM_HOME') == binp
+        assert 'PNPM_HOME' not in env
+
+    def test_bin_dir_is_under_pnpm_home(self, monkeypatch):
+        # 已有 PNPM_HOME 时: 全局 bin 目录 = <PNPM_HOME>\bin, 且保留原 PNPM_HOME 不覆盖
+        monkeypatch.setenv('PNPM_HOME', 'C:/pnpm-home')
+        monkeypatch.setenv('PATH', 'C:/Windows')
+        env = pkgmgr.pnpm_env()
+        assert env['PATH'].split(os.pathsep)[0] == os.path.join('C:/pnpm-home', 'bin')
+        assert env['PNPM_HOME'] == 'C:/pnpm-home'
 
     def test_no_duplicate(self, monkeypatch):
         binp = os.path.join('C:/Users/x/AppData/Local', 'pnpm', 'bin')
@@ -80,7 +89,16 @@ class TestDetectMode:
 
 
 class TestCommands:
-    def test_install_cmd_strips_v(self):
+    def test_npm_version_normalization(self):
+        # dsh Release tag 带 dsh- 前缀; 包模式必须映射成 npm 版本
+        assert pkgmgr.npm_version('dsh-v0.1.5-rc.2') == '0.1.5-rc.2'
+        assert pkgmgr.npm_version('v0.1.5-rc.1') == '0.1.5-rc.1'
+        assert pkgmgr.npm_version('@0.1.5') == '0.1.5'
+        assert pkgmgr.npm_version('0.1.5') == '0.1.5'
+        assert pkgmgr.npm_version('') == ''
+
+    def test_install_cmd_strips_prefix(self):
+        assert pkgmgr.install_cmd('dsh-v0.1.5-rc.2')[-1] == '@deepseek-ai/dsh@0.1.5-rc.2'
         assert pkgmgr.install_cmd('v0.1.5-rc.1')[-1] == '@deepseek-ai/dsh@0.1.5-rc.1'
         assert pkgmgr.install_cmd('')[-1] == '@deepseek-ai/dsh'
 
@@ -119,6 +137,13 @@ class TestPackageModeLifecycle:
         r = ctl.deploy_dsh_version(None, tag='v0.1.5-rc.1')
         assert r['err'] == '' and r['tag'] == 'v0.1.5-rc.1'
         assert pkgmgr.install_cmd('0.1.5-rc.1') in calls
+
+    def test_deploy_version_strips_dsh_v(self, monkeypatch):
+        # 真实 dsh Release tag 形如 dsh-v0.1.5-rc.2 -> npm 0.1.5-rc.2
+        ctl, calls = self._ctl(monkeypatch)
+        r = ctl.deploy_dsh_version(None, tag='dsh-v0.1.5-rc.2')
+        assert r['err'] == '' and r['tag'] == 'dsh-v0.1.5-rc.2'
+        assert ['pnpm.cmd', 'add', '-g', '@deepseek-ai/dsh@0.1.5-rc.2'] in calls
 
     def test_uninstall_routes_to_pnpm_remove(self, monkeypatch):
         import core.dshctl as dshctl

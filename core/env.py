@@ -249,6 +249,15 @@ def _bridge(events):
     return cb
 
 
+def _is_dsh_checkout(path):
+    # 目录是否为 dsh 的 git 工作区: 供"目标目录已存在"时决定能否跳过 clone(重装/修复)。
+    # 复用 core.pkgmgr.source_info 的 dsh 仓库识别, 不在此另写一份判断。
+    from core import pkgmgr
+    if not os.path.isdir(os.path.join(path, ".git")):
+        return False
+    return bool(pkgmgr.source_info(os.path.abspath(path))["ok"])
+
+
 def install_dsh(events=None, url=None, target=None, version=""):
     # 一键安装 dsh: 环境预检 -> git clone -> (指定版本时 checkout) -> pnpm install -> pnpm build
     # -> 写 config.dash_repo(指定版本时同时写 dsh_version_pin)。
@@ -278,8 +287,15 @@ def install_dsh(events=None, url=None, target=None, version=""):
     ctl = DshCtl(dsh_config.load_derived())
     bridge = _bridge(events)
     # 1) clone(完整克隆, 便于后续 update 的 git pull)
+    #    非空目录: 仅当确实是 dsh 的 git 工作区才跳过 clone; 否则明确报错, 避免后续
+    #    git fetch/checkout 以 "not a git repository" 失败(BUG-014)。
     if os.path.isdir(target) and os.listdir(target):
-        line("[安装] 目录已存在且有内容, 跳过 clone: " + target)
+        if _is_dsh_checkout(target):
+            line("[安装] 目录已存在且是 dsh 仓库, 跳过 clone: " + target)
+        else:
+            line("[安装] 目标目录已存在且不是 dsh 仓库: " + target)
+            return {"msg": "", "err": "目标目录已存在且不是 dsh 仓库，请换一个空目录，或先清空该目录再安装",
+                    "target": target}
     else:
         step(1, "步骤 1/3: git clone ...")
         if not ctl.stream_cmd(["git", "clone", url, target], events=bridge):

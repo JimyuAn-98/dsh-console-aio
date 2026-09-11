@@ -176,6 +176,35 @@ class TestInstallDsh:
         r = env_mod.install_dsh(None, "  ", str(tmp_path))
         assert "git 仓库地址" in r["err"]
 
+    def test_non_dsh_nonempty_target_refused(self, tmp_path, monkeypatch):
+        # BUG-014: 目标目录已存在且非空但不是 dsh 仓库 -> 中文报错, 且不执行任何 git 命令
+        monkeypatch.setattr(env_mod, "missing_tools", lambda tools=None: [])
+        calls = self._ctl_ok(monkeypatch)
+        target = tmp_path / "notrepo"
+        target.mkdir()
+        (target / "random.txt").write_text("x", encoding="utf-8")
+        r = env_mod.install_dsh(None, "https://x.git", str(target))
+        assert "不是 dsh 仓库" in r["err"]
+        assert calls == []
+
+    def test_existing_dsh_checkout_skips_clone(self, tmp_path, monkeypatch):
+        # 已是 dsh 工作区: 跳过 clone, 直接 install/build(不再 clone)
+        monkeypatch.setattr(env_mod, "missing_tools", lambda tools=None: [])
+        calls = self._ctl_ok(monkeypatch)
+        target = tmp_path / "repo"
+        (target / ".git").mkdir(parents=True)
+        (target / "apps" / "cli").mkdir(parents=True)
+        (target / "package.json").write_text('{"name":"@deepseek-ai/dsh-root"}', encoding="utf-8")
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(dsh_config, "load_config", lambda path=None: {"dash_port": 3080})
+        monkeypatch.setattr(dsh_config, "save_config",
+                            lambda cfg, path=None: cfg_path.write_text(
+                                json.dumps(cfg), encoding="utf-8") or True)
+        r = env_mod.install_dsh(None, "https://x.git", str(target))
+        assert r["err"] == ""
+        assert all(c[0][:2] != ("git", "clone") for c in calls)
+
 
 class TestUninstallDsh:
     # 与 TestInstallDsh 同构: 子进程(停 web)/config 读写/目录删除全部隔离, 绝不真删。

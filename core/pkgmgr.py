@@ -25,17 +25,24 @@ _CACHE = {"at": 0.0, "deps": None}   # pnpm list -g 结果缓存(探测一次约
 _CACHE_TTL = 30.0
 
 
-def _default_bin_dir():
-    # 仅用环境变量推导 pnpm 全局可执行目录(不跑子进程, 供 pnpm_env 使用避免递归)。
+def pnpm_home():
+    # pnpm 的"家"目录(PNPM_HOME): 全局包与 shim 的根, 注意不是 bin 目录本身。
     home = (os.environ.get("PNPM_HOME") or "").strip()
     if home:
         return home
     base = (os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")).strip()
-    return os.path.join(base, "pnpm", "bin")
+    return os.path.join(base, "pnpm")
+
+
+def _default_bin_dir():
+    # pnpm 全局可执行目录 = <pnpm home>\bin; 只推导不跑子进程(供 pnpm_env 避免递归)。
+    return os.path.join(pnpm_home(), "bin")
 
 
 def pnpm_env(base=None):
-    # 复制环境并把全局 bin 目录前置进 PATH; 同时补 PNPM_HOME(解 corepack 报错)。
+    # 复制环境并把全局 bin 目录前置进 PATH。
+    # 红线: 绝不能把 PNPM_HOME 设成 bin 目录本身 —— pnpm 会在 PNPM_HOME 之后**再拼一层 bin**,
+    # 得到 <...>\pnpm\bin\bin, 因不在 PATH 而直接报错退出(BUG-013, 实机复现)。
     env = dict(base if base is not None else os.environ)
     path = ""
     for k in [k for k in env if k.upper() == "PATH"]:
@@ -46,8 +53,6 @@ def pnpm_env(base=None):
     if d and d not in parts:
         parts.insert(0, d)
     env["PATH"] = os.pathsep.join(parts)
-    if not env.get("PNPM_HOME"):
-        env["PNPM_HOME"] = d
     return env
 
 
@@ -151,10 +156,21 @@ def mode_label(info):
     return "未检测到已安装的 dsh"
 
 
+def npm_version(tag):
+    # dsh Release tag -> npm 版本: dsh-v0.1.5-rc.2 / v0.1.5-rc.2 / @0.1.5-rc.2 -> 0.1.5-rc.2。
+    # 源码模式仍用原始 tag(git checkout 需要 dsh-v0.1.5-rc.2), 只有包模式做这层映射。
+    v = str(tag or "").strip()
+    if v.startswith("@"):
+        v = v[1:]
+    for prefix in ("dsh-v", "dsh-", "v"):
+        if v.startswith(prefix):
+            v = v[len(prefix):]
+            break
+    return v
+
+
 def install_cmd(version=""):
-    v = str(version or "").strip().lstrip("@")
-    if v.startswith("v"):
-        v = v[1:]   # Release tag(v0.1.5-rc.1) -> npm 版本(0.1.5-rc.1)
+    v = npm_version(version)
     return [PNPM, "add", "-g", DSH_PKG + ("@" + v if v else "")]
 
 
