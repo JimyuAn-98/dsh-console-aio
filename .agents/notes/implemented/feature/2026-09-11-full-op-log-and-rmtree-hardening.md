@@ -46,3 +46,4 @@
   3. 仍删不净则列出残留文件清单与前 10 条失败原因，再抛带路径的 `OSError`。
 - **效果**：同一测试树（3002 项 + 只读 + junction 环）**0.2s 删净**，全程 7 行日志可见进度。
 - 测试：新增 junction 成环用例；`test_core_env.py::test_rmtree_failure_returns_error` 改为打桩 `_rmtree_force`（删除加固本身由 `test_core_rmtree_force.py` 覆盖）。
+- **实机验证（2026-09-11 23:36）**：`C:\Users\JimyuAn\dsh` 源码树，快删阶段 0.5s（长路径使原生 rmdir 提前返回，实际清理由精修完成），精修处理 **75541 项 / 31.1s** 后 `[删除] 完成`；BUG-011 结案。
