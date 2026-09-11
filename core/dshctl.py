@@ -526,7 +526,8 @@ class DshCtl:
         _t.sleep(1)
         step(2, "步骤2/3: npm install -g " + pkgmgr.DSH_PKG + "@latest")
         self._log(events, "[更新] npm install -g " + pkgmgr.DSH_PKG + "@latest", "warn")
-        if not self.stream_cmd(pkgmgr.update_cmd(), env=pkgmgr.npm_env(), events=events):
+        if not self.stream_cmd(pkgmgr.update_cmd(), cwd=pkgmgr.npm_cwd(),
+                               env=pkgmgr.npm_env(), events=events):
             self._status(events, "更新失败: npm install -g @latest")
             return False
         step(3, "步骤3/3: 重启 dsh web")
@@ -655,7 +656,8 @@ class DshCtl:
         _t.sleep(1)
         step(2, "步骤2/3: 安装 %s@%s" % (pkgmgr.DSH_PKG, ver))
         self._log(events, "[部署] 步骤2/3: npm install -g %s@%s" % (pkgmgr.DSH_PKG, ver), "warn")
-        if not self.stream_cmd(pkgmgr.install_cmd(ver), env=pkgmgr.npm_env(), events=events):
+        if not self.stream_cmd(pkgmgr.install_cmd(ver), cwd=pkgmgr.npm_cwd(),
+                               env=pkgmgr.npm_env(), events=events):
             self._status(events, "部署失败: npm install -g")
             return {"err": "npm install -g 失败", "dirty": False, "msg": "", "tag": tag}
         step(3, "步骤3/3: 重启 dsh web")
@@ -704,6 +706,7 @@ class DshCtl:
         deadline = _t.time() + timeout
         t0 = _t.time()
         last = _t.time()
+        errs = []   # 错误行(供失败时给出简短摘要, 不让几千行日志淹没根因)
         while True:
             try:
                 line = q.get(timeout=0.5)
@@ -712,7 +715,14 @@ class DshCtl:
             if line is done:
                 break
             if line is not None:
-                self._log(events, "    " + line.rstrip())
+                text = line.rstrip()
+                self._log(events, "    " + text)
+                low = text.strip().lower()
+                if (low.startswith("error") or low.startswith("npm error")
+                        or "err!" in low or "etarget" in low or "notarget" in low):
+                    errs.append(text.strip())
+                    if len(errs) > 8:
+                        errs.pop(0)
                 last = _t.time()
                 continue
             now = _t.time()
@@ -725,6 +735,11 @@ class DshCtl:
                 self._log(events, "  ... 已运行 %d 秒(命令仍在执行)" % int(now - t0), "warn")
         rc = p.wait()
         if rc != 0:
+            for e in errs[-5:]:
+                self._log(events, "  [失败摘要] " + e[:300], "err")
+            if any("etarget" in e.lower() or "notarget" in e.lower() for e in errs):
+                self._log(events, "  [提示] 依赖版本解析失败: 多为 npm 镜像尚未同步或该版本"
+                                  "未发布; 可稍后重试, 或在「安装 dsh」卡指定一个已发布版本", "warn")
             self._log(events, "  [stream] 命令失败 (exit %s)" % rc, "err")
             return False
         return True

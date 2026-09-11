@@ -56,3 +56,12 @@
 - **改法**：读管子交给独立线程 + `queue.Queue`，主循环 `q.get(timeout=0.5)`，静默超过 `heartbeat`(默认 15s) 就打一条 `... 已运行 N 秒(命令仍在执行)`，同时每个 0.5s 都能检查 deadline 并 kill。所有走 `stream_cmd` 的长命令（安装/更新/构建/克隆等）一并受益。
 - **npm 参数**：`pkgmgr` 的 install/update 统一加 `--loglevel=http`（暴露下载行）、`--no-fund`/`--no-audit`（减噪）、`--prefer-offline`（命中缓存不重下）。
 - 测试：`tests/test_core.py::TestStreamCmdHeartbeat`（静默命令心跳、静默命令超时被杀）。
+
+## 补充三（2026-09-12）：失败摘要与中性 cwd（BUG-019）
+
+实机更新遇到 npm `ETARGET`（找不到 `@deepseek-ai/dsh-tool-subagent-report@^0.1.0-rc.8`），日志数千行、根因埋在里面；且日志显示 npm 的 `cwd` 是控制台的启动目录。
+
+- **那次失败不是控制台的问题**：属 npm 镜像尚未同步该子包版本的**瞬时/上游**状态；本机对 `registry.npmmirror.com` 做 `npm install -g @deepseek-ai/dsh@latest --dry-run` 现已成功解析 518 个包（`@deepseek-ai/dsh-*` 落到 0.1.5-rc.2）。
+- **改进一（失败摘要）**：`stream_cmd` 边流式输出边收集错误行（`error`/`npm error`/`err!`/`ETARGET`/`notarget`），命令非 0 退出时先打 `[失败摘要]`（末 5 条），再打 `[stream] 命令失败`；命中 `ETARGET`/`notarget` 时追加中文提示「镜像未同步或版本未发布，可稍后重试或指定版本」。
+- **改进二（中性 cwd）**：`pkgmgr.npm_cwd()` 返回用户主目录，`install_dsh_pkg`/`_uninstall_dsh_pkg`/`update_dsh_pkg`/`_deploy_pkg_version` 四处全局 npm 调用都显式传它，不再继承控制台启动目录。
+- 测试：`tests/test_core.py::TestStreamCmdHeartbeat::test_failure_summary_and_registry_hint`。

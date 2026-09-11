@@ -76,6 +76,12 @@ def npm_env(base=None):
     return _with_path_prepended(global_bin_dir(), base)
 
 
+def npm_cwd():
+    # 全局 npm 命令一律用中性 cwd(用户主目录): 不继承控制台启动目录, 避免本地 .npmrc/
+    # 项目状态影响全局安装, 也让日志里的 cwd 稳定可预期(此前会显示控制台启动目录)。
+    return os.path.expanduser("~")
+
+
 def pnpm_home():
     # pnpm 的"家"目录(PNPM_HOME): 全局包与 shim 的根, 注意不是 bin 目录本身。
     home = (os.environ.get("PNPM_HOME") or "").strip()

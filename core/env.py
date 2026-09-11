@@ -360,7 +360,8 @@ def install_dsh_pkg(events=None, version=""):
     bridge = _bridge(events)
     step(1, "步骤 1/2: " + " ".join(pkgmgr.install_cmd(version)))
     line("[安装] 全局包安装: " + " ".join(pkgmgr.install_cmd(version)))
-    if not ctl.stream_cmd(pkgmgr.install_cmd(version), env=pkgmgr.npm_env(), events=bridge):
+    if not ctl.stream_cmd(pkgmgr.install_cmd(version), cwd=pkgmgr.npm_cwd(),
+                          env=pkgmgr.npm_env(), events=bridge):
         return {"msg": "", "err": "npm install -g 失败(详见安装日志)", "target": "", "version": version}
 
     step(2, "步骤 2/2: 校验安装结果")
@@ -486,7 +487,8 @@ def _uninstall_dsh_pkg(events=None, keep_data=True):
 
     step(2, "步骤 2/3: " + " ".join(pkgmgr.remove_cmd()))
     line("[卸载] 全局包卸载: " + " ".join(pkgmgr.remove_cmd()))
-    if not ctl.stream_cmd(pkgmgr.remove_cmd(), env=pkgmgr.npm_env(), events=bridge):
+    if not ctl.stream_cmd(pkgmgr.remove_cmd(), cwd=pkgmgr.npm_cwd(),
+                          env=pkgmgr.npm_env(), events=bridge):
         return {"msg": "", "err": "npm uninstall -g 失败(详见卸载日志)", "removed_repo": False,
                 "removed_data": False, "data_dir": ""}
     pkgmgr.package_info(force=True)

@@ -567,6 +567,17 @@ class TestStreamCmdHeartbeat:
         assert ok is True
         assert any("已运行" in t for t in logs)
 
+    def test_failure_summary_and_registry_hint(self):
+        import sys
+        ctl = self._ctl()
+        logs, ev = self._collector()
+        ok = ctl.stream_cmd(
+            [sys.executable, "-c", "print('error ETARGET boom'); raise SystemExit(3)"],
+            events=ev, heartbeat=1)
+        assert ok is False
+        assert any("失败摘要" in t for t in logs)
+        assert any("镜像" in t for t in logs)   # ETARGET -> 镜像未同步提示
+
     def test_timeout_kills_silent_command(self):
         import sys
         ctl = self._ctl()
