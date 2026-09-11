@@ -19,7 +19,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QPlainTextEdit, QScrollArea,
     QPushButton, QMessageBox, QDialog, QLineEdit, QFormLayout,
-    QGridLayout, QWidget, QComboBox)
+    QGridLayout, QWidget, QComboBox, QListWidget, QListWidgetItem)
 
 from core import deployments as core_deployments
 from ui.base import BasePage
@@ -46,7 +46,7 @@ class _AddDeployDialog(QDialog):
     # SSH 连接(name/host/user/port/dsh_home) + 远端 web 端口 + 关联正向隧道 +
     # 本机访问端口 + 节点标识(node_key, 公网信箱 key, ASCII)。
     # 只收集字段并返回 result dict; 写 config.json 由页面负责(save_deployments 自动备份)。
-    def __init__(self, deployments, cfg=None, parent=None, edit=None):
+    def __init__(self, deployments, cfg=None, parent=None, edit=None, prefill=None):
         super().__init__(parent)
         self.setWindowTitle("编辑节点" if edit else "添加节点")
         self.setModal(True)
@@ -54,7 +54,7 @@ class _AddDeployDialog(QDialog):
         self._cfg = cfg or {}
         self._edit = edit or None
         self.result = None
-        e = edit or {}
+        e = edit or prefill or {}
         self._name = QLineEdit(e.get("name") or "")
         self._host = QLineEdit(e.get("host") or "")
         self._user = QLineEdit(e.get("user") or "")
@@ -182,6 +182,64 @@ class _AddDeployDialog(QDialog):
         self.accept()
 
 
+class _MailboxDialog(QDialog):
+    # 公网信箱条目列表(只读展示): 选定后「绑定为节点」或「删除条目」。
+    def __init__(self, entries, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("公网信箱节点")
+        self.setModal(True)
+        self.action = None
+        self.entry = None
+        v = QVBoxLayout(self)
+        v.setContentsMargins(14, 12, 14, 12)
+        v.setSpacing(8)
+        v.addWidget(QLabel("公网信箱里发现的节点（主机名 · 节点码 · 最后更新 · Token）",
+                           objectName="cardTitle"))
+        self._list = QListWidget()
+        import time as _t
+        for e in entries or []:
+            ts = int(e.get("updated_at") or 0)
+            when = _t.strftime("%Y-%m-%d %H:%M", _t.localtime(ts)) if ts else "未知"
+            tok = "Token就绪" if e.get("token") else "无Token"
+            it = QListWidgetItem("%s · %s · %s · %s" % (e.get("hostname") or "(未知主机)",
+                                                        e.get("key") or "?", when, tok))
+            it.setData(Qt.UserRole, e)
+            self._list.addItem(it)
+        if self._list.count():
+            self._list.setCurrentRow(0)
+        v.addWidget(self._list, 1)
+        btns = QHBoxLayout()
+        bind = QPushButton("绑定为节点")
+        bind.clicked.connect(self._bind)
+        dele = QPushButton("删除条目")
+        dele.clicked.connect(self._delete)
+        close = QPushButton("关闭")
+        close.clicked.connect(self.reject)
+        btns.addWidget(bind)
+        btns.addWidget(dele)
+        btns.addStretch(1)
+        btns.addWidget(close)
+        v.addLayout(btns)
+
+    def _selected(self):
+        it = self._list.currentItem()
+        return it.data(Qt.UserRole) if it is not None else None
+
+    def _bind(self):
+        e = self._selected()
+        if e:
+            self.entry = e
+            self.action = "bind"
+            self.accept()
+
+    def _delete(self):
+        e = self._selected()
+        if e:
+            self.entry = e
+            self.action = "delete"
+            self.accept()
+
+
 class DeploymentPage(BasePage):
     # 部署管理页: 本机 + config.json deployments 的多部署只读总览。
     # BasePage 范式, 构造签名 (app, parent=None), app 为 MainWindow。
@@ -265,8 +323,12 @@ class DeploymentPage(BasePage):
         self._open_link_btn.clicked.connect(self._open_auth_link)
         self._edit_btn = QPushButton("编辑节点")
         self._edit_btn.clicked.connect(self._edit_deployment)
+        self._discover_btn = QPushButton("从公网信箱发现")
+        self._discover_btn.setToolTip("列出公网信箱里已投递 Token 的节点, 可直接绑定为远程节点")
+        self._discover_btn.clicked.connect(self._discover_mailbox)
         for b in (self._add_btn, self._edit_btn, self._del_btn, self._test_btn,
-                  self._refresh_btn, self._copy_link_btn, self._open_link_btn):
+                  self._refresh_btn, self._copy_link_btn, self._open_link_btn,
+                  self._discover_btn):
             btns.addWidget(b)
         btns.addStretch(1)
         note = QLabel("本机不可删除；状态来自 deployment_snapshot(在线/离线/未测试)",
@@ -528,6 +590,35 @@ class DeploymentPage(BasePage):
             self._deployments[idx] = dlg.result
         self._save_and_reload("已更新节点「%s」" % dlg.result.get("name"))
 
+    # ── 从公网信箱发现/管理节点 ──
+    def _discover_mailbox(self):
+        cfg = dsh_config.load_config()
+        if not (cfg.get("ssh_server") and cfg.get("ssh_user")):
+            self._op("公网信箱不可用: 未配置公网中转服务器（设置页）", "err")
+            return
+        self._op("正在读取公网信箱...", "warn")
+        self.app.service.list_mailbox_nodes(cfg, op="mailbox-list")
+
+    def _show_mailbox(self, entries):
+        if not entries:
+            self._op("公网信箱为空（远端控制台尚未投递 Token）", "err")
+            return
+        dlg = _MailboxDialog(entries, self)
+        if dlg.exec() != QDialog.Accepted or not dlg.entry:
+            return
+        e = dlg.entry
+        if dlg.action == "bind":
+            cfg = dsh_config.load_config()
+            prefill = {"name": e.get("hostname") or e.get("key") or "remote",
+                       "node_key": e.get("key") or ""}
+            add = _AddDeployDialog(self._deployments, cfg, self, prefill=prefill)
+            if add.exec() == QDialog.Accepted and add.result:
+                self._deployments = list(self._deployments) + [add.result]
+                self._save_and_reload("已从信箱绑定节点「%s」" % add.result.get("name"))
+        elif dlg.action == "delete":
+            cfg = dsh_config.load_config()
+            self.app.service.delete_mailbox_node(cfg, e.get("key") or "", op="mailbox-del")
+
     def _delete_deployment(self):
         # 删除 config.json 里的部署记录(本机不可删); 远程数据不受影响
         row = self._selected_row()
@@ -601,6 +692,15 @@ class DeploymentPage(BasePage):
             self._pending_op = None
             self._set_btns(True)
             self._after_save(self._save_msg, payload.get("err", ""))
+        elif op == "mailbox-list":
+            self._show_mailbox(payload.get("data") or [])
+        elif op == "mailbox-del":
+            d = payload.get("data") or {}
+            if payload.get("err") or not d.get("ok"):
+                self._op("删除信箱条目失败: " + str(payload.get("err") or d.get("err") or ""), "err")
+            else:
+                self._op("已删除信箱条目: " + str(d.get("key") or ""), "ok")
+            self._discover_mailbox()
 
     def _on_finished(self, op, ok):
         # 刷新总览整批收尾(每行回包已由 _apply_snapshot 计数); 其余 op 作 busy 兜底

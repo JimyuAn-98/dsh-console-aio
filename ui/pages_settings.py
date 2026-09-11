@@ -70,6 +70,8 @@ class SettingsPage(BasePage):
             data = payload.get("data")
             text = data if (not err and data) else ("诊断生成失败: " + str(err or "未知错误"))
             self._on_diag_done(text)
+        elif op in ("node-regen", "node-publish"):
+            self._on_node_result(op, payload)
 
     def _build(self):
         root = QVBoxLayout(self)
@@ -198,6 +200,47 @@ class SettingsPage(BasePage):
         self._test_btn.setEnabled(True)
         self._set_test(msg, ok)
 
+    # ── 本机节点码 / Token 同步 ──
+    def _copy_node_id(self):
+        nid = (self._node_id_lbl.text() or "").strip()
+        if not nid or nid.startswith("("):
+            self._set_save("尚未生成节点码（启动一次 dsh 或点「重新生成」）", err=True)
+            return
+        QApplication.clipboard().setText(nid)
+        self._set_status("已复制节点码: " + nid)
+
+    def _regen_node_id(self):
+        def do_regen():
+            self._set_save("正在重新生成节点码...")
+            self.app.service.regenerate_node_id(op="node-regen")
+        self._node_confirm.ask(
+            "重新生成节点码",
+            "将随机生成一个新的节点码并写入 config.json。旧节点码在公网信箱里的条目会变成孤儿"
+            "（可在部署页「从公网信箱发现」里删除），本机需要重新同步一次 Token。",
+            do_regen, level="warn", confirm_text="确认重新生成")
+
+    def _sync_node_token(self):
+        cfg = dsh_config.load_config(self._config_path)
+        self._node_sync_lbl.setText("正在同步 Token 到公网信箱...")
+        self.app.service.publish_local_token(cfg, op="node-publish")
+
+    def _on_node_result(self, op, payload):
+        if op == "node-regen":
+            nid = str(payload.get("data") or "")
+            self._node_id_lbl.setText(nid or "-")
+            self._set_save("已重新生成节点码: %s（请重新同步 Token）" % nid)
+            return
+        d = payload.get("data") or {}
+        if payload.get("err"):
+            self._node_sync_lbl.setText("同步失败: " + str(payload.get("err")))
+            self._set_save("Token 同步失败", err=True)
+        elif d.get("ok"):
+            self._node_sync_lbl.setText("已同步到公网信箱（节点码 %s）" % d.get("node_id"))
+            self._set_save("Token 已同步到公网信箱")
+        else:
+            self._node_sync_lbl.setText("未同步: " + str(d.get("err") or "未知原因"))
+            self._set_save("Token 未同步", err=True)
+
     def _collect_basic(self):
         # 核心连接与基础服务收集; 非法整数抛 ValueError
         cfg = {}
@@ -256,6 +299,35 @@ class SettingsPage(BasePage):
         m_desc.setWordWrap(True)
         mv.addWidget(m_desc)
         v.addWidget(mon_box)
+
+        # 本机节点(鉴权信箱标识): 节点码 + Token 同步; 与显示名严格分离
+        node_box = QFrame(objectName="card")
+        nb = QVBoxLayout(node_box)
+        nb.setContentsMargins(14, 12, 14, 12)
+        nb.setSpacing(6)
+        nb.addWidget(QLabel("本机节点（鉴权信箱标识）", objectName="cardTitle"))
+        nrow = QHBoxLayout()
+        nrow.addWidget(QLabel("节点码:", objectName="monNote"))
+        self._node_id_lbl = QLabel(cfg.get("node_id") or "(未生成，启动 dsh 时自动生成)",
+                                   objectName="monVal")
+        self._node_id_lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        nrow.addWidget(self._node_id_lbl, 1)
+        copy_id = QPushButton("复制")
+        copy_id.clicked.connect(self._copy_node_id)
+        nrow.addWidget(copy_id)
+        regen = QPushButton("重新生成")
+        regen.clicked.connect(self._regen_node_id)
+        nrow.addWidget(regen)
+        nb.addLayout(nrow)
+        self._node_sync_lbl = QLabel("", objectName="cardHint")
+        self._node_sync_lbl.setWordWrap(True)
+        nb.addWidget(self._node_sync_lbl)
+        sync_btn = QPushButton("立即同步 Token 到公网信箱")
+        sync_btn.clicked.connect(self._sync_node_token)
+        nb.addWidget(sync_btn)
+        self._node_confirm = ConfirmBanner(self)
+        nb.addWidget(self._node_confirm)
+        v.addWidget(node_box)
 
         v.addStretch(1)
         return page

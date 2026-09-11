@@ -110,9 +110,10 @@
 | dash_port | 本机 dsh GUI 端口 | 3080 |
 | dash_cmd | 本机 dsh 启动命令 | ["pnpm.cmd","dsh","web"] |
 | dsh_version_pin | 固定部署的 dsh 版本 tag（空=跟随默认分支） | 空 |
+| node_id | 本机节点码（鉴权信箱 key，自动生成，可重新生成） | 自动 |
 | local_ports | 本机端口监控 [端口,名称,说明] | 3080/8090/8022/8091/3090 |
 | remote_tunnels | 远端反向隧道监控 [端口,名称,说明] | 8090/8022/8091 |
-| local_name / lab_name / ssh_name | 三处机器命名（界面跟随） | 本机/实验室/公网中转 |
+| local_name / ssh_name | 本机节点名 / 公网中转名（远端节点名在「部署管理」里按节点设置） | 本机/公网中转 |
 | poll_seconds / remote_poll_seconds | 本机轮询 / SSH 直查间隔(秒) | 4 / 20 |
 | *_timeout | 探测与更新超时 | ... |
 
@@ -163,7 +164,7 @@
 
 | 页面 | 功能 |
 |------|------|
-| 总览 | 运行状态卡 + 数据速览（会话/用量/任务板/插件）+ 部署列表 + 隧道速览 |
+| 总览 | 运行状态卡 + 数据速览（会话/用量/任务板/插件）+ 节点列表（本机/远程：经隧道探活 + 免密链接复制/在浏览器打开） |
 | DSH 管理 | 本机 dsh 操控（启动/重启/停止）+ 完整更新 + 环境/安装 + 版本发布日志（GitHub Releases 中文更新日志）+ 部署指定版本（切换/固定/回退） |
 | 隧道 | 隧道卡片启停/常驻 + 本机 dsh 启停/更新 |
 | 会话与工作区 | 分组/会话/详情三栏，归档/恢复/删除（二次确认） |
@@ -175,7 +176,7 @@
 | LLM 配置 | 默认模型切换、自定义 provider 浏览（密钥只提示环境变量名） |
 | 备份与凭据 | ~/.dsh 一键备份（排除凭据）、凭据存在性提示 |
 | SSH 密钥 | 生成/指纹/公钥查看（私钥内容绝不读取） |
-| 部署管理 | 多部署列表/详情/操作日志三栏：CRUD、连接测试、只读快照（在线徽章） |
+| 部署管理 | 节点（远端 dsh）配置：SSH + 远端 web 端口 + 关联正向隧道 + 节点标识；从公网信箱发现、复制/在浏览器打开免密链接、连接测试与只读快照 |
 | 日志管理 | dsh web 落盘输出 tail + 过滤 + 着色 + token 脱敏 |
 | 设置 | 配置标签页化，保存即热重载；诊断报告（脱敏可外发）与配置导入导出 |
 | 主题 | 明/暗变体一键切换 + 全部界面颜色实时可调（即时预览），可存/载主题文件、设启动默认 |
@@ -289,7 +290,7 @@ See the Chinese section above for the full field table.
 ## Data-domain pages (17-page navigation)
 | Page | What it does |
 |--------|-------------|
-| Overview | run-status card + data quick-look (sessions/usage/tasks/plugins) + deployments + tunnels |
+| Overview | run-status card + data quick-look + node list (local/remote: probe via tunnel + copy/open passwordless link) |
 | DSH manage | local dsh start/restart/stop + full update + env/install + release notes (GitHub Releases changelog viewer) + deploy a specific version (switch/pin/rollback) |
 | Tunnels | tunnel card start/persist/stop + local dsh start/stop/update |
 | Sessions & workspace | group/session/detail columns, archive/restore/delete (double confirm) |
@@ -301,7 +302,7 @@ See the Chinese section above for the full field table.
 | LLM config | switch default model, browse custom providers (API keys only hinted by env-var name) |
 | Backup & credentials | one-click ~/.dsh backup (credentials excluded), credential presence hints |
 | SSH keys | generate / fingerprints / public-key view (private keys are never read) |
-| Deployments | multi-deployment list/detail/op-log columns: CRUD, connection test, read-only snapshots |
+| Deployments | remote dsh node config (SSH + remote web port + linked forward tunnel + node key), discover from relay mailbox, copy/open passwordless link, connection test & read-only snapshots |
 | Logs | live tail of dsh web output with filtering, coloring, token masking |
 | Settings | config as tabs, hot-reload on save; masked diagnostics report & config import/export |
 | Theme | toggle dark/light variant + edit every UI color live (instant preview), save/load theme files, set startup default |

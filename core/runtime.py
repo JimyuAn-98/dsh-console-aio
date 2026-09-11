@@ -204,6 +204,35 @@ def resolve_node_token(dep, cfg=None):
     return None, ""
 
 
+def sync_local_token(cfg=None):
+    # 近端/本机: 解析本机 Token -> 落盘 runtime.json -> (配了公网)投递信箱。
+    # 返回 {"ok","node_id","err"}; 供设置页「立即同步 Token」按钮调用。
+    from core import config as dsh_config
+    from core import nodeid
+    from core.dshctl import get_runtime_token
+    cfg = cfg or dsh_config.load_config()
+    nid = str(cfg.get("node_id") or "")
+    if not nodeid.valid_node_id(nid):
+        nid = nodeid.ensure_node_id()
+    tok = get_runtime_token("local", refresh=True)
+    if not tok:
+        return {"ok": False, "node_id": nid, "err": "未捕获到本机 dsh Token（请先启动 dsh）"}
+    write_runtime(nid, tok)
+    if not (cfg.get("ssh_server") and cfg.get("ssh_user")):
+        return {"ok": False, "node_id": nid, "err": "未配置公网中转（请在设置页填写服务器）"}
+    ok = publish_mailbox(cfg, nid, tok)
+    return {"ok": bool(ok), "node_id": nid,
+            "err": "" if ok else "投递到公网信箱失败"}
+
+
+def delete_mailbox_node(cfg, key):
+    # 删除公网信箱条目并回结构体(供 service._run_core_op)。
+    ok = delete_mailbox(cfg, key)
+    return {"ok": bool(ok), "key": key,
+            "err": "" if ok else "删除失败或条目不存在"}
+
+
 __all__ = ["runtime_path", "read_runtime", "write_runtime", "parse_runtime",
            "publish_mailbox", "pull_mailbox", "list_mailbox", "delete_mailbox",
-           "read_remote_runtime", "resolve_node_token"]
+           "read_remote_runtime", "resolve_node_token",
+           "sync_local_token", "delete_mailbox_node"]

@@ -23,6 +23,20 @@ def valid_node_id(s):
     return bool(s and _ID_RE.match(str(s)))
 
 
+def new_node_id():
+    # 全新随机节点码(10 位 hex): 用于"重新生成"(如克隆机/换网卡后想换一个标识)。
+    import secrets
+    return secrets.token_hex(5)
+
+
+def regenerate_node_id(path=None):
+    # 强制生成并持久化一个新的节点码; 返回新值(旧信箱条目会变成孤儿, 调用方需提示)。
+    cfg = dsh_config.load_config(path)
+    cfg["node_id"] = new_node_id()
+    dsh_config.save_config(cfg, path)
+    return cfg["node_id"]
+
+
 def ensure_node_id(path=None):
     # 读取 config; node_id 缺失/非法则用 machine_node_id() 生成并写回; 返回最终 node_id。
     cfg = dsh_config.load_config(path)
@@ -35,4 +49,5 @@ def ensure_node_id(path=None):
     return nid
 
 
-__all__ = ["machine_node_id", "valid_node_id", "ensure_node_id"]
+__all__ = ["machine_node_id", "new_node_id", "valid_node_id",
+           "ensure_node_id", "regenerate_node_id"]

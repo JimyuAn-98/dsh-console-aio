@@ -65,6 +65,13 @@
 - **捕获即投递**：`DshCtl._capture_local_token` 在 `start_dsh` 捕获 Token 时落盘 + 投递；`TunnelManager._sync_push_token` 的信箱 key 从 `local_name` 改为 `node_id`（消除显示名兼任 key）。
 - **信箱治理地基**：`list_mailbox`（列举 key/主机名/更新时间）、`delete_mailbox`（删条目），供近端发现与管理；兼容旧的裸 `<key>.token`。
 
+### 节点访问规划（阶段 3b）：节点码/Token 同步入口与公网信箱发现（2026-09-11）
+
+- **设置页「本机节点」卡**：显示本机节点码（可复制/重新生成），并提供「立即同步 Token 到公网信箱」；节点码与显示名严格分离。
+- **部署页「从公网信箱发现」**：列出公网信箱里已投递 Token 的节点（主机名 · 节点码 · 最后更新 · Token），可「绑定为节点」（预填 node_key 后走添加节点对话框）或「删除条目」。
+- **核心辅助**：`core/runtime.py::sync_local_token`（解析本机 Token → 落盘 → 投递）、`delete_mailbox_node`；`core/nodeid.py::new_node_id/regenerate_node_id`（随机重生成，附孤儿条目提示）。
+- **服务桥**：`publish_local_token` / `list_mailbox_nodes` / `delete_mailbox_node` / `regenerate_node_id`。
+
 ## v0.8.0 (2026-09-10)
 
 ### 安装版一键更新：下载安装包并自动退出运行安装程序（2026-09-10）

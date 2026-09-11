@@ -328,6 +328,24 @@ class DshService(QObject):
         from core import data as _data
         self._run_core_op(op, _data.list_profiles, remote)
 
+    def publish_local_token(self, cfg, op="node-publish"):
+        # 本机 Token -> runtime.json -> 公网信箱(设置页「立即同步」)
+        from core import runtime as _runtime
+        self._run_core_op(op, _runtime.sync_local_token, cfg)
+
+    def list_mailbox_nodes(self, cfg, op="mailbox-list"):
+        # 列举公网信箱节点(部署页「从公网信箱发现」)
+        from core import runtime as _runtime
+        self._run_core_op(op, _runtime.list_mailbox, cfg)
+
+    def delete_mailbox_node(self, cfg, key, op="mailbox-del"):
+        from core import runtime as _runtime
+        self._run_core_op(op, _runtime.delete_mailbox_node, cfg, key)
+
+    def regenerate_node_id(self, op="node-regen"):
+        from core import nodeid as _nodeid
+        self._run_core_op(op, _nodeid.regenerate_node_id)
+
     def check_tool_versions(self, tools, op="dsh-tool-versions"):
         from core import env as _env
         self._run_core_op(op, _env.tool_versions, tools)

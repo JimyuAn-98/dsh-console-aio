@@ -71,6 +71,12 @@
 - 部署页新增「编辑节点」「在浏览器打开」，详情卡新增「访问端口」；
 - **命名去冗余**：设置页移除 `lab_name` 入口；命名单一来源见 `docs/ARCHITECTURE.md` §3.1。
 
+**节点访问规划·阶段 3（2026-09-11）：**
+
+- `core/nodeid.py`（节点码 MAC→短哈希，持久化可改）+ `core/runtime.py`（`runtime.json` 落盘、公网信箱 JSON 发布/拉取/列举/删除、远端直读、`resolve_node_token` 三级解析）；
+- 捕获即投递：`DshCtl._capture_local_token`；`_sync_push_token` 改用 `node_id`；
+- 设置页「本机节点」卡（节点码 / 重新生成 / 立即同步 Token）+ 部署页「从公网信箱发现」（绑定 / 删除条目）。
+
 **转为跨页技术债：**
 
 - 7 个数据页（overview/agents/profiles/sessions/plugins/taskboard/usage）各自复制同一段缓存编排
